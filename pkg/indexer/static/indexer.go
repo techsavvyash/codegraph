@@ -16,16 +16,19 @@ import (
 
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/search"
 )
 
 // StaticIndexer indexes Go source code into the graph database
 type StaticIndexer struct {
-	client      *neo4j.Client
-	serviceName string
-	version     string
-	repoURL     string
-	packageMap  map[string]*models.Module // Cache for package/module nodes
-	symbolMap   map[string]string         // Cache for symbol -> node ID mapping
+	client           *neo4j.Client
+	serviceName      string
+	version          string
+	repoURL          string
+	packageMap       map[string]*models.Module // Cache for package/module nodes
+	symbolMap        map[string]string         // Cache for symbol -> node ID mapping
+	embeddingService search.EmbeddingService   // Optional embedding service
+	vectorSearch     *search.VectorSearchManager
 }
 
 // NewStaticIndexer creates a new static indexer
@@ -37,6 +40,43 @@ func NewStaticIndexer(client *neo4j.Client, serviceName, version, repoURL string
 		repoURL:     repoURL,
 		packageMap:  make(map[string]*models.Module),
 		symbolMap:   make(map[string]string),
+		// Embedding service will be set later if needed
+		embeddingService: nil,
+		vectorSearch:     nil,
+	}
+}
+
+// SetEmbeddingService sets the embedding service for automatic embedding generation
+func (si *StaticIndexer) SetEmbeddingService(embeddingService search.EmbeddingService) {
+	si.embeddingService = embeddingService
+	if embeddingService != nil {
+		si.vectorSearch = search.NewVectorSearchManager(si.client)
+	}
+}
+
+// generateEmbeddingForNode generates and updates embedding for a newly created node
+func (si *StaticIndexer) generateEmbeddingForNode(ctx context.Context, nodeID string, nodeType string, textParts ...string) {
+	if si.embeddingService == nil || si.vectorSearch == nil {
+		return // Skip if no embedding service configured
+	}
+
+	// Build text for embedding
+	text := strings.Join(textParts, " | ")
+	if text == "" {
+		text = fmt.Sprintf("%s node", nodeType)
+	}
+
+	// Generate embedding
+	embedding, err := si.embeddingService.GenerateEmbedding(ctx, text)
+	if err != nil {
+		log.Printf("Warning: failed to generate embedding for %s node %s: %v", nodeType, nodeID, err)
+		return
+	}
+
+	// Update node with embedding
+	err = si.vectorSearch.UpdateNodeEmbedding(ctx, nodeID, embedding)
+	if err != nil {
+		log.Printf("Warning: failed to update embedding for %s node %s: %v", nodeType, nodeID, err)
 	}
 }
 
@@ -351,12 +391,20 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 		labels = []string{"Function"}
 	}
 
-	funcID, err := v.indexer.client.MergeNode(v.ctx, labels, 
+	funcID, err := v.indexer.client.MergeNode(v.ctx, labels,
 		map[string]any{"signature": signature, "filePath": v.filePath}, funcProps)
 	if err != nil {
 		log.Printf("Failed to create function node %s: %v", fn.Name.Name, err)
 		return
 	}
+
+	// Generate embedding for the function
+	nodeType := "Function"
+	if isMethod {
+		nodeType = "Method"
+	}
+	v.indexer.generateEmbeddingForNode(v.ctx, funcID, nodeType,
+		fn.Name.Name, signature, v.extractDocstring(fn.Doc))
 
 	// Link to parent (module or class)
 	if parentID != "" {
@@ -422,12 +470,15 @@ func (v *astVisitor) indexStruct(name string, structType *ast.StructType, startP
 		"updatedAt":      time.Now().UTC().Unix(),
 	}
 
-	classID, err := v.indexer.client.MergeNode(v.ctx, []string{"Class"}, 
+	classID, err := v.indexer.client.MergeNode(v.ctx, []string{"Class"},
 		map[string]any{"fqn": fqn}, classProps)
 	if err != nil {
 		log.Printf("Failed to create struct node %s: %v", name, err)
 		return
 	}
+
+	// Generate embedding for the class
+	v.indexer.generateEmbeddingForNode(v.ctx, classID, "Class", name, fqn)
 
 	// Link to module
 	_, err = v.indexer.client.CreateRelationship(v.ctx, v.moduleID, classID, "CONTAINS", nil)

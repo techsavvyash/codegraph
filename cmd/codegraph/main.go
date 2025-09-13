@@ -14,6 +14,7 @@ import (
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
 	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
 	"github.com/context-maximiser/code-graph/pkg/benchmarks"
+	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -69,6 +70,7 @@ func init() {
 	rootCmd.AddCommand(schemaCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(queryCmd)
+	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 	rootCmd.AddCommand(serverCmd)
 }
@@ -251,6 +253,10 @@ var indexProjectCmd = &cobra.Command{
 		serviceName, _ := cmd.Flags().GetString("service")
 		version, _ := cmd.Flags().GetString("version")
 		repoURL, _ := cmd.Flags().GetString("repo-url")
+		generateEmbeddings, _ := cmd.Flags().GetBool("generate-embeddings")
+		apiKey, _ := cmd.Flags().GetString("embedding-api-key")
+		baseURL, _ := cmd.Flags().GetString("embedding-base-url")
+		model, _ := cmd.Flags().GetString("embedding-model")
 
 		if serviceName == "" {
 			serviceName = "context-maximiser" // Default service name
@@ -266,7 +272,20 @@ var indexProjectCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		indexer := static.NewStaticIndexer(client, serviceName, version, repoURL)
-		
+
+		// Configure embedding service if requested
+		if generateEmbeddings {
+			var embeddingService search.EmbeddingService
+			if apiKey != "" && baseURL != "" {
+				embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
+				fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
+			} else {
+				embeddingService = search.NewMockEmbeddingService()
+				fmt.Printf("🧪 Using mock embedding service for testing\n")
+			}
+			indexer.SetEmbeddingService(embeddingService)
+		}
+
 		fmt.Printf("Indexing project at %s using AST parsing...\n", projectPath)
 		ctx := context.Background()
 		if err := indexer.IndexProject(ctx, projectPath); err != nil {
@@ -773,6 +792,371 @@ var benchmarkIncrementalCmd = &cobra.Command{
 	},
 }
 
+// searchCmd manages advanced search capabilities
+var searchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Advanced search management",
+	Long:  "Manage vector search, full-text search (BM25), and hybrid search capabilities",
+}
+
+var searchInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize search indexes",
+	Long:  "Create vector and full-text indexes required for advanced search",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		// Create embedding service (using mock for now)
+		embeddingService := search.NewMockEmbeddingService()
+
+		// Create hybrid search manager
+		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+
+		fmt.Println("🚀 Initializing advanced search indexes...")
+		ctx := context.Background()
+
+		if err := hybridSearch.InitializeSearchIndexes(ctx); err != nil {
+			return fmt.Errorf("failed to initialize search indexes: %w", err)
+		}
+
+		fmt.Println("✅ Advanced search indexes initialized successfully")
+		return nil
+	},
+}
+
+var searchTestCmd = &cobra.Command{
+	Use:   "test [query]",
+	Short: "Test hybrid search capabilities",
+	Long:  "Test vector search, full-text search, and hybrid search with a query",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		query := args[0]
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		// Create embedding service
+		embeddingService := search.NewMockEmbeddingService()
+
+		// Create hybrid search manager
+		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+
+		fmt.Printf("🔍 Testing hybrid search for: '%s'\n", query)
+		fmt.Println("=" + strings.Repeat("=", len(query)+35))
+
+		ctx := context.Background()
+
+		// Perform hybrid search
+		response, err := hybridSearch.UnifiedSearch(ctx, query, limit)
+		if err != nil {
+			return fmt.Errorf("hybrid search failed: %w", err)
+		}
+
+		// Display results
+		fmt.Printf("\n📊 Search Results (%d total):\n", response.TotalResults)
+		fmt.Printf("Search Types: %v\n", response.SearchTypes)
+		fmt.Printf("Vector Results: %d | Full-Text Results: %d | Semantic Results: %d\n",
+			response.Metadata.VectorResults,
+			response.Metadata.FullTextResults,
+			response.Metadata.SemanticResults)
+
+		fmt.Println("\nResults:")
+		fmt.Println("---------")
+
+		for i, result := range response.Results {
+			fmt.Printf("\n%d. ", i+1)
+
+			if name, ok := result.Node["name"].(string); ok {
+				fmt.Printf("**%s**", name)
+			} else if title, ok := result.Node["title"].(string); ok {
+				fmt.Printf("**%s**", title)
+			} else {
+				fmt.Printf("**Unknown**")
+			}
+
+			if len(result.Labels) > 0 {
+				fmt.Printf(" (%s)", strings.Join(result.Labels, ", "))
+			}
+
+			fmt.Printf("\n   Combined Score: %.3f | Source: %s | Relevance: %s\n",
+				result.CombinedScore, result.Source, result.Relevance)
+
+			if result.VectorScore > 0 {
+				fmt.Printf("   Vector: %.3f", result.VectorScore)
+			}
+			if result.FullTextScore > 0 {
+				fmt.Printf(" | Full-Text: %.3f", result.FullTextScore)
+			}
+			if result.SemanticScore > 0 {
+				fmt.Printf(" | Semantic: %.3f", result.SemanticScore)
+			}
+			fmt.Println()
+
+			// Show description or content snippet
+			if description, ok := result.Node["description"].(string); ok && description != "" {
+				if len(description) > 100 {
+					description = description[:97] + "..."
+				}
+				fmt.Printf("   Description: %s\n", description)
+			} else if content, ok := result.Node["content"].(string); ok && content != "" {
+				if len(content) > 100 {
+					content = content[:97] + "..."
+				}
+				fmt.Printf("   Content: %s\n", content)
+			}
+		}
+
+		return nil
+	},
+}
+
+var searchInfoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Show search capabilities and index status",
+	Long:  "Display information about available search methods and index status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		embeddingService := search.NewMockEmbeddingService()
+		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+
+		fmt.Println("🔍 CodeGraph Search Capabilities")
+		fmt.Println("=================================")
+
+		ctx := context.Background()
+		capabilities, err := hybridSearch.GetSearchCapabilities(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get search capabilities: %w", err)
+		}
+
+		// Display vector search info
+		if vectorInfo, ok := capabilities["vectorSearch"].(map[string]interface{}); ok {
+			fmt.Println("\n📊 Vector Search:")
+			if indexes, ok := vectorInfo["vectorIndexes"].([]map[string]interface{}); ok {
+				fmt.Printf("   Indexes: %d\n", len(indexes))
+				for _, index := range indexes {
+					if name, ok := index["name"].(string); ok {
+						fmt.Printf("   - %s", name)
+						if state, ok := index["state"].(string); ok {
+							fmt.Printf(" (%s)", state)
+						}
+						fmt.Println()
+					}
+				}
+			}
+		}
+
+		// Display full-text search info
+		if fullTextInfo, ok := capabilities["fullTextSearch"].(map[string]interface{}); ok {
+			fmt.Println("\n📝 Full-Text Search (BM25):")
+			if indexes, ok := fullTextInfo["fullTextIndexes"].([]map[string]interface{}); ok {
+				fmt.Printf("   Indexes: %d\n", len(indexes))
+				for _, index := range indexes {
+					if name, ok := index["name"].(string); ok {
+						fmt.Printf("   - %s", name)
+						if state, ok := index["state"].(string); ok {
+							fmt.Printf(" (%s)", state)
+						}
+						fmt.Println()
+					}
+				}
+			}
+		}
+
+		// Display hybrid search info
+		if hybridInfo, ok := capabilities["hybridSearch"].(map[string]interface{}); ok {
+			fmt.Println("\n🔬 Hybrid Search:")
+			if methods, ok := hybridInfo["supportedMethods"].([]string); ok {
+				fmt.Printf("   Methods: %v\n", methods)
+			}
+			if weights, ok := hybridInfo["defaultWeights"]; ok {
+				fmt.Printf("   Default Weights: %+v\n", weights)
+			}
+			if smartSearch, ok := hybridInfo["smartSearch"].(bool); ok {
+				fmt.Printf("   Smart Search: %t\n", smartSearch)
+			}
+			if embeddingService, ok := hybridInfo["embeddingService"].(bool); ok {
+				fmt.Printf("   Embedding Service: %t\n", embeddingService)
+			}
+		}
+
+		fmt.Println("\n✨ Available Commands:")
+		fmt.Println("   codegraph search init          # Initialize search indexes")
+		fmt.Println("   codegraph search test 'query'  # Test hybrid search")
+		fmt.Println("   codegraph search info          # Show this information")
+
+		return nil
+	},
+}
+
+var searchEmbedCmd = &cobra.Command{
+	Use:   "embed",
+	Short: "Generate and populate embeddings for existing nodes",
+	Long:  "Generate embeddings for Functions, Documents, Features, and Classes that don't have embeddings yet",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		batchSize, _ := cmd.Flags().GetInt("batch-size")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		model, _ := cmd.Flags().GetString("model")
+
+		// Create embedding service
+		var embeddingService search.EmbeddingService
+		if apiKey != "" && baseURL != "" {
+			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
+			fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
+		} else {
+			embeddingService = search.NewMockEmbeddingService()
+			fmt.Printf("🧪 Using mock embedding service for testing\n")
+		}
+
+		ctx := context.Background()
+
+		// Get vector search manager
+		vectorSearch := search.NewVectorSearchManager(client)
+
+		fmt.Printf("🚀 Starting embedding population (batch size: %d, dry-run: %t)...\n", batchSize, dryRun)
+
+		// Process each node type
+		nodeTypes := []string{"Function", "Method", "Class", "Document", "Feature"}
+		totalProcessed := 0
+
+		for _, nodeType := range nodeTypes {
+			fmt.Printf("\n📊 Processing %s nodes...\n", nodeType)
+
+			processed, err := populateEmbeddingsForNodeType(ctx, client, embeddingService, vectorSearch, nodeType, batchSize, dryRun)
+			if err != nil {
+				fmt.Printf("⚠️  Error processing %s nodes: %v\n", nodeType, err)
+				continue
+			}
+
+			totalProcessed += processed
+			fmt.Printf("✓ Processed %d %s nodes\n", processed, nodeType)
+		}
+
+		fmt.Printf("\n🎉 Embedding population completed! Processed %d nodes total.\n", totalProcessed)
+		return nil
+	},
+}
+
+func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, embeddingService search.EmbeddingService, vectorSearch *search.VectorSearchManager, nodeType string, batchSize int, dryRun bool) (int, error) {
+	// Query nodes that don't have embeddings
+	query := fmt.Sprintf(`
+		MATCH (n:%s)
+		WHERE n.embedding IS NULL
+		RETURN elementId(n) as nodeId, n.name as name, n.signature as signature, n.description as description, n.content as content, n.title as title
+		LIMIT 1000
+	`, nodeType)
+
+	results, err := client.ExecuteQuery(ctx, query, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query %s nodes: %w", nodeType, err)
+	}
+
+	if len(results) == 0 {
+		fmt.Printf("   No %s nodes need embeddings\n", nodeType)
+		return 0, nil
+	}
+
+	fmt.Printf("   Found %d %s nodes without embeddings\n", len(results), nodeType)
+
+	if dryRun {
+		return len(results), nil
+	}
+
+	// Process in batches
+	processed := 0
+	for i := 0; i < len(results); i += batchSize {
+		end := i + batchSize
+		if end > len(results) {
+			end = len(results)
+		}
+
+		batch := results[i:end]
+		var updates []search.NodeEmbeddingUpdate
+		var texts []string
+
+		// Prepare texts for embedding
+		for _, record := range batch {
+			recordMap := record.AsMap()
+			nodeId, _ := recordMap["nodeId"].(string)
+
+			// Build text for embedding based on available fields
+			var textParts []string
+			if name, ok := recordMap["name"].(string); ok && name != "" {
+				textParts = append(textParts, name)
+			}
+			if title, ok := recordMap["title"].(string); ok && title != "" {
+				textParts = append(textParts, title)
+			}
+			if signature, ok := recordMap["signature"].(string); ok && signature != "" {
+				textParts = append(textParts, signature)
+			}
+			if description, ok := recordMap["description"].(string); ok && description != "" {
+				textParts = append(textParts, description)
+			}
+			if content, ok := recordMap["content"].(string); ok && content != "" {
+				// Truncate very long content
+				if len(content) > 500 {
+					content = content[:500] + "..."
+				}
+				textParts = append(textParts, content)
+			}
+
+			text := strings.Join(textParts, " | ")
+			if text == "" {
+				text = fmt.Sprintf("%s node", nodeType) // Fallback
+			}
+
+			texts = append(texts, text)
+			updates = append(updates, search.NodeEmbeddingUpdate{
+				NodeId:    nodeId,
+				Embedding: nil, // Will be filled after generation
+			})
+		}
+
+		// Generate embeddings
+		fmt.Printf("   Generating embeddings for batch %d-%d...\n", i+1, end)
+		embeddings, err := embeddingService.GenerateBatchEmbeddings(ctx, texts)
+		if err != nil {
+			return processed, fmt.Errorf("failed to generate embeddings: %w", err)
+		}
+
+		// Fill in embeddings
+		for j, embedding := range embeddings {
+			updates[j].Embedding = embedding
+		}
+
+		// Update Neo4j
+		fmt.Printf("   Updating Neo4j with embeddings...\n")
+		if err := vectorSearch.BatchUpdateEmbeddings(ctx, updates); err != nil {
+			return processed, fmt.Errorf("failed to update embeddings: %w", err)
+		}
+
+		processed += len(batch)
+	}
+
+	return processed, nil
+}
+
 func init() {
 	// Schema subcommands
 	schemaCmd.AddCommand(schemaCreateCmd)
@@ -789,6 +1173,10 @@ func init() {
 	indexProjectCmd.Flags().StringP("service", "s", "", "Service name")
 	indexProjectCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
 	indexProjectCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	indexProjectCmd.Flags().Bool("generate-embeddings", false, "Generate embeddings for indexed nodes")
+	indexProjectCmd.Flags().String("embedding-api-key", "", "API key for real embedding service")
+	indexProjectCmd.Flags().String("embedding-base-url", "", "Base URL for embedding API")
+	indexProjectCmd.Flags().String("embedding-model", "text-embedding-3-small", "Embedding model to use")
 	
 	// Flags for SCIP command
 	indexSCIPCmd.Flags().StringP("service", "s", "", "Service name")
@@ -827,6 +1215,20 @@ func init() {
 	benchmarkIncrementalCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
 	benchmarkIncrementalCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
 	benchmarkIncrementalCmd.Flags().DurationP("sample-interval", "i", 2*time.Second, "Memory sampling interval")
+
+	// Search subcommands
+	searchCmd.AddCommand(searchInitCmd)
+	searchCmd.AddCommand(searchTestCmd)
+	searchCmd.AddCommand(searchInfoCmd)
+	searchCmd.AddCommand(searchEmbedCmd)
+
+	// Search flags
+	searchTestCmd.Flags().IntP("limit", "l", 10, "Limit search results")
+	searchEmbedCmd.Flags().IntP("batch-size", "b", 50, "Batch size for processing embeddings")
+	searchEmbedCmd.Flags().Bool("dry-run", false, "Show what would be processed without making changes")
+	searchEmbedCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
+	searchEmbedCmd.Flags().String("base-url", "", "Base URL for embedding API (e.g., https://api.openai.com/v1)")
+	searchEmbedCmd.Flags().String("model", "text-embedding-3-small", "Embedding model to use")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")
