@@ -7,11 +7,13 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 	"github.com/context-maximiser/code-graph/pkg/schema"
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
 	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
+	"github.com/context-maximiser/code-graph/pkg/benchmarks"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -67,6 +69,7 @@ func init() {
 	rootCmd.AddCommand(schemaCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(queryCmd)
+	rootCmd.AddCommand(benchmarkCmd)
 	rootCmd.AddCommand(serverCmd)
 }
 
@@ -322,6 +325,47 @@ var indexSCIPCmd = &cobra.Command{
 }
 
 // indexDocsCmd handles indexing documents  
+var indexIncrementalCmd = &cobra.Command{
+	Use:   "incremental [path]",
+	Short: "Incrementally index a Go project",
+	Long:  "Incrementally index Go source files by only updating changed files based on content hash comparison",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+
+		if serviceName == "" {
+			serviceName = "context-maximiser" // Default service name
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		indexer := static.NewStaticIndexer(client, serviceName, version, repoURL)
+
+		fmt.Printf("Performing incremental indexing for project at %s...\n", projectPath)
+		ctx := context.Background()
+		if err := indexer.IndexProjectIncremental(ctx, projectPath); err != nil {
+			return fmt.Errorf("failed to perform incremental indexing: %w", err)
+		}
+
+		fmt.Println("✓ Incremental indexing completed successfully")
+		return nil
+	},
+}
+
 var indexDocsCmd = &cobra.Command{
 	Use:   "docs [path]",
 	Short: "Index documents for feature extraction",
@@ -550,6 +594,185 @@ var serverCmd = &cobra.Command{
 	},
 }
 
+// benchmarkCmd handles performance and memory benchmarking
+var benchmarkCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Performance and memory benchmarking",
+	Long:  "Run comprehensive benchmarks to analyze performance and memory usage of indexing operations",
+}
+
+var benchmarkMemoryCmd = &cobra.Command{
+	Use:   "memory [path]",
+	Short: "Benchmark memory usage of indexing operations",
+	Long:  "Compare memory usage between full and incremental indexing to analyze performance impact",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		sampleInterval, _ := cmd.Flags().GetDuration("sample-interval")
+
+		if serviceName == "" {
+			serviceName = "benchmark-test"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		config := benchmarks.BenchmarkConfig{
+			ProjectPath:    projectPath,
+			ServiceName:    serviceName,
+			Version:        version,
+			RepoURL:        repoURL,
+			SampleInterval: sampleInterval,
+		}
+
+		benchmark := benchmarks.NewIndexingBenchmark(client, config)
+		ctx := context.Background()
+
+		fmt.Printf("🔬 Starting Memory Impact Benchmark for project at %s...\n", projectPath)
+		comparison := benchmark.BenchmarkMemoryImpact(ctx)
+
+		// Print detailed comparison report
+		comparison.PrintComparison()
+
+		return nil
+	},
+}
+
+var benchmarkFullCmd = &cobra.Command{
+	Use:   "full [path]",
+	Short: "Benchmark full indexing performance",
+	Long:  "Run comprehensive benchmark of full project indexing with detailed memory monitoring",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		sampleInterval, _ := cmd.Flags().GetDuration("sample-interval")
+
+		if serviceName == "" {
+			serviceName = "benchmark-full"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		config := benchmarks.BenchmarkConfig{
+			ProjectPath:    projectPath,
+			ServiceName:    serviceName,
+			Version:        version,
+			RepoURL:        repoURL,
+			SampleInterval: sampleInterval,
+		}
+
+		benchmark := benchmarks.NewIndexingBenchmark(client, config)
+		ctx := context.Background()
+
+		fmt.Printf("🚀 Starting Full Indexing Benchmark for project at %s...\n", projectPath)
+		result := benchmark.BenchmarkFullIndexing(ctx)
+
+		// Print detailed results
+		fmt.Printf("\n📊 Full Indexing Results:\n")
+		fmt.Printf("   Duration: %v\n", result.Duration)
+		fmt.Printf("   Files Processed: %d\n", result.FilesProcessed)
+		fmt.Printf("   Success: %t\n", result.Success)
+
+		if result.Error != "" {
+			fmt.Printf("   Error: %s\n", result.Error)
+		}
+
+		if result.MemoryReport != nil {
+			result.MemoryReport.PrintReport()
+		}
+
+		return nil
+	},
+}
+
+var benchmarkIncrementalCmd = &cobra.Command{
+	Use:   "incremental [path]",
+	Short: "Benchmark incremental indexing performance",
+	Long:  "Run comprehensive benchmark of incremental project indexing with detailed memory monitoring",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		sampleInterval, _ := cmd.Flags().GetDuration("sample-interval")
+
+		if serviceName == "" {
+			serviceName = "benchmark-incremental"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		config := benchmarks.BenchmarkConfig{
+			ProjectPath:    projectPath,
+			ServiceName:    serviceName,
+			Version:        version,
+			RepoURL:        repoURL,
+			SampleInterval: sampleInterval,
+		}
+
+		benchmark := benchmarks.NewIndexingBenchmark(client, config)
+		ctx := context.Background()
+
+		fmt.Printf("⚡ Starting Incremental Indexing Benchmark for project at %s...\n", projectPath)
+		result := benchmark.BenchmarkIncrementalIndexing(ctx)
+
+		// Print detailed results
+		fmt.Printf("\n📊 Incremental Indexing Results:\n")
+		fmt.Printf("   Duration: %v\n", result.Duration)
+		fmt.Printf("   Files Processed: %d\n", result.FilesProcessed)
+		fmt.Printf("   Success: %t\n", result.Success)
+
+		if result.Error != "" {
+			fmt.Printf("   Error: %s\n", result.Error)
+		}
+
+		if result.MemoryReport != nil {
+			result.MemoryReport.PrintReport()
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	// Schema subcommands
 	schemaCmd.AddCommand(schemaCreateCmd)
@@ -559,6 +782,7 @@ func init() {
 	// Index subcommands
 	indexCmd.AddCommand(indexProjectCmd)
 	indexCmd.AddCommand(indexSCIPCmd)
+	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
 	
 	// Flags for project command
@@ -571,12 +795,38 @@ func init() {
 	indexSCIPCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
 	indexSCIPCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
 
+	// Flags for incremental command
+	indexIncrementalCmd.Flags().StringP("service", "s", "", "Service name")
+	indexIncrementalCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	indexIncrementalCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+
 	// Query subcommands
 	queryCmd.AddCommand(querySearchCmd)
 	queryCmd.AddCommand(querySourceCmd)
-	
+
 	// Query flags
 	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
+
+	// Benchmark subcommands
+	benchmarkCmd.AddCommand(benchmarkMemoryCmd)
+	benchmarkCmd.AddCommand(benchmarkFullCmd)
+	benchmarkCmd.AddCommand(benchmarkIncrementalCmd)
+
+	// Benchmark flags
+	benchmarkMemoryCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkMemoryCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	benchmarkMemoryCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkMemoryCmd.Flags().DurationP("sample-interval", "i", 2*time.Second, "Memory sampling interval")
+
+	benchmarkFullCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkFullCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	benchmarkFullCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkFullCmd.Flags().DurationP("sample-interval", "i", 2*time.Second, "Memory sampling interval")
+
+	benchmarkIncrementalCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkIncrementalCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	benchmarkIncrementalCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkIncrementalCmd.Flags().DurationP("sample-interval", "i", 2*time.Second, "Memory sampling interval")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")

@@ -362,7 +362,10 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 				toLower(n.displayName) CONTAINS toLower($searchTerm) OR
 				toLower(n.signature) CONTAINS toLower($searchTerm) OR
 				toLower(n.symbol) CONTAINS toLower($searchTerm) OR
-				toLower(n.path) CONTAINS toLower($searchTerm)
+				toLower(n.path) CONTAINS toLower($searchTerm) OR
+				toLower(n.description) CONTAINS toLower($searchTerm) OR
+				toLower(n.content) CONTAINS toLower($searchTerm) OR
+				toLower(n.title) CONTAINS toLower($searchTerm)
 			)
 			RETURN n, labels(n) AS nodeLabels
 			ORDER BY 
@@ -379,12 +382,15 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 	} else {
 		cypher = `
 			MATCH (n)
-			WHERE 
+			WHERE
 				toLower(n.name) CONTAINS toLower($searchTerm) OR
 				toLower(n.displayName) CONTAINS toLower($searchTerm) OR
 				toLower(n.signature) CONTAINS toLower($searchTerm) OR
 				toLower(n.symbol) CONTAINS toLower($searchTerm) OR
-				toLower(n.path) CONTAINS toLower($searchTerm)
+				toLower(n.path) CONTAINS toLower($searchTerm) OR
+				toLower(n.description) CONTAINS toLower($searchTerm) OR
+				toLower(n.content) CONTAINS toLower($searchTerm) OR
+				toLower(n.title) CONTAINS toLower($searchTerm)
 			RETURN n, labels(n) AS nodeLabels
 			ORDER BY 
 				CASE 
@@ -408,6 +414,100 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search nodes: %w", err)
+	}
+
+	return result, nil
+}
+
+// SemanticSearch performs advanced search including multi-word phrases and related concepts
+func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, nodeTypes []string, limit int) ([]*neo4j.Record, error) {
+	// Split search term into individual words for better matching
+	words := strings.Fields(searchTerm)
+
+	// Build the label filter
+	var labelFilters []string
+	for _, nodeType := range nodeTypes {
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", nodeType))
+	}
+
+	// Build word-based search conditions
+	var wordConditions []string
+	for i, _ := range words {
+		wordParam := fmt.Sprintf("word%d", i)
+		wordConditions = append(wordConditions, fmt.Sprintf(`(
+			toLower(n.name) CONTAINS toLower($%s) OR
+			toLower(n.displayName) CONTAINS toLower($%s) OR
+			toLower(n.signature) CONTAINS toLower($%s) OR
+			toLower(n.symbol) CONTAINS toLower($%s) OR
+			toLower(n.path) CONTAINS toLower($%s) OR
+			toLower(n.description) CONTAINS toLower($%s) OR
+			toLower(n.content) CONTAINS toLower($%s) OR
+			toLower(n.title) CONTAINS toLower($%s)
+		)`, wordParam, wordParam, wordParam, wordParam, wordParam, wordParam, wordParam, wordParam))
+	}
+
+	var cypher string
+	wordSearchCondition := strings.Join(wordConditions, " AND ")
+
+	if len(labelFilters) > 0 {
+		labelFilter := strings.Join(labelFilters, " OR ")
+		cypher = fmt.Sprintf(`
+			MATCH (n)
+			WHERE (%s) AND (%s)
+			// Also search for related nodes through relationships
+			OPTIONAL MATCH (n)-[:MENTIONS|IMPLEMENTS|DOCUMENTS|BELONGS_TO]-(related)
+			WHERE %s
+			RETURN n, labels(n) AS nodeLabels, COUNT(related) as relationshipScore
+			ORDER BY
+				relationshipScore DESC,
+				CASE
+					WHEN n:Function OR n:Method THEN 1
+					WHEN n:Class OR n:Interface THEN 2
+					WHEN n:Variable OR n:Parameter THEN 3
+					WHEN n:Document OR n:Feature THEN 4
+					WHEN n:File THEN 5
+					WHEN n:Symbol THEN 6
+					ELSE 7
+				END,
+				n.name
+		`, labelFilter, wordSearchCondition, wordSearchCondition)
+	} else {
+		cypher = fmt.Sprintf(`
+			MATCH (n)
+			WHERE %s
+			// Also search for related nodes through relationships
+			OPTIONAL MATCH (n)-[:MENTIONS|IMPLEMENTS|DOCUMENTS|BELONGS_TO]-(related)
+			WHERE %s
+			RETURN n, labels(n) AS nodeLabels, COUNT(related) as relationshipScore
+			ORDER BY
+				relationshipScore DESC,
+				CASE
+					WHEN n:Function OR n:Method THEN 1
+					WHEN n:Class OR n:Interface THEN 2
+					WHEN n:Variable OR n:Parameter THEN 3
+					WHEN n:Document OR n:Feature THEN 4
+					WHEN n:File THEN 5
+					WHEN n:Symbol THEN 6
+					ELSE 7
+				END,
+				n.name
+		`, wordSearchCondition, wordSearchCondition)
+	}
+
+	// Only apply limit if it's greater than 0
+	if limit > 0 {
+		cypher += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	// Build parameters for all words
+	params := make(map[string]any)
+	for i, word := range words {
+		params[fmt.Sprintf("word%d", i)] = word
+	}
+
+	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform semantic search: %w", err)
 	}
 
 	return result, nil
