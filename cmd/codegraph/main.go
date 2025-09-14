@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/context-maximiser/code-graph/pkg/benchmarks"
+	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
+	"github.com/context-maximiser/code-graph/pkg/indexer/static"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 	"github.com/context-maximiser/code-graph/pkg/schema"
-	"github.com/context-maximiser/code-graph/pkg/indexer/static"
-	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
-	"github.com/context-maximiser/code-graph/pkg/benchmarks"
 	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/spf13/cobra"
@@ -21,12 +21,12 @@ import (
 )
 
 var (
-	cfgFile    string
-	verbose    bool
-	neo4jURI   string
-	neo4jUser  string
-	neo4jPass  string
-	neo4jDB    string
+	cfgFile   string
+	verbose   bool
+	neo4jURI  string
+	neo4jUser string
+	neo4jPass string
+	neo4jDB   string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -152,7 +152,7 @@ var schemaCreateCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		schemaManager := schema.NewSchemaManager(client)
-		
+
 		fmt.Println("Creating Neo4j schema...")
 		ctx := context.Background()
 		if err := schemaManager.CreateSchema(ctx); err != nil {
@@ -176,7 +176,7 @@ var schemaDropCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		schemaManager := schema.NewSchemaManager(client)
-		
+
 		fmt.Println("Dropping Neo4j schema...")
 		ctx := context.Background()
 		if err := schemaManager.DropSchema(ctx); err != nil {
@@ -200,7 +200,7 @@ var schemaInfoCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		schemaManager := schema.NewSchemaManager(client)
-		
+
 		ctx := context.Background()
 		info, err := schemaManager.GetSchemaInfo(ctx)
 		if err != nil {
@@ -209,7 +209,7 @@ var schemaInfoCmd = &cobra.Command{
 
 		fmt.Println("Schema Information:")
 		fmt.Println("==================")
-		
+
 		if constraints, ok := info["constraints"].([]map[string]any); ok {
 			fmt.Printf("\nConstraints (%d):\n", len(constraints))
 			for _, constraint := range constraints {
@@ -257,6 +257,8 @@ var indexProjectCmd = &cobra.Command{
 		apiKey, _ := cmd.Flags().GetString("embedding-api-key")
 		baseURL, _ := cmd.Flags().GetString("embedding-base-url")
 		model, _ := cmd.Flags().GetString("embedding-model")
+		// useOpenRouter, _ := cmd.Flags().GetBool("embedding-openrouter")
+		useGemini, _ := cmd.Flags().GetBool("embedding-gemini")
 
 		if serviceName == "" {
 			serviceName = "context-maximiser" // Default service name
@@ -276,13 +278,20 @@ var indexProjectCmd = &cobra.Command{
 		// Configure embedding service if requested
 		if generateEmbeddings {
 			var embeddingService search.EmbeddingService
-			if apiKey != "" && baseURL != "" {
+			if useGemini && apiKey != "" {
+				embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
+				fmt.Printf("🔗 Using Google Gemini embedding service (model: %s)\n", model)
+			} else if apiKey != "" && baseURL != "" {
 				embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
 				fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
 			} else {
 				embeddingService = search.NewMockEmbeddingService()
 				fmt.Printf("🧪 Using mock embedding service for testing\n")
 			}
+			//  else if useOpenRouter && apiKey != "" {
+			// 	embeddingService = search.NewOpenRouterEmbeddingService(apiKey, model)
+			// 	fmt.Printf("🔗 Using OpenRouter embedding service (model: %s)\n", model)
+			// }
 			indexer.SetEmbeddingService(embeddingService)
 		}
 
@@ -326,12 +335,12 @@ var indexSCIPCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		scipIndexer := static.NewSCIPIndexer(client, serviceName, version, repoURL)
-		
+
 		// Validate environment
 		if err := scipIndexer.ValidateEnvironment(); err != nil {
 			return fmt.Errorf("environment validation failed: %w", err)
 		}
-		
+
 		fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
 		ctx := context.Background()
 		if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
@@ -343,7 +352,7 @@ var indexSCIPCmd = &cobra.Command{
 	},
 }
 
-// indexDocsCmd handles indexing documents  
+// indexDocsCmd handles indexing documents
 var indexIncrementalCmd = &cobra.Command{
 	Use:   "incremental [path]",
 	Short: "Incrementally index a Go project",
@@ -392,7 +401,7 @@ var indexDocsCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		docPath := args[0]
-		
+
 		client, err := createNeo4jClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Neo4j client: %w", err)
@@ -412,7 +421,7 @@ var indexDocsCmd = &cobra.Command{
 			fmt.Printf("Indexing documents in directory: %s\n", docPath)
 			err = indexer.IndexDirectory(ctx, docPath)
 		} else {
-			fmt.Printf("Indexing document file: %s\n", docPath)  
+			fmt.Printf("Indexing document file: %s\n", docPath)
 			err = indexer.IndexDocument(ctx, docPath)
 		}
 
@@ -430,7 +439,7 @@ var indexDocsCmd = &cobra.Command{
 				fmt.Printf("  Documents: %v\n", docCount)
 			}
 			if featureCount, ok := stats["featureCount"]; ok {
-				fmt.Printf("  Features extracted: %v\n", featureCount)  
+				fmt.Printf("  Features extracted: %v\n", featureCount)
 			}
 			if symbolCount, ok := stats["mentionedSymbolCount"]; ok {
 				fmt.Printf("  Code symbols linked: %v\n", symbolCount)
@@ -456,7 +465,7 @@ var querySearchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		searchTerm := args[0]
-		
+
 		client, err := createNeo4jClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Neo4j client: %w", err)
@@ -464,12 +473,12 @@ var querySearchCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		queryBuilder := neo4j.NewQueryBuilder(client)
-		
+
 		// Get limit from flags, 0 means no limit
 		limit, _ := cmd.Flags().GetInt("limit")
-		
+
 		ctx := context.Background()
-		results, err := queryBuilder.SearchNodes(ctx, searchTerm, 
+		results, err := queryBuilder.SearchNodes(ctx, searchTerm,
 			[]string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}, limit)
 		if err != nil {
 			return fmt.Errorf("failed to search: %w", err)
@@ -477,7 +486,7 @@ var querySearchCmd = &cobra.Command{
 
 		fmt.Printf("Search results for '%s':\n", searchTerm)
 		fmt.Println("========================")
-		
+
 		for _, record := range results {
 			recordMap := record.AsMap()
 			if nodeObj, ok := recordMap["n"]; ok {
@@ -488,7 +497,7 @@ var querySearchCmd = &cobra.Command{
 						// Handle different node types
 						var displayName string
 						var details []string
-						
+
 						switch labels[0].(string) {
 						case "File":
 							if path, ok := props["path"]; ok {
@@ -535,7 +544,7 @@ var querySearchCmd = &cobra.Command{
 								}
 							}
 						}
-						
+
 						if displayName != "" {
 							fmt.Printf("- %s (%s)\n", displayName, labels[0])
 							for _, detail := range details {
@@ -558,7 +567,7 @@ var querySourceCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		functionName := args[0]
-		
+
 		client, err := createNeo4jClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Neo4j client: %w", err)
@@ -566,7 +575,7 @@ var querySourceCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		queryBuilder := neo4j.NewQueryBuilder(client)
-		
+
 		ctx := context.Background()
 		sourceCode, err := queryBuilder.GetFunctionSourceCode(ctx, functionName)
 		if err != nil {
@@ -577,7 +586,7 @@ var querySourceCmd = &cobra.Command{
 		fmt.Println("=" + strings.Repeat("=", len(functionName)+25))
 		fmt.Println(sourceCode)
 		fmt.Println("=" + strings.Repeat("=", len(functionName)+25))
-		
+
 		return nil
 	},
 }
@@ -589,10 +598,10 @@ var serverCmd = &cobra.Command{
 	Long:  "Start the REST API server for querying the code graph",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
-		
+
 		fmt.Printf("Starting API server on port %d...\n", port)
 		fmt.Println("API server functionality not yet implemented")
-		
+
 		// Set up signal handling for graceful shutdown
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -600,7 +609,7 @@ var serverCmd = &cobra.Command{
 		// Handle shutdown signals
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		
+
 		go func() {
 			<-sigChan
 			fmt.Println("\nShutting down server...")
@@ -843,8 +852,19 @@ var searchTestCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		// Create embedding service
-		embeddingService := search.NewMockEmbeddingService()
+		// Create embedding service based on flags
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		model, _ := cmd.Flags().GetString("model")
+		useGemini, _ := cmd.Flags().GetBool("gemini")
+
+		var embeddingService search.EmbeddingService
+		if useGemini && apiKey != "" {
+			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
+			fmt.Printf("🔗 Using Google Gemini embedding service (model: %s) for search\n", model)
+		} else {
+			embeddingService = search.NewMockEmbeddingService()
+			fmt.Printf("🧪 Using mock embedding service for search testing\n")
+		}
 
 		// Create hybrid search manager
 		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
@@ -1017,16 +1037,25 @@ var searchEmbedCmd = &cobra.Command{
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		baseURL, _ := cmd.Flags().GetString("base-url")
 		model, _ := cmd.Flags().GetString("model")
+		// useOpenRouter, _ := cmd.Flags().GetBool("openrouter")
+		useGemini, _ := cmd.Flags().GetBool("gemini")
 
 		// Create embedding service
 		var embeddingService search.EmbeddingService
-		if apiKey != "" && baseURL != "" {
+		if useGemini && apiKey != "" {
+			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
+			fmt.Printf("🔗 Using Google Gemini embedding service (model: %s)\n", model)
+		} else if apiKey != "" && baseURL != "" {
 			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
 			fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
 		} else {
 			embeddingService = search.NewMockEmbeddingService()
 			fmt.Printf("🧪 Using mock embedding service for testing\n")
 		}
+		// else if useOpenRouter && apiKey != "" {
+		// 	embeddingService = search.NewOpenRouterEmbeddingService(apiKey, model)
+		// 	fmt.Printf("🔗 Using OpenRouter embedding service (model: %s)\n", model)
+		// }
 
 		ctx := context.Background()
 
@@ -1168,7 +1197,7 @@ func init() {
 	indexCmd.AddCommand(indexSCIPCmd)
 	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
-	
+
 	// Flags for project command
 	indexProjectCmd.Flags().StringP("service", "s", "", "Service name")
 	indexProjectCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
@@ -1176,8 +1205,10 @@ func init() {
 	indexProjectCmd.Flags().Bool("generate-embeddings", false, "Generate embeddings for indexed nodes")
 	indexProjectCmd.Flags().String("embedding-api-key", "", "API key for real embedding service")
 	indexProjectCmd.Flags().String("embedding-base-url", "", "Base URL for embedding API")
-	indexProjectCmd.Flags().String("embedding-model", "text-embedding-3-small", "Embedding model to use")
-	
+	indexProjectCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
+	indexProjectCmd.Flags().Bool("embedding-openrouter", false, "Use OpenRouter for embeddings (requires --embedding-api-key)")
+	indexProjectCmd.Flags().Bool("embedding-gemini", false, "Use Google Gemini for embeddings (requires --embedding-api-key)")
+
 	// Flags for SCIP command
 	indexSCIPCmd.Flags().StringP("service", "s", "", "Service name")
 	indexSCIPCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
@@ -1224,11 +1255,16 @@ func init() {
 
 	// Search flags
 	searchTestCmd.Flags().IntP("limit", "l", 10, "Limit search results")
+	searchTestCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
+	searchTestCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
+	searchTestCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
 	searchEmbedCmd.Flags().IntP("batch-size", "b", 50, "Batch size for processing embeddings")
 	searchEmbedCmd.Flags().Bool("dry-run", false, "Show what would be processed without making changes")
 	searchEmbedCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
 	searchEmbedCmd.Flags().String("base-url", "", "Base URL for embedding API (e.g., https://api.openai.com/v1)")
-	searchEmbedCmd.Flags().String("model", "text-embedding-3-small", "Embedding model to use")
+	searchEmbedCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
+	searchEmbedCmd.Flags().Bool("openrouter", false, "Use OpenRouter API (requires --api-key)")
+	searchEmbedCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")

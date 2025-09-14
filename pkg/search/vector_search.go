@@ -47,32 +47,62 @@ type VectorSearchResponse struct {
 // CreateVectorIndexes creates all necessary vector indexes for CodeGraph
 func (vsm *VectorSearchManager) CreateVectorIndexes(ctx context.Context) error {
 	indexes := []VectorIndexConfig{
+		// Legacy 384-dimension indexes for existing mock embeddings
 		{
-			Name:               "function_embeddings",
+			Name:               "function_embeddings_384",
 			NodeLabel:          "Function",
 			Property:           "embedding",
 			Dimensions:         384, // sentence-transformers/all-MiniLM-L6-v2
 			SimilarityFunction: "cosine",
 		},
 		{
-			Name:               "document_embeddings",
+			Name:               "document_embeddings_384",
 			NodeLabel:          "Document",
 			Property:           "embedding",
 			Dimensions:         384,
 			SimilarityFunction: "cosine",
 		},
 		{
-			Name:               "feature_embeddings",
+			Name:               "feature_embeddings_384",
 			NodeLabel:          "Feature",
 			Property:           "embedding",
 			Dimensions:         384,
 			SimilarityFunction: "cosine",
 		},
 		{
-			Name:               "class_embeddings",
+			Name:               "class_embeddings_384",
 			NodeLabel:          "Class",
 			Property:           "embedding",
 			Dimensions:         384,
+			SimilarityFunction: "cosine",
+		},
+		// New 768-dimension indexes for Gemini embeddings
+		{
+			Name:               "function_embeddings_768",
+			NodeLabel:          "Function",
+			Property:           "embedding",
+			Dimensions:         768, // Gemini embedding-001 (with dimension override)
+			SimilarityFunction: "cosine",
+		},
+		{
+			Name:               "document_embeddings_768",
+			NodeLabel:          "Document",
+			Property:           "embedding",
+			Dimensions:         768,
+			SimilarityFunction: "cosine",
+		},
+		{
+			Name:               "feature_embeddings_768",
+			NodeLabel:          "Feature",
+			Property:           "embedding",
+			Dimensions:         768,
+			SimilarityFunction: "cosine",
+		},
+		{
+			Name:               "class_embeddings_768",
+			NodeLabel:          "Class",
+			Property:           "embedding",
+			Dimensions:         768,
 			SimilarityFunction: "cosine",
 		},
 	}
@@ -174,12 +204,16 @@ func (vsm *VectorSearchManager) VectorSearch(ctx context.Context, indexName stri
 
 // HybridVectorSearch combines multiple vector indexes for comprehensive search
 func (vsm *VectorSearchManager) HybridVectorSearch(ctx context.Context, queryVector []float64, limit int) (*VectorSearchResponse, error) {
+	// Use 768-dimension indexes for Gemini embeddings
 	indexes := []string{
-		"function_embeddings",
-		"document_embeddings",
-		"feature_embeddings",
-		"class_embeddings",
+		"function_embeddings_768",
+		"class_embeddings_768",
+		"method_embeddings_768",
+		"document_embeddings_768",
 	}
+
+	dimension := len(queryVector)
+	log.Printf("Using vector indexes for %d-dimension query", dimension)
 
 	var allResults []VectorSearchResult
 

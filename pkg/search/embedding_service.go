@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"google.golang.org/genai"
 )
 
 // SimpleEmbeddingService provides embeddings using a REST API or local service
@@ -72,16 +74,15 @@ func (es *SimpleEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, t
 		return nil, fmt.Errorf("no texts provided")
 	}
 
-	// If no API key provided, use mock embeddings
+	// If no API key provided, return error
 	if es.APIKey == "" || es.BaseURL == "" {
-		return es.generateMockEmbeddings(texts), nil
+		return nil, fmt.Errorf("API key and base URL are required for embedding service")
 	}
 
-	// Try to call actual API first
+	// Call actual API
 	response, err := es.callEmbeddingAPI(ctx, texts)
 	if err != nil {
-		log.Printf("Warning: API call failed (%v), falling back to mock embeddings", err)
-		return es.generateMockEmbeddings(texts), nil
+		return nil, fmt.Errorf("embedding API call failed: %w", err)
 	}
 
 	// Extract embeddings from API response
@@ -115,7 +116,7 @@ func (es *SimpleEmbeddingService) generateMockEmbeddings(texts []string) [][]flo
 		// Create base pattern based on text content
 		for j := 0; j < 384; j++ {
 			// Create deterministic values based on text content and position
-			baseValue := float64((hash + int64(j*13)) % 2000) / 1000.0 - 1.0 // Range: -1.0 to 1.0
+			baseValue := float64((hash+int64(j*13))%2000)/1000.0 - 1.0 // Range: -1.0 to 1.0
 
 			// Add semantic variations based on text characteristics
 			if strings.Contains(strings.ToLower(text), "function") {
@@ -244,7 +245,7 @@ func (mes *MockEmbeddingService) GenerateEmbedding(ctx context.Context, text str
 	}
 
 	for i := range embedding {
-		value := float64((hash+int64(i))%2000) / 1000.0 - 1.0 // Range: -1.0 to 1.0
+		value := float64((hash+int64(i))%2000)/1000.0 - 1.0 // Range: -1.0 to 1.0
 		embedding[i] = value
 	}
 
@@ -264,4 +265,106 @@ func (mes *MockEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, te
 	}
 
 	return embeddings, nil
+}
+
+// GeminiEmbeddingService provides embeddings using Google's Gemini API
+type GeminiEmbeddingService struct {
+	APIKey string
+	Model  string
+}
+
+// NewGeminiEmbeddingService creates a new Gemini embedding service
+func NewGeminiEmbeddingService(apiKey, model string) *GeminiEmbeddingService {
+	if model == "" {
+		model = "gemini-embedding-001" // Stable Gemini embedding model
+	}
+
+	return &GeminiEmbeddingService{
+		APIKey: apiKey,
+		Model:  model,
+	}
+}
+
+// GenerateEmbedding generates a single embedding for the given text using Gemini
+func (ges *GeminiEmbeddingService) GenerateEmbedding(ctx context.Context, text string) ([]float64, error) {
+	embeddings, err := ges.GenerateBatchEmbeddings(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(embeddings) == 0 {
+		return nil, fmt.Errorf("no embeddings returned")
+	}
+
+	return embeddings[0], nil
+}
+
+// GenerateBatchEmbeddings generates embeddings for multiple texts using Gemini
+func (ges *GeminiEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float64, error) {
+	if len(texts) == 0 {
+		return nil, fmt.Errorf("no texts provided")
+	}
+
+	// If no API key provided, return error
+	if ges.APIKey == "" {
+		return nil, fmt.Errorf("Google API key is required for Gemini embedding service")
+	}
+
+	// Create client with API key
+	clientConfig := &genai.ClientConfig{
+		Backend: genai.BackendGeminiAPI,
+		APIKey:  ges.APIKey,
+	}
+	client, err := genai.NewClient(ctx, clientConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+	}
+
+	var allEmbeddings [][]float64
+
+	// Process texts in batches (Gemini supports batch processing)
+	for _, text := range texts {
+		// Create content from text
+		contents := genai.Text(text)
+
+		// Generate embedding with semantic similarity task type and 768 dimensions
+		embedConfig := &genai.EmbedContentConfig{
+			TaskType:             "SEMANTIC_SIMILARITY",
+			OutputDimensionality: genai.Ptr(int32(768)), // Request 768 dimensions to fit Neo4j limit
+		}
+
+		result, err := client.Models.EmbedContent(ctx, ges.Model, contents, embedConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Gemini embedding failed for text '%s': %w", text[:min(50, len(text))], err)
+		}
+
+		if result == nil || result.Embeddings == nil || len(result.Embeddings) == 0 {
+			return nil, fmt.Errorf("no embedding returned for text '%s'", text[:min(50, len(text))])
+		}
+
+		// Get the first (and only) embedding
+		embedding := result.Embeddings[0]
+		if len(embedding.Values) == 0 {
+			return nil, fmt.Errorf("empty embedding values for text '%s'", text[:min(50, len(text))])
+		}
+
+		// Convert float32 to float64
+		embeddingVec := make([]float64, len(embedding.Values))
+		for i, v := range embedding.Values {
+			embeddingVec[i] = float64(v)
+		}
+
+		allEmbeddings = append(allEmbeddings, embeddingVec)
+	}
+
+	log.Printf("✓ Generated %d embeddings using Gemini %s", len(allEmbeddings), ges.Model)
+	return allEmbeddings, nil
+}
+
+// Helper function for min
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
