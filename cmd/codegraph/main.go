@@ -1086,6 +1086,110 @@ var searchEmbedCmd = &cobra.Command{
 	},
 }
 
+// searchCommentCmd handles comment/docstring-based embedding generation
+var searchCommentCmd = &cobra.Command{
+	Use:   "comments",
+	Short: "Generate embeddings for docstrings and comments only",
+	Long:  "Extract docstrings and comments from functions/methods/classes and create embeddings for semantic search",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		batchSize, _ := cmd.Flags().GetInt("batch-size")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		model, _ := cmd.Flags().GetString("model")
+		useGemini, _ := cmd.Flags().GetBool("gemini")
+		dimensions, _ := cmd.Flags().GetInt("dimensions")
+		force, _ := cmd.Flags().GetBool("force")
+
+		// Create embedding service
+		var embeddingService search.EmbeddingService
+		if useGemini && apiKey != "" {
+			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
+			fmt.Printf("🔗 Using Google Gemini embedding service (model: %s)\n", model)
+		} else if apiKey != "" && baseURL != "" {
+			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
+			fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
+		} else {
+			embeddingService = search.NewMockEmbeddingService()
+			fmt.Printf("🧪 Using mock embedding service for testing\n")
+		}
+
+		// Create comment embedding service
+		commentService := search.NewCommentEmbeddingService(client, embeddingService)
+
+		// Clear existing comment embeddings if force flag is set
+		if force {
+			fmt.Printf("🧹 Clearing existing comment embeddings...\n")
+			clearQuery := `
+				MATCH (n)-[r:HAS_COMMENT]->(c:Comment)
+				WHERE c.isDocstring = true
+				DELETE r, c
+			`
+			_, err := client.ExecuteQuery(context.Background(), clearQuery, nil)
+			if err != nil {
+				fmt.Printf("Warning: failed to clear existing comment embeddings: %v\n", err)
+			} else {
+				fmt.Printf("✅ Cleared existing comment embeddings\n")
+			}
+		}
+
+		// Create comment embedding index
+		fmt.Printf("📊 Creating comment embedding index...\n")
+		if err := commentService.CreateCommentEmbeddingIndex(context.Background(), dimensions); err != nil {
+			return fmt.Errorf("failed to create comment embedding index: %w", err)
+		}
+
+		// Extract and embed docstrings
+		fmt.Printf("🚀 Starting comment embedding extraction (batch size: %d, dry-run: %t)...\n", batchSize, dryRun)
+
+		if err := commentService.ExtractAndEmbedDocstrings(context.Background(), batchSize, dryRun); err != nil {
+			return fmt.Errorf("failed to extract and embed docstrings: %w", err)
+		}
+
+		fmt.Printf("\n🎉 Comment embedding extraction completed!\n")
+
+		// Test search functionality
+		if !dryRun {
+			fmt.Printf("\n🧪 Testing comment-based search...\n")
+			testQueries := []string{
+				"authentication",
+				"database connection",
+				"error handling",
+				"HTTP request",
+			}
+
+			for _, query := range testQueries {
+				fmt.Printf("   Testing query: '%s'\n", query)
+				results, err := commentService.SearchFunctionsByComment(context.Background(), query, 3)
+				if err != nil {
+					fmt.Printf("   ❌ Search failed: %v\n", err)
+					continue
+				}
+
+				if len(results.Results) == 0 {
+					fmt.Printf("   📭 No results found\n")
+				} else {
+					fmt.Printf("   📋 Found %d results:\n", len(results.Results))
+					for i, result := range results.Results {
+						parentName := getStringFromInterface(result.ParentNode, "name")
+						parentType := getStringFromInterface(result.CommentNode, "parentType")
+						fmt.Printf("     %d. %s %s (similarity: %.3f)\n", i+1, parentType, parentName, result.Score)
+					}
+				}
+				fmt.Printf("\n")
+			}
+		}
+
+		return nil
+	},
+}
+
 func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, embeddingService search.EmbeddingService, vectorSearch *search.VectorSearchManager, nodeType string, batchSize int, dryRun bool) (int, error) {
 	// Query nodes that don't have embeddings
 	query := fmt.Sprintf(`
@@ -1252,6 +1356,7 @@ func init() {
 	searchCmd.AddCommand(searchTestCmd)
 	searchCmd.AddCommand(searchInfoCmd)
 	searchCmd.AddCommand(searchEmbedCmd)
+	searchCmd.AddCommand(searchCommentCmd)
 
 	// Search flags
 	searchTestCmd.Flags().IntP("limit", "l", 10, "Limit search results")
@@ -1265,9 +1370,27 @@ func init() {
 	searchEmbedCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
 	searchEmbedCmd.Flags().Bool("openrouter", false, "Use OpenRouter API (requires --api-key)")
 	searchEmbedCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
+	searchCommentCmd.Flags().IntP("batch-size", "b", 50, "Batch size for processing comment embeddings")
+	searchCommentCmd.Flags().Bool("dry-run", false, "Show what would be processed without making changes")
+	searchCommentCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
+	searchCommentCmd.Flags().String("base-url", "", "Base URL for embedding API")
+	searchCommentCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
+	searchCommentCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
+	searchCommentCmd.Flags().Int("dimensions", 768, "Embedding dimensions to use")
+	searchCommentCmd.Flags().Bool("force", false, "Force recreate comment embeddings (remove existing ones first)")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")
+}
+
+// Helper function to extract string values from interface maps
+func getStringFromInterface(data map[string]interface{}, key string) string {
+	if val, ok := data[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 func main() {

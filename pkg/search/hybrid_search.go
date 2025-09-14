@@ -19,6 +19,7 @@ type HybridSearchManager struct {
 	fullTextSearch      *FullTextSearchManager
 	queryBuilder        *neo4j.QueryBuilder
 	embeddingService    EmbeddingService // Interface for generating embeddings
+	commentSearch       *CommentEmbeddingService // For comment-based function discovery
 }
 
 // NewHybridSearchManager creates a comprehensive hybrid search manager
@@ -29,6 +30,7 @@ func NewHybridSearchManager(client *neo4j.Client, embeddingService EmbeddingServ
 		fullTextSearch:   NewFullTextSearchManager(client),
 		queryBuilder:     neo4j.NewQueryBuilder(client),
 		embeddingService: embeddingService,
+		commentSearch:    NewCommentEmbeddingService(client, embeddingService),
 	}
 }
 
@@ -45,8 +47,9 @@ type HybridSearchResult struct {
 	VectorScore     float64                `json:"vectorScore"`
 	FullTextScore   float64                `json:"fullTextScore"`
 	SemanticScore   float64                `json:"semanticScore"`
+	CommentScore    float64                `json:"commentScore"`    // Score from comment-based search
 	CombinedScore   float64                `json:"combinedScore"`
-	Source          string                 `json:"source"` // "vector", "fulltext", "semantic", "hybrid"
+	Source          string                 `json:"source"` // "vector", "fulltext", "semantic", "hybrid", "comment"
 	Relevance       string                 `json:"relevance"` // "high", "medium", "low"
 }
 
@@ -65,6 +68,7 @@ type SearchMetadata struct {
 	VectorResults    int     `json:"vectorResults"`
 	FullTextResults  int     `json:"fullTextResults"`
 	SemanticResults  int     `json:"semanticResults"`
+	CommentResults   int     `json:"commentResults"`
 	SearchDuration   string  `json:"searchDuration"`
 	HybridWeight     Weights `json:"hybridWeight"`
 }
@@ -201,7 +205,29 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 		}
 	}
 
-	// 4. Merge and deduplicate results
+	// 4. Comment-Based Search (search function/methods through their docstrings)
+	var commentResults []CommentSearchResult
+	if hsm.commentSearch != nil {
+		commentResponse, err := hsm.commentSearch.SearchFunctionsByComment(ctx, query, limit)
+		if err != nil {
+			log.Printf("Warning: comment search failed: %v", err)
+		} else {
+			commentResults = commentResponse.Results
+			for _, result := range commentResults {
+				// Add the parent function/method/class (not the comment node itself)
+				allResults = append(allResults, HybridSearchResult{
+					Node:          result.ParentNode,
+					Labels:        []string{getStringFromMap(result.CommentNode, "parentType")},
+					CommentScore:  result.Score,
+					CombinedScore: result.Score * 0.8, // Weight for comment-based results
+					Source:        "comment",
+					Relevance:     hsm.calculateRelevance(result.Score, "comment"),
+				})
+			}
+		}
+	}
+
+	// 5. Merge and deduplicate results
 	mergedResults := hsm.mergeResults(allResults)
 
 	// 5. Sort by combined score
@@ -219,12 +245,13 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 		Results:     mergedResults,
 		Query:       query,
 		QueryVector: queryVector,
-		SearchTypes: []string{"vector", "fulltext", "semantic"},
+		SearchTypes: []string{"vector", "fulltext", "semantic", "comment"},
 		TotalResults: len(mergedResults),
 		Metadata: SearchMetadata{
 			VectorResults:   len(vectorResults),
 			FullTextResults: len(fullTextResults),
 			SemanticResults: len(semanticResults),
+			CommentResults:  len(commentResults),
 			HybridWeight:    searchWeights,
 		},
 	}
@@ -245,11 +272,13 @@ func (hsm *HybridSearchManager) mergeResults(results []HybridSearchResult) []Hyb
 			existing.VectorScore = math.Max(existing.VectorScore, result.VectorScore)
 			existing.FullTextScore = math.Max(existing.FullTextScore, result.FullTextScore)
 			existing.SemanticScore = math.Max(existing.SemanticScore, result.SemanticScore)
+			existing.CommentScore = math.Max(existing.CommentScore, result.CommentScore)
 
 			// Recalculate combined score
 			existing.CombinedScore = existing.VectorScore*DefaultWeights.Vector +
 				existing.FullTextScore*DefaultWeights.FullText +
-				existing.SemanticScore*DefaultWeights.Semantic
+				existing.SemanticScore*DefaultWeights.Semantic +
+				existing.CommentScore*0.8 // Weight for comment-based results
 
 			// Update source to indicate hybrid
 			existing.Source = "hybrid"
@@ -484,4 +513,14 @@ func (hsm *HybridSearchManager) GetSearchCapabilities(ctx context.Context) (map[
 	}
 
 	return capabilities, nil
+}
+
+// Helper function to safely extract string values from maps
+func getStringFromMap(data map[string]interface{}, key string) string {
+	if val, ok := data[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
