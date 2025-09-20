@@ -9,22 +9,26 @@ import (
 	"go/token"
 	"io/fs"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/search"
 )
 
 // StaticIndexer indexes Go source code into the graph database
 type StaticIndexer struct {
-	client      *neo4j.Client
-	serviceName string
-	version     string
-	repoURL     string
-	packageMap  map[string]*models.Module // Cache for package/module nodes
-	symbolMap   map[string]string         // Cache for symbol -> node ID mapping
+	client           *neo4j.Client
+	serviceName      string
+	version          string
+	repoURL          string
+	packageMap       map[string]*models.Module // Cache for package/module nodes
+	symbolMap        map[string]string         // Cache for symbol -> node ID mapping
+	embeddingService search.EmbeddingService   // Optional embedding service
+	vectorSearch     *search.VectorSearchManager
 }
 
 // NewStaticIndexer creates a new static indexer
@@ -36,6 +40,43 @@ func NewStaticIndexer(client *neo4j.Client, serviceName, version, repoURL string
 		repoURL:     repoURL,
 		packageMap:  make(map[string]*models.Module),
 		symbolMap:   make(map[string]string),
+		// Embedding service will be set later if needed
+		embeddingService: nil,
+		vectorSearch:     nil,
+	}
+}
+
+// SetEmbeddingService sets the embedding service for automatic embedding generation
+func (si *StaticIndexer) SetEmbeddingService(embeddingService search.EmbeddingService) {
+	si.embeddingService = embeddingService
+	if embeddingService != nil {
+		si.vectorSearch = search.NewVectorSearchManager(si.client)
+	}
+}
+
+// generateEmbeddingForNode generates and updates embedding for a newly created node
+func (si *StaticIndexer) generateEmbeddingForNode(ctx context.Context, nodeID string, nodeType string, textParts ...string) {
+	if si.embeddingService == nil || si.vectorSearch == nil {
+		return // Skip if no embedding service configured
+	}
+
+	// Build text for embedding
+	text := strings.Join(textParts, " | ")
+	if text == "" {
+		text = fmt.Sprintf("%s node", nodeType)
+	}
+
+	// Generate embedding
+	embedding, err := si.embeddingService.GenerateEmbedding(ctx, text)
+	if err != nil {
+		log.Printf("Warning: failed to generate embedding for %s node %s: %v", nodeType, nodeID, err)
+		return
+	}
+
+	// Update node with embedding
+	err = si.vectorSearch.UpdateNodeEmbedding(ctx, nodeID, embedding)
+	if err != nil {
+		log.Printf("Warning: failed to update embedding for %s node %s: %v", nodeType, nodeID, err)
 	}
 }
 
@@ -78,6 +119,86 @@ func (si *StaticIndexer) IndexProject(ctx context.Context, rootPath string) erro
 	}
 
 	log.Printf("Successfully indexed project %s", si.serviceName)
+	return nil
+}
+
+// IndexProjectIncremental performs incremental indexing by only updating changed files
+func (si *StaticIndexer) IndexProjectIncremental(ctx context.Context, rootPath string) error {
+	log.Printf("Starting incremental indexing of project at %s", rootPath)
+
+	// Create or update the service node
+	serviceID, err := si.createServiceNode(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create service node: %w", err)
+	}
+	log.Printf("Updated service node with ID: %s", serviceID)
+
+	// Get existing file hashes from the database
+	existingFiles, err := si.getExistingFileHashes(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get existing file hashes: %w", err)
+	}
+	log.Printf("Found %d existing files in database", len(existingFiles))
+
+	// Track current files to detect deletions
+	currentFiles := make(map[string]bool)
+
+	// Walk the directory tree and index changed files
+	err = filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip vendor, .git, and other directories
+		if d.IsDir() && shouldSkipDir(d.Name()) {
+			return filepath.SkipDir
+		}
+
+		// Only process .go files
+		if !d.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			currentFiles[path] = true
+
+			// Calculate current file hash
+			currentHash, err := si.calculateFileHash(path)
+			if err != nil {
+				log.Printf("Warning: failed to calculate hash for %s: %v", path, err)
+				return nil
+			}
+
+			// Check if file has changed
+			existingHash, exists := existingFiles[path]
+			if !exists || existingHash != currentHash {
+				log.Printf("Indexing changed file: %s (new: %t)", path, !exists)
+				if err := si.indexFileIncremental(ctx, path, serviceID, currentHash); err != nil {
+					log.Printf("Warning: failed to index file %s: %v", path, err)
+				}
+			} else {
+				log.Printf("Skipping unchanged file: %s", path)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	// Clean up deleted files
+	deletedCount := 0
+	for filePath := range existingFiles {
+		if !currentFiles[filePath] {
+			log.Printf("Removing deleted file: %s", filePath)
+			if err := si.removeFileNodes(ctx, filePath); err != nil {
+				log.Printf("Warning: failed to remove file %s: %v", filePath, err)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	log.Printf("Successfully completed incremental indexing for %s (removed %d deleted files)",
+		si.serviceName, deletedCount)
 	return nil
 }
 
@@ -270,12 +391,20 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 		labels = []string{"Function"}
 	}
 
-	funcID, err := v.indexer.client.MergeNode(v.ctx, labels, 
+	funcID, err := v.indexer.client.MergeNode(v.ctx, labels,
 		map[string]any{"signature": signature, "filePath": v.filePath}, funcProps)
 	if err != nil {
 		log.Printf("Failed to create function node %s: %v", fn.Name.Name, err)
 		return
 	}
+
+	// Generate embedding for the function
+	nodeType := "Function"
+	if isMethod {
+		nodeType = "Method"
+	}
+	v.indexer.generateEmbeddingForNode(v.ctx, funcID, nodeType,
+		fn.Name.Name, signature, v.extractDocstring(fn.Doc))
 
 	// Link to parent (module or class)
 	if parentID != "" {
@@ -341,12 +470,15 @@ func (v *astVisitor) indexStruct(name string, structType *ast.StructType, startP
 		"updatedAt":      time.Now().UTC().Unix(),
 	}
 
-	classID, err := v.indexer.client.MergeNode(v.ctx, []string{"Class"}, 
+	classID, err := v.indexer.client.MergeNode(v.ctx, []string{"Class"},
 		map[string]any{"fqn": fqn}, classProps)
 	if err != nil {
 		log.Printf("Failed to create struct node %s: %v", name, err)
 		return
 	}
+
+	// Generate embedding for the class
+	v.indexer.generateEmbeddingForNode(v.ctx, classID, "Class", name, fqn)
 
 	// Link to module
 	_, err = v.indexer.client.CreateRelationship(v.ctx, v.moduleID, classID, "CONTAINS", nil)
@@ -691,9 +823,131 @@ func (si *StaticIndexer) getPackageFQN(filePath, packageName string) string {
 }
 
 func (si *StaticIndexer) calculateFileHash(filePath string) (string, error) {
-	// For now, just hash the file path - in production, should hash file contents
-	hash := sha256.Sum256([]byte(filePath))
+	// Read file contents and calculate hash
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+
+	hash := sha256.Sum256(content)
 	return fmt.Sprintf("%x", hash), nil
+}
+
+// getExistingFileHashes retrieves existing file paths and their hashes from the database
+func (si *StaticIndexer) getExistingFileHashes(ctx context.Context) (map[string]string, error) {
+	query := `
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
+		RETURN f.path as path, f.hash as hash
+	`
+
+	params := map[string]any{"serviceName": si.serviceName}
+	results, err := si.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query existing files: %w", err)
+	}
+
+	fileHashes := make(map[string]string)
+	for _, record := range results {
+		recordMap := record.AsMap()
+		path, ok := recordMap["path"].(string)
+		if !ok {
+			continue
+		}
+		hash, ok := recordMap["hash"].(string)
+		if !ok {
+			continue
+		}
+		fileHashes[path] = hash
+	}
+
+	return fileHashes, nil
+}
+
+// indexFileIncremental indexes a single file with incremental logic
+func (si *StaticIndexer) indexFileIncremental(ctx context.Context, filePath, serviceID, fileHash string) error {
+	// First, remove existing nodes for this file to avoid duplicates
+	if err := si.removeFileNodes(ctx, filePath); err != nil {
+		log.Printf("Warning: failed to remove existing nodes for %s: %v", filePath, err)
+	}
+
+	// Now index the file normally with the new hash
+	return si.indexFileWithHash(ctx, filePath, serviceID, fileHash)
+}
+
+// indexFileWithHash is like indexFile but accepts a pre-calculated hash
+func (si *StaticIndexer) indexFileWithHash(ctx context.Context, filePath, serviceID, fileHash string) error {
+	// Parse the file
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
+	if err != nil {
+		return fmt.Errorf("failed to parse file %s: %w", filePath, err)
+	}
+
+	// Create file node with the provided hash
+	fileProps := map[string]any{
+		"path":         filePath,
+		"absolutePath": filePath,
+		"language":     "Go",
+		"hash":         fileHash,
+		"lineCount":    fset.Position(node.End()).Line,
+		"createdAt":    time.Now().UTC().Unix(),
+		"updatedAt":    time.Now().UTC().Unix(),
+	}
+
+	fileID, err := si.client.MergeNode(ctx, []string{"File"},
+		map[string]any{"path": filePath}, fileProps)
+	if err != nil {
+		return fmt.Errorf("failed to create file node: %w", err)
+	}
+
+	// Link file to service
+	_, err = si.client.CreateRelationship(ctx, serviceID, fileID, "CONTAINS", nil)
+	if err != nil {
+		return fmt.Errorf("failed to link file to service: %w", err)
+	}
+
+	// Index the package/module
+	packageName := node.Name.Name
+	packageFQN := si.getPackageFQN(filePath, packageName)
+
+	moduleID, err := si.getOrCreateModule(ctx, packageName, packageFQN, fileID)
+	if err != nil {
+		return fmt.Errorf("failed to create module node: %w", err)
+	}
+
+	// Create a visitor to traverse the AST
+	visitor := &astVisitor{
+		indexer:   si,
+		ctx:       ctx,
+		fileID:    fileID,
+		moduleID:  moduleID,
+		filePath:  filePath,
+		fset:      fset,
+		packageName: packageName,
+	}
+
+	// Visit all nodes in the AST
+	ast.Walk(visitor, node)
+
+	return nil
+}
+
+// removeFileNodes removes all nodes associated with a file
+func (si *StaticIndexer) removeFileNodes(ctx context.Context, filePath string) error {
+	query := `
+		MATCH (f:File {path: $filePath})
+		OPTIONAL MATCH (f)-[:CONTAINS|DEFINES|DECLARES|CALLS|BELONGS_TO*]-(related)
+		DETACH DELETE f, related
+	`
+
+	params := map[string]any{"filePath": filePath}
+	_, err := si.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return fmt.Errorf("failed to remove file nodes for %s: %w", filePath, err)
+	}
+
+	log.Printf("Removed nodes for file: %s", filePath)
+	return nil
 }
 
 func shouldSkipDir(dirName string) bool {

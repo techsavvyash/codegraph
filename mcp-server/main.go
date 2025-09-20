@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
@@ -57,8 +58,11 @@ type ToolContent struct {
 
 // CodeGraph MCP Server
 type CodeGraphMCPServer struct {
-	client       *neo4j.Client
-	queryBuilder *neo4j.QueryBuilder
+	client         *neo4j.Client
+	queryBuilder   *neo4j.QueryBuilder
+	hybridSearch   *search.HybridSearchManager
+	vectorSearch   *search.VectorSearchManager
+	embeddingService search.EmbeddingService
 }
 
 func main() {
@@ -76,9 +80,26 @@ func main() {
 	}
 	defer client.Close(context.Background())
 
+	// Initialize embedding service
+	var embeddingService search.EmbeddingService
+	if apiKey := os.Getenv("GOOGLE_API_KEY"); apiKey != "" {
+		embeddingService = search.NewGeminiEmbeddingService(apiKey, "gemini-embedding-001")
+		log.Printf("Using Gemini embedding service")
+	} else {
+		embeddingService = search.NewMockEmbeddingService()
+		log.Printf("Warning: GOOGLE_API_KEY not set, using mock embedding service")
+	}
+
+	// Initialize search managers
+	vectorSearch := search.NewVectorSearchManager(client)
+	hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+
 	server := &CodeGraphMCPServer{
-		client:       client,
-		queryBuilder: neo4j.NewQueryBuilder(client),
+		client:           client,
+		queryBuilder:     neo4j.NewQueryBuilder(client),
+		hybridSearch:     hybridSearch,
+		vectorSearch:     vectorSearch,
+		embeddingService: embeddingService,
 	}
 
 	// Start MCP server
@@ -206,6 +227,44 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"required": []string{"function_name"},
 			},
 		},
+		{
+			Name:        "codegraph_hybrid_search",
+			Description: "Perform hybrid semantic search combining vector similarity, full-text search, and graph queries",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query": map[string]interface{}{
+						"type":        "string",
+						"description": "Search query for semantic understanding",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of results to return (default: 10)",
+						"default":     10,
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
+			Name:        "codegraph_vector_search",
+			Description: "Perform pure vector similarity search using embeddings",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query": map[string]interface{}{
+						"type":        "string",
+						"description": "Query text to convert to vector and search",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of results to return (default: 10)",
+						"default":     10,
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -235,6 +294,10 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleFindReferencesTool(ctx, toolCall.Arguments)
 	case "codegraph_analyze_function":
 		response = s.handleAnalyzeFunctionTool(ctx, toolCall.Arguments)
+	case "codegraph_hybrid_search":
+		response = s.handleHybridSearchTool(ctx, toolCall.Arguments)
+	case "codegraph_vector_search":
+		response = s.handleVectorSearchTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -522,6 +585,181 @@ func (s *CodeGraphMCPServer) handleAnalyzeFunctionTool(ctx context.Context, args
 	}
 }
 
+func (s *CodeGraphMCPServer) handleHybridSearchTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	query, ok := args["query"].(string)
+	if !ok {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: query parameter is required"}},
+			IsError: true,
+		}
+	}
+
+	limit := 10
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+	}
+
+	results, err := s.hybridSearch.SmartSearch(ctx, query, limit)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Hybrid search error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	if len(results.Results) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No results found for query: %s", query)}},
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Hybrid Search Results for '%s'\n\n", query))
+	output.WriteString(fmt.Sprintf("**Found %d result(s) using %s**\n\n", results.TotalResults, strings.Join(results.SearchTypes, ", ")))
+
+	for i, result := range results.Results {
+		if i >= 20 { // Limit output
+			output.WriteString(fmt.Sprintf("... and %d more results\n", len(results.Results)-i))
+			break
+		}
+
+		output.WriteString(fmt.Sprintf("### Result %d (Score: %.3f)\n", i+1, result.CombinedScore))
+
+		// Handle different result types
+		if result.Node != nil {
+			name := getStringFromInterface(result.Node, "name")
+			nodeType := getStringFromInterface(result.Node, "nodeType")
+			if nodeType == "" {
+				nodeType = "Unknown"
+			}
+
+			output.WriteString(fmt.Sprintf("**%s** (%s)\n", name, nodeType))
+
+			if filePath := getStringFromInterface(result.Node, "filePath"); filePath != "" {
+				output.WriteString(fmt.Sprintf("- **File**: %s\n", filePath))
+			}
+			if signature := getStringFromInterface(result.Node, "signature"); signature != "" {
+				output.WriteString(fmt.Sprintf("- **Signature**: %s\n", signature))
+			}
+			if startLine := getIntFromInterface(result.Node, "startLine"); startLine > 0 {
+				endLine := getIntFromInterface(result.Node, "endLine")
+				if endLine > startLine {
+					output.WriteString(fmt.Sprintf("- **Lines**: %d-%d\n", startLine, endLine))
+				} else {
+					output.WriteString(fmt.Sprintf("- **Line**: %d\n", startLine))
+				}
+			}
+			if docstring := getStringFromInterface(result.Node, "docstring"); docstring != "" {
+				output.WriteString(fmt.Sprintf("- **Description**: %s\n", docstring))
+			}
+		}
+
+		if result.Source != "" {
+			output.WriteString(fmt.Sprintf("- **Match Source**: %s\n", result.Source))
+		}
+		if result.Relevance != "" {
+			output.WriteString(fmt.Sprintf("- **Relevance**: %s\n", result.Relevance))
+		}
+
+		output.WriteString("\n")
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+func (s *CodeGraphMCPServer) handleVectorSearchTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	query, ok := args["query"].(string)
+	if !ok {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: query parameter is required"}},
+			IsError: true,
+		}
+	}
+
+	limit := 10
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+	}
+
+	// Generate embedding for the query
+	embedding, err := s.embeddingService.GenerateEmbedding(ctx, query)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error generating embedding: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	// Perform vector search
+	results, err := s.vectorSearch.HybridVectorSearch(ctx, embedding, limit)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Vector search error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	if len(results.Results) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No vector results found for query: %s", query)}},
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Vector Search Results for '%s'\n\n", query))
+	output.WriteString(fmt.Sprintf("**Found %d result(s) using %s index**\n", results.Count, results.IndexUsed))
+	output.WriteString(fmt.Sprintf("**Embedding Dimensions**: %d\n\n", len(results.QueryVector)))
+
+	for i, result := range results.Results {
+		if i >= 20 { // Limit output
+			output.WriteString(fmt.Sprintf("... and %d more results\n", len(results.Results)-i))
+			break
+		}
+
+		output.WriteString(fmt.Sprintf("### Result %d (Similarity: %.4f)\n", i+1, result.Score))
+
+		name := getStringFromInterface(result.Node, "name")
+		filePath := getStringFromInterface(result.Node, "filePath")
+		signature := getStringFromInterface(result.Node, "signature")
+		nodeType := "Unknown"
+
+		// Try to determine node type from properties
+		if labels, ok := result.Node["labels"].([]interface{}); ok && len(labels) > 0 {
+			if label, ok := labels[0].(string); ok {
+				nodeType = label
+			}
+		}
+
+		output.WriteString(fmt.Sprintf("**%s** (%s)\n", name, nodeType))
+
+		if filePath != "" {
+			output.WriteString(fmt.Sprintf("- **File**: %s\n", filePath))
+		}
+		if signature != "" {
+			output.WriteString(fmt.Sprintf("- **Signature**: %s\n", signature))
+		}
+		if startLine := getIntFromInterface(result.Node, "startLine"); startLine > 0 {
+			endLine := getIntFromInterface(result.Node, "endLine")
+			if endLine > startLine {
+				output.WriteString(fmt.Sprintf("- **Lines**: %d-%d\n", startLine, endLine))
+			} else {
+				output.WriteString(fmt.Sprintf("- **Line**: %d\n", startLine))
+			}
+		}
+		if docstring := getStringFromInterface(result.Node, "docstring"); docstring != "" {
+			output.WriteString(fmt.Sprintf("- **Description**: %s\n", docstring))
+		}
+
+		output.WriteString("\n")
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
 func (s *CodeGraphMCPServer) sendResponse(id interface{}, result interface{}) {
 	response := MCPResponse{
 		JSONRPC: "2.0",
@@ -617,4 +855,27 @@ func getBoolFromRecord(record map[string]interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func getStringFromInterface(data map[string]interface{}, key string) string {
+	if val, ok := data[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getIntFromInterface(data map[string]interface{}, key string) int {
+	if val, ok := data[key]; ok {
+		switch v := val.(type) {
+		case int64:
+			return int(v)
+		case int:
+			return v
+		case float64:
+			return int(v)
+		}
+	}
+	return 0
 }
