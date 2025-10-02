@@ -71,6 +71,7 @@ func init() {
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 	rootCmd.AddCommand(serverCmd)
 }
@@ -285,8 +286,7 @@ var indexProjectCmd = &cobra.Command{
 				embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
 				fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
 			} else {
-				embeddingService = search.NewMockEmbeddingService()
-				fmt.Printf("🧪 Using mock embedding service for testing\n")
+				return fmt.Errorf("embedding generation requires either --embedding-gemini with GEMINI_API_KEY or --embedding-api-key with --embedding-base-url")
 			}
 			//  else if useOpenRouter && apiKey != "" {
 			// 	embeddingService = search.NewOpenRouterEmbeddingService(apiKey, model)
@@ -819,16 +819,14 @@ var searchInitCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		// Create embedding service (using mock for now)
-		embeddingService := search.NewMockEmbeddingService()
-
-		// Create hybrid search manager
-		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+		// For initialization, we don't need real embeddings, just need to create schema
+		// Vector search manager for creating indexes
+		vectorSearch := search.NewVectorSearchManager(client)
 
 		fmt.Println("🚀 Initializing advanced search indexes...")
 		ctx := context.Background()
 
-		if err := hybridSearch.InitializeSearchIndexes(ctx); err != nil {
+		if err := vectorSearch.CreateVectorIndexes(ctx); err != nil {
 			return fmt.Errorf("failed to initialize search indexes: %w", err)
 		}
 
@@ -862,8 +860,7 @@ var searchTestCmd = &cobra.Command{
 			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
 			fmt.Printf("🔗 Using Google Gemini embedding service (model: %s) for search\n", model)
 		} else {
-			embeddingService = search.NewMockEmbeddingService()
-			fmt.Printf("🧪 Using mock embedding service for search testing\n")
+			return fmt.Errorf("search testing requires --gemini flag with valid API key")
 		}
 
 		// Create hybrid search manager
@@ -949,8 +946,8 @@ var searchInfoCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		embeddingService := search.NewMockEmbeddingService()
-		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+		// For info command, we don't need embedding service, just to check capabilities
+		hybridSearch := search.NewHybridSearchManager(client, nil)
 
 		fmt.Println("🔍 CodeGraph Search Capabilities")
 		fmt.Println("=================================")
@@ -1049,8 +1046,7 @@ var searchEmbedCmd = &cobra.Command{
 			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
 			fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
 		} else {
-			embeddingService = search.NewMockEmbeddingService()
-			fmt.Printf("🧪 Using mock embedding service for testing\n")
+			return fmt.Errorf("embedding generation requires either --gemini with GEMINI_API_KEY or --api-key with --base-url")
 		}
 		// else if useOpenRouter && apiKey != "" {
 		// 	embeddingService = search.NewOpenRouterEmbeddingService(apiKey, model)
@@ -1116,8 +1112,7 @@ var searchCommentCmd = &cobra.Command{
 			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
 			fmt.Printf("🔗 Using real embedding service: %s (model: %s)\n", baseURL, model)
 		} else {
-			embeddingService = search.NewMockEmbeddingService()
-			fmt.Printf("🧪 Using mock embedding service for testing\n")
+			return fmt.Errorf("comment embedding generation requires either --gemini with GEMINI_API_KEY or --api-key with --base-url")
 		}
 
 		// Create comment embedding service
@@ -1184,6 +1179,152 @@ var searchCommentCmd = &cobra.Command{
 				}
 				fmt.Printf("\n")
 			}
+		}
+
+		return nil
+	},
+}
+
+// linkCmd handles linking features to code implementations
+var linkCmd = &cobra.Command{
+	Use:   "link",
+	Short: "Link features to code implementations",
+	Long:  "Create semantic links between features and code implementations using LLM analysis",
+}
+
+var linkFeaturesCmd = &cobra.Command{
+	Use:   "features",
+	Short: "Link all features to their code implementations",
+	Long: `Link all features in the database to their code implementations using RFC-002 semantic analysis.
+
+This command implements the full RFC-002 specification:
+1. Generate embeddings for feature descriptions
+2. Find candidate code entry points using vector search
+3. Extract and summarize code subgraphs using LLM
+4. Validate feature-code matches using LLM analysis
+5. Create IMPLEMENTS relationships for validated matches
+
+The process uses advanced semantic understanding to connect high-level business requirements
+to the specific code functions that implement them.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Printf("🚀 Starting RFC-002 Feature Linking Process...\n\n")
+
+		// Create Neo4j client
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to connect to Neo4j: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		// Get embedding service configuration
+		gemini, _ := cmd.Flags().GetBool("gemini")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		model, _ := cmd.Flags().GetString("model")
+		minConfidence, _ := cmd.Flags().GetFloat64("min-confidence")
+		maxCandidates, _ := cmd.Flags().GetInt("max-candidates")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		// Determine embedding service
+		var embeddingService search.EmbeddingService
+		var llmService search.LLMService
+
+		if gemini {
+			if apiKey == "" {
+				apiKey = os.Getenv("GEMINI_API_KEY")
+			}
+			if apiKey == "" {
+				return fmt.Errorf("Gemini embedding service requires GEMINI_API_KEY environment variable or --api-key flag")
+			}
+			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
+			llmService = search.NewGeminiLLMService(apiKey)
+			fmt.Printf("🧠 Using Gemini embedding service (model: %s)\n", model)
+			fmt.Printf("🤖 Using Gemini LLM service for text generation and validation\n")
+		} else if apiKey != "" && baseURL != "" {
+			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
+			fmt.Printf("🔗 Using embedding service: %s (model: %s)\n", baseURL, model)
+			fmt.Printf("⚠️  LLM text generation not available - will use heuristic validation\n")
+		} else {
+			return fmt.Errorf("feature linking requires either --gemini with GEMINI_API_KEY or --api-key with --base-url")
+		}
+
+		// Create feature linker
+		featureLinker := search.NewFeatureLinker(client, embeddingService)
+
+		// Enable LLM service if available
+		if llmService != nil {
+			featureLinker = featureLinker.WithLLMService(llmService)
+		}
+
+		// Configure confidence threshold
+		if minConfidence > 0 {
+			fmt.Printf("📊 Using minimum confidence threshold: %.2f\n", minConfidence)
+		}
+
+		fmt.Printf("🎯 Maximum candidates per feature: %d\n", maxCandidates)
+
+		if dryRun {
+			fmt.Printf("🧪 DRY RUN MODE - No relationships will be created\n")
+		}
+
+		fmt.Printf("\n")
+
+		// Link all features
+		results, err := featureLinker.LinkAllFeatures(context.Background())
+		if err != nil {
+			return fmt.Errorf("feature linking failed: %w", err)
+		}
+
+		// Display results
+		fmt.Printf("\n📊 FEATURE LINKING RESULTS\n")
+		fmt.Printf("=" + strings.Repeat("=", 50) + "\n\n")
+
+		totalFeatures := len(results)
+		totalLinks := 0
+		totalCandidates := 0
+
+		for _, result := range results {
+			totalCandidates += result.CandidatesFound
+			totalLinks += len(result.ImplementsLinks)
+
+			fmt.Printf("🎯 FEATURE: %s\n", result.FeatureName)
+			if result.FeatureDescription != "" {
+				fmt.Printf("   Description: %s\n", result.FeatureDescription)
+			}
+			fmt.Printf("   Candidates Found: %d\n", result.CandidatesFound)
+			fmt.Printf("   Candidates Validated: %d\n", result.CandidatesValidated)
+			fmt.Printf("   IMPLEMENTS Links Created: %d\n", len(result.ImplementsLinks))
+
+			if len(result.ImplementsLinks) > 0 {
+				fmt.Printf("   📝 IMPLEMENTATIONS:\n")
+				for i, link := range result.ImplementsLinks {
+					fmt.Printf("      %d. %s (confidence: %.3f)\n", i+1, link.FunctionName, link.Confidence)
+					if link.CodeSummary != "" {
+						fmt.Printf("         Summary: %s\n", link.CodeSummary)
+					}
+					fmt.Printf("         Subgraph Size: %d functions\n", link.SubgraphSize)
+					fmt.Printf("         Validation: %s\n", link.ValidationMethod)
+				}
+			}
+			fmt.Printf("\n")
+		}
+
+		// Summary statistics
+		fmt.Printf("🎉 SUMMARY\n")
+		fmt.Printf("=" + strings.Repeat("=", 30) + "\n")
+		fmt.Printf("Features Processed: %d\n", totalFeatures)
+		fmt.Printf("Total Candidates Evaluated: %d\n", totalCandidates)
+		fmt.Printf("Total IMPLEMENTS Links Created: %d\n", totalLinks)
+
+		if totalFeatures > 0 {
+			fmt.Printf("Average Links per Feature: %.2f\n", float64(totalLinks)/float64(totalFeatures))
+		}
+
+		if !dryRun {
+			fmt.Printf("\n✅ Feature linking completed successfully!\n")
+			fmt.Printf("💡 Use 'codegraph query feature-implementations <featureId>' to explore specific implementations\n")
+		} else {
+			fmt.Printf("\n🧪 Dry run completed - no changes made to database\n")
 		}
 
 		return nil
@@ -1378,6 +1519,17 @@ func init() {
 	searchCommentCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
 	searchCommentCmd.Flags().Int("dimensions", 768, "Embedding dimensions to use")
 	searchCommentCmd.Flags().Bool("force", false, "Force recreate comment embeddings (remove existing ones first)")
+
+	// Link subcommands
+	linkCmd.AddCommand(linkFeaturesCmd)
+
+	// Link flags
+	linkFeaturesCmd.Flags().Float64("min-confidence", 0.6, "Minimum confidence threshold for creating IMPLEMENTS relationships")
+	linkFeaturesCmd.Flags().Int("max-candidates", 10, "Maximum number of candidate functions to analyze per feature")
+	linkFeaturesCmd.Flags().Bool("dry-run", false, "Show what would be linked without creating relationships")
+	linkFeaturesCmd.Flags().String("api-key", "", "API key for embedding service (Gemini or OpenRouter)")
+	linkFeaturesCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
+	linkFeaturesCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")

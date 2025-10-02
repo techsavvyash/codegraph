@@ -225,47 +225,6 @@ func (es *SimpleEmbeddingService) callEmbeddingAPI(ctx context.Context, texts []
 	return &embeddingResponse, nil
 }
 
-// MockEmbeddingService provides mock embeddings for testing
-type MockEmbeddingService struct{}
-
-// NewMockEmbeddingService creates a new mock embedding service
-func NewMockEmbeddingService() *MockEmbeddingService {
-	return &MockEmbeddingService{}
-}
-
-// GenerateEmbedding generates a mock embedding
-func (mes *MockEmbeddingService) GenerateEmbedding(ctx context.Context, text string) ([]float64, error) {
-	// Create a simple mock embedding based on text length and content
-	embedding := make([]float64, 384)
-
-	// Simple algorithm to create consistent but varied embeddings
-	hash := int64(5381)
-	for _, c := range text {
-		hash = ((hash << 5) + hash) + int64(c)
-	}
-
-	for i := range embedding {
-		value := float64((hash+int64(i))%2000)/1000.0 - 1.0 // Range: -1.0 to 1.0
-		embedding[i] = value
-	}
-
-	return embedding, nil
-}
-
-// GenerateBatchEmbeddings generates mock embeddings for multiple texts
-func (mes *MockEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float64, error) {
-	var embeddings [][]float64
-
-	for _, text := range texts {
-		embedding, err := mes.GenerateEmbedding(ctx, text)
-		if err != nil {
-			return nil, err
-		}
-		embeddings = append(embeddings, embedding)
-	}
-
-	return embeddings, nil
-}
 
 // GeminiEmbeddingService provides embeddings using Google's Gemini API
 type GeminiEmbeddingService struct {

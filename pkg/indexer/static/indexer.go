@@ -29,6 +29,8 @@ type StaticIndexer struct {
 	symbolMap        map[string]string         // Cache for symbol -> node ID mapping
 	embeddingService search.EmbeddingService   // Optional embedding service
 	vectorSearch     *search.VectorSearchManager
+	callGraphExtractor *CallGraphExtractor     // Call graph analysis
+	fset             *token.FileSet            // File set for position tracking
 }
 
 // NewStaticIndexer creates a new static indexer
@@ -43,6 +45,7 @@ func NewStaticIndexer(client *neo4j.Client, serviceName, version, repoURL string
 		// Embedding service will be set later if needed
 		embeddingService: nil,
 		vectorSearch:     nil,
+		callGraphExtractor: NewCallGraphExtractor(client),
 	}
 }
 
@@ -221,6 +224,7 @@ func (si *StaticIndexer) createServiceNode(ctx context.Context) (string, error) 
 func (si *StaticIndexer) indexFile(ctx context.Context, filePath string, serviceID string) error {
 	// Parse the file
 	fset := token.NewFileSet()
+	si.fset = fset // Store fset for call graph extraction
 	node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
 	if err != nil {
 		return fmt.Errorf("failed to parse file %s: %w", filePath, err)
@@ -426,7 +430,10 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 		}
 	}
 
-	// TODO: Index function calls and references within the function body
+	// Extract call graph relationships from function body
+	if err := v.indexer.extractCallGraph(v.ctx, fn, funcID); err != nil {
+		log.Printf("Warning: failed to extract call graph for function %s: %v", fn.Name.Name, err)
+	}
 }
 
 // indexType indexes type declarations (structs, aliases, etc.)
@@ -878,6 +885,7 @@ func (si *StaticIndexer) indexFileIncremental(ctx context.Context, filePath, ser
 func (si *StaticIndexer) indexFileWithHash(ctx context.Context, filePath, serviceID, fileHash string) error {
 	// Parse the file
 	fset := token.NewFileSet()
+	si.fset = fset // Store fset for call graph extraction
 	node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
 	if err != nil {
 		return fmt.Errorf("failed to parse file %s: %w", filePath, err)
@@ -969,4 +977,27 @@ func shouldSkipDir(dirName string) bool {
 func (v *astVisitor) indexInterface(interfaceType *ast.InterfaceType) {
 	// This method is called when visiting InterfaceType nodes directly
 	// The actual interface indexing is handled in indexInterfaceType
+}
+
+// extractCallGraph analyzes a function for call graph relationships
+func (si *StaticIndexer) extractCallGraph(ctx context.Context, funcDecl *ast.FuncDecl, funcID string) error {
+	if si.callGraphExtractor == nil {
+		return nil // Skip if no call graph extractor
+	}
+
+	// Extract calls from the function using current visitor context
+	// We need to pass the current package and file context
+	packageName := si.serviceName // Use service name as package for now
+	filePath := "" // File path would need to be tracked in visitor
+
+	return si.callGraphExtractor.ExtractCallsFromFunction(ctx, funcDecl, funcID,
+		si.fset, packageName, filePath)
+}
+
+// Helper field to track current fset (needed for call graph extraction)
+var currentFset *token.FileSet
+
+// Helper method to set fset for call graph extraction
+func (si *StaticIndexer) setFileSet(fset *token.FileSet) {
+	si.fset = fset
 }

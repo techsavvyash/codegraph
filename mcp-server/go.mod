@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/context-maximiser/code-graph v0.0.0
+	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 )
 
