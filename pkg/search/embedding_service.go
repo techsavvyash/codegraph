@@ -283,8 +283,15 @@ func (ges *GeminiEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, 
 
 	// Process texts in batches (Gemini supports batch processing)
 	for _, text := range texts {
+		// Validate text has minimum content (Gemini requires non-empty, meaningful text)
+		trimmedText := strings.TrimSpace(text)
+		if len(trimmedText) < 3 {
+			// For very short text, pad with generic context
+			trimmedText = trimmedText + " code element"
+		}
+
 		// Create content from text
-		contents := genai.Text(text)
+		contents := genai.Text(trimmedText)
 
 		// Generate embedding with semantic similarity task type and 768 dimensions
 		embedConfig := &genai.EmbedContentConfig{
