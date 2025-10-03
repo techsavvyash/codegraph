@@ -2,6 +2,7 @@ package static
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,38 +13,56 @@ import (
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 )
 
-// SCIPIndexer indexes Go projects using the SCIP protocol
+// SCIPIndexer indexes projects using the SCIP protocol
 type SCIPIndexer struct {
-	client      *neo4j.Client
-	serviceName string
-	version     string
-	repoURL     string
-	scipBinary  string
+	client       *neo4j.Client
+	serviceName  string
+	version      string
+	repoURL      string
+	language     Language
+	langConfig   *LanguageConfig
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
 func NewSCIPIndexer(client *neo4j.Client, serviceName, version, repoURL string) *SCIPIndexer {
+	// Default to Go for backward compatibility
+	return NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, LanguageGo)
+}
+
+// NewSCIPIndexerWithLanguage creates a new SCIP-based indexer for a specific language
+func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repoURL string, lang Language) *SCIPIndexer {
+	langConfig, err := GetLanguageConfig(lang)
+	if err != nil {
+		// Fallback to Go if language not found
+		langConfig, _ = GetLanguageConfig(LanguageGo)
+		lang = LanguageGo
+	}
+
 	return &SCIPIndexer{
 		client:      client,
 		serviceName: serviceName,
 		version:     version,
 		repoURL:     repoURL,
-		scipBinary:  "scip-go", // Assume scip-go is in PATH
+		language:    lang,
+		langConfig:  langConfig,
 	}
 }
 
-// IndexProject indexes a Go project using SCIP
+// IndexProject indexes a project using SCIP
 func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) error {
-	fmt.Printf("Starting SCIP indexing for project at %s\n", projectPath)
+	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
 
 	// Step 1: Generate SCIP index file
 	scipFile, err := si.generateSCIPIndex(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to generate SCIP index: %w", err)
 	}
-	defer os.Remove(scipFile) // Clean up temporary file
+	// Only clean up for languages that auto-generate (not Java/Scala/Kotlin)
+	if si.language != LanguageJava && si.language != LanguageScala && si.language != LanguageKotlin {
+		defer os.Remove(scipFile) // Clean up temporary file
+	}
 
-	fmt.Printf("Generated SCIP index file: %s\n", scipFile)
+	fmt.Printf("Using SCIP index file: %s\n", scipFile)
 
 	// Step 2: Parse the SCIP file
 	parser := NewSCIPParser()
@@ -57,7 +76,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	// Step 3: Create service node
-	serviceID, err := si.createServiceNode(ctx)
+	serviceID, err := si.createServiceNode(ctx, projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to create service node: %w", err)
 	}
@@ -91,37 +110,95 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	fmt.Printf("Successfully indexed %d symbols from SCIP data\n", len(symbolDefs))
+
+	// Step 6: Extract and index imports for cross-package dependencies
+	imports, err := parser.ExtractImports(projectPath)
+	if err != nil {
+		fmt.Printf("Warning: failed to extract imports: %v\n", err)
+	} else {
+		fmt.Printf("Extracted %d import statements\n", len(imports))
+		if err := si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
+			fmt.Printf("Warning: failed to index package dependencies: %v\n", err)
+		}
+	}
+
+	// Step 7: Analyze API patterns and create cross-service relationships
+	fmt.Println("Analyzing API patterns and cross-service calls...")
+	analyzer := NewAPIAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
+	if err := analyzer.AnalyzeAPIPatterns(ctx, fileNodes); err != nil {
+		fmt.Printf("Warning: API pattern analysis failed: %v\n", err)
+		// Don't fail the entire indexing, just log warning
+	}
+
+	fmt.Println("SCIP indexing completed successfully")
 	return nil
 }
 
-// generateSCIPIndex runs scip-go to generate a SCIP index file
+// generateSCIPIndex runs the appropriate SCIP indexer to generate a SCIP index file
 func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
-	// Check if scip-go is available
-	if _, err := exec.LookPath(si.scipBinary); err != nil {
-		return "", fmt.Errorf("scip-go not found in PATH. Install with: go install github.com/sourcegraph/scip-go/cmd/scip-go@latest")
+	// Check if the language-specific SCIP binary is available
+	if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
+		return "", fmt.Errorf("%s not found in PATH.\nInstall with: %s\nSee: %s",
+			si.langConfig.SCIPBinary,
+			si.langConfig.InstallCommand,
+			si.langConfig.InstallDocs)
 	}
 
-	// Create temporary output file
-	outputFile := filepath.Join(projectPath, "index.scip")
+	// Get absolute path for project
+	absPath, err := filepath.Abs(projectPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path: %w", err)
+	}
 
-	// Prepare scip-go command
-	cmd := exec.Command(si.scipBinary,
-		"--module-name", si.serviceName,
-		"--module-version", si.version,
-		"--output", outputFile,
-	)
+	// Create temporary output file with absolute path
+	outputFile := filepath.Join(absPath, "index.scip")
 
-	// Set working directory
-	cmd.Dir = projectPath
+	// Prepare language-specific command
+	var cmd *exec.Cmd
+	switch si.language {
+	case LanguageGo:
+		// scip-go --module-name <name> --module-version <version> --output <file>
+		cmd = exec.Command(si.langConfig.SCIPBinary,
+			"--module-name", si.serviceName,
+			"--module-version", si.version,
+			"--output", outputFile,
+		)
+	case LanguageTypeScript, LanguageJavaScript:
+		// scip-typescript index --output <file>
+		args := append(si.langConfig.IndexFlags, "--output", outputFile)
+		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
+	case LanguagePython:
+		// scip-python index --project-name <name> --output <file>
+		args := append(si.langConfig.IndexFlags,
+			"--project-name", si.serviceName,
+			"--output", outputFile,
+		)
+		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
+	case LanguagePHP:
+		// scip-php generates index.scip in current directory
+		// We need to specify the source directory
+		cmd = exec.Command(si.langConfig.SCIPBinary, "src", "--output", outputFile)
+	case LanguageJava, LanguageScala, LanguageKotlin:
+		// scip-java index
+		// scip-java runs the build tool (Maven/Gradle/sbt) and generates index.scip
+		// in the current directory
+		// Use sh -c to handle shell scripts
+		cmd = exec.Command("sh", "-c", si.langConfig.SCIPBinary+" index")
+	default:
+		return "", fmt.Errorf("unsupported language for SCIP indexing: %s", si.language)
+	}
+
+	// Set working directory to absolute path
+	cmd.Dir = absPath
 
 	// Run the command
-	fmt.Printf("Running: %s in %s\n", cmd.String(), projectPath)
+	fmt.Printf("Running: %s in %s\n", cmd.String(), absPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("scip-go command failed: %w\nOutput: %s", err, string(output))
+		return "", fmt.Errorf("%s command failed: %w\nOutput: %s", si.langConfig.SCIPBinary, err, string(output))
 	}
 
-	fmt.Printf("scip-go output: %s\n", string(output))
+	fmt.Printf("%s output: %s\n", si.langConfig.SCIPBinary, string(output))
 
 	// Verify the output file exists
 	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
@@ -132,16 +209,45 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 }
 
 // createServiceNode creates the service node in Neo4j
-func (si *SCIPIndexer) createServiceNode(ctx context.Context) (string, error) {
+func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string) (string, error) {
+	// Try to extract actual package name from package.json for TypeScript/JavaScript
+	actualPackageName := si.serviceName
+	if si.language == LanguageTypeScript || si.language == LanguageJavaScript {
+		if npmName := si.extractNPMPackageName(projectPath); npmName != "" {
+			actualPackageName = npmName
+			fmt.Printf("Detected NPM package name: %s\n", npmName)
+		}
+	}
+
 	serviceProps := map[string]any{
 		"name":          si.serviceName,
-		"language":      "Go",
+		"packageName":   actualPackageName, // Store package name for dependency matching
+		"language":      si.langConfig.DisplayName,
 		"version":       si.version,
 		"repositoryUrl": si.repoURL,
 	}
 
-	return si.client.MergeNode(ctx, []string{"Service"}, 
+	return si.client.MergeNode(ctx, []string{"Service"},
 		map[string]any{"name": si.serviceName}, serviceProps)
+}
+
+// extractNPMPackageName reads package.json and extracts the package name
+func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
+	packageJSONPath := filepath.Join(projectPath, "package.json")
+	data, err := os.ReadFile(packageJSONPath)
+	if err != nil {
+		return ""
+	}
+
+	var packageData struct {
+		Name string `json:"name"`
+	}
+
+	if err := json.Unmarshal(data, &packageData); err != nil {
+		return ""
+	}
+
+	return packageData.Name
 }
 
 // createFileNode creates a file node in Neo4j
@@ -229,6 +335,87 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	fmt.Printf("Completed indexing symbols\n")
+	return nil
+}
+
+// indexPackageDependencies creates DEPENDS_ON relationships between services based on imports
+func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*models.PackageImport, serviceID string) error {
+	if len(imports) == 0 {
+		return nil
+	}
+
+	fmt.Printf("Processing %d imports for dependency relationships...\n", len(imports))
+
+	// Group imports by target package
+	packageMap := make(map[string]int)
+	for _, imp := range imports {
+		if imp.IsExternal {
+			packageMap[imp.TargetPackage]++
+		}
+	}
+
+	createdCount := 0
+
+	// Create DEPENDS_ON relationships for each external package
+	for packageName, count := range packageMap {
+		// Try to find the target service by package name or service name
+		// Multiple matching strategies:
+		// 1. Exact packageName match
+		// 2. Service name in package (e.g., "@try-veil/veil-gateway" matches "veil-gateway")
+		// 3. Package contains service name
+		targetServiceQuery := `
+			MATCH (s:Service)
+			WHERE s.packageName = $packageName
+			   OR s.name = $packageName
+			   OR $packageName CONTAINS s.packageName
+			   OR s.packageName CONTAINS $packageName
+			RETURN elementId(s) AS id, s.name AS name, s.packageName AS packageName
+			ORDER BY
+				CASE
+					WHEN s.packageName = $packageName THEN 0
+					WHEN s.name = $packageName THEN 1
+					ELSE 2
+				END
+			LIMIT 1
+		`
+
+		result, err := si.client.ExecuteQuery(ctx, targetServiceQuery,
+			map[string]any{"packageName": packageName})
+
+		if err != nil || len(result) == 0 {
+			// Target service not indexed yet, log and skip
+			fmt.Printf("  No service found for package: %s\n", packageName)
+			continue
+		}
+
+		targetServiceID := result[0].AsMap()["id"].(string)
+		targetServiceName := result[0].AsMap()["name"].(string)
+
+		// Avoid self-dependencies
+		if targetServiceID == serviceID {
+			continue
+		}
+
+		// Create DEPENDS_ON relationship
+		relProps := map[string]any{
+			"packageName":  packageName,
+			"isDirect":     true,
+			"importCount":  count,
+			"detectedFrom": "import-analysis",
+		}
+
+		_, err = si.client.CreateRelationship(ctx, serviceID, targetServiceID,
+			string(models.DependsOnRel), relProps)
+
+		if err != nil {
+			fmt.Printf("Warning: failed to create DEPENDS_ON relationship to %s: %v\n", targetServiceName, err)
+		} else {
+			fmt.Printf("Created DEPENDS_ON: %s -> %s (%d imports)\n", si.serviceName, targetServiceName, count)
+			createdCount++
+		}
+	}
+
+	fmt.Printf("Created %d DEPENDS_ON relationships\n", createdCount)
 	return nil
 }
 
@@ -367,15 +554,23 @@ func (si *SCIPIndexer) createReferenceRelationship(ctx context.Context, ref *mod
 
 // SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
 func (si *SCIPIndexer) SetSCIPBinary(binary string) {
-	si.scipBinary = binary
+	si.langConfig.SCIPBinary = binary
 }
 
 // ValidateEnvironment checks if the required tools are available
 func (si *SCIPIndexer) ValidateEnvironment() error {
-	if _, err := exec.LookPath(si.scipBinary); err != nil {
-		return fmt.Errorf("scip-go not found in PATH. Install with: go install github.com/sourcegraph/scip-go/cmd/scip-go@latest")
+	if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
+		return fmt.Errorf("%s not found in PATH.\nInstall with: %s\nSee: %s",
+			si.langConfig.SCIPBinary,
+			si.langConfig.InstallCommand,
+			si.langConfig.InstallDocs)
 	}
 	return nil
+}
+
+// GetLanguage returns the language this indexer is configured for
+func (si *SCIPIndexer) GetLanguage() Language {
+	return si.language
 }
 
 // calculateByteOffsets calculates the start and end byte positions for a code location

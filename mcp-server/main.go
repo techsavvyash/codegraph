@@ -543,6 +543,26 @@ func (s *CodeGraphMCPServer) handleGetSourceTool(ctx context.Context, args map[s
 		}
 	}
 
+	// Get function metadata including file path
+	cypher := `
+		MATCH (f)
+		WHERE (f:Function OR f:Method) AND f.name = $functionName
+		RETURN f.filePath AS filePath
+		LIMIT 1
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"functionName": functionName})
+	if err != nil || len(result) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error finding function '%s': %v", functionName, err)}},
+			IsError: true,
+		}
+	}
+
+	// Detect language from file path
+	filePath := getStringFromRecord(result[0].AsMap(), "filePath")
+	language := detectLanguageFromPath(filePath)
+
 	sourceCode, err := s.queryBuilder.GetFunctionSourceCode(ctx, functionName)
 	if err != nil {
 		return ToolCallResponse{
@@ -553,7 +573,7 @@ func (s *CodeGraphMCPServer) handleGetSourceTool(ctx context.Context, args map[s
 
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("Source code for function '%s':\n\n", functionName))
-	output.WriteString("```go\n")
+	output.WriteString(fmt.Sprintf("```%s\n", language))
 	output.WriteString(sourceCode)
 	output.WriteString("\n```\n")
 
@@ -1011,6 +1031,49 @@ func getIntFromInterface(data map[string]interface{}, key string) int {
 		}
 	}
 	return 0
+}
+
+// detectLanguageFromPath detects the programming language from a file path
+func detectLanguageFromPath(filePath string) string {
+	ext := filepath.Ext(filePath)
+	switch ext {
+	case ".go":
+		return "go"
+	case ".ts":
+		return "typescript"
+	case ".tsx":
+		return "tsx"
+	case ".js":
+		return "javascript"
+	case ".jsx":
+		return "jsx"
+	case ".py":
+		return "python"
+	case ".java":
+		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
+	case ".scala":
+		return "scala"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
+	case ".rs":
+		return "rust"
+	case ".c":
+		return "c"
+	case ".cpp", ".cc", ".cxx":
+		return "cpp"
+	case ".h", ".hpp":
+		return "cpp"
+	case ".cs":
+		return "csharp"
+	case ".swift":
+		return "swift"
+	default:
+		return "text"
+	}
 }
 
 // Document-related tool handlers
