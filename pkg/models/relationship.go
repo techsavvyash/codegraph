@@ -89,6 +89,10 @@ type InheritsFromRelationship struct {
 // ImplementsRelationship represents interface implementation or feature realization
 type ImplementsRelationship struct {
 	BaseRelationship
+	Confidence       float64 `json:"confidence" neo4j:"confidence"`             // LLM validation confidence (0.0-1.0)
+	ValidationMethod string  `json:"validationMethod" neo4j:"validationMethod"` // "llm", "heuristic", "hybrid"
+	CodeSummary      string  `json:"codeSummary" neo4j:"codeSummary"`           // LLM-generated summary of implementing code
+	SubgraphSize     int     `json:"subgraphSize" neo4j:"subgraphSize"`         // Number of functions in implementing subgraph
 }
 
 // ExposesAPIRelationship connects code handlers to API endpoints

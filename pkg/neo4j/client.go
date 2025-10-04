@@ -28,9 +28,9 @@ func NewClient(config Config) (*Client, error) {
 		config.URI,
 		neo4j.BasicAuth(config.Username, config.Password, ""),
 		func(c *neo4j.Config) {
-			c.MaxConnectionPoolSize = 50
-			c.MaxConnectionLifetime = 30 * time.Minute
-			c.ConnectionAcquisitionTimeout = 2 * time.Minute
+			c.MaxConnectionPoolSize = 10  // Reduced for stability
+			c.MaxConnectionLifetime = 5 * time.Minute
+			c.ConnectionAcquisitionTimeout = 30 * time.Second
 		},
 	)
 	if err != nil {
@@ -273,10 +273,62 @@ func (c *Client) BatchCreateRelationships(ctx context.Context, relationships []B
 	return nil
 }
 
+// SetNodeProperty sets a property on a node identified by its ID
+func (c *Client) SetNodeProperty(ctx context.Context, nodeID string, propertyName string, propertyValue any) error {
+	cypher := `
+		MATCH (n)
+		WHERE elementId(n) = $nodeId
+		SET n.` + propertyName + ` = $value
+		RETURN n
+	`
+
+	params := map[string]any{
+		"nodeId": nodeID,
+		"value":  propertyValue,
+	}
+
+	result, err := c.ExecuteQuery(ctx, cypher, params)
+	if err != nil {
+		return fmt.Errorf("failed to set node property: %w", err)
+	}
+
+	if len(result) == 0 {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	return nil
+}
+
+// SetNodeProperties sets multiple properties on a node identified by its ID
+func (c *Client) SetNodeProperties(ctx context.Context, nodeID string, properties map[string]any) error {
+	cypher := `
+		MATCH (n)
+		WHERE elementId(n) = $nodeId
+		SET n += $props
+		RETURN n
+	`
+
+	params := map[string]any{
+		"nodeId": nodeID,
+		"props":  properties,
+	}
+
+	result, err := c.ExecuteQuery(ctx, cypher, params)
+	if err != nil {
+		return fmt.Errorf("failed to set node properties: %w", err)
+	}
+
+	if len(result) == 0 {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	return nil
+}
+
 // GetDatabaseInfo returns information about the database
 func (c *Client) GetDatabaseInfo(ctx context.Context) (map[string]any, error) {
 	cypher := "CALL dbms.components() YIELD name, versions, edition"
-	
+
 	result, err := c.ExecuteQuery(ctx, cypher, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database info: %w", err)

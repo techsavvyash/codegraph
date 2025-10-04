@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/context-maximiser/code-graph/pkg/models"
@@ -165,9 +167,24 @@ func (sp *SCIPParser) GetServiceInfo() (*models.Service, error) {
 		return nil, fmt.Errorf("no metadata found")
 	}
 
+	// Try to infer language from tool info
+	language := "unknown"
+	if metadata.ToolInfo != nil {
+		toolName := strings.ToLower(metadata.ToolInfo.Name)
+		if strings.Contains(toolName, "scip-go") {
+			language = "Go"
+		} else if strings.Contains(toolName, "scip-typescript") || strings.Contains(toolName, "typescript") {
+			language = "TypeScript"
+		} else if strings.Contains(toolName, "scip-python") || strings.Contains(toolName, "python") {
+			language = "Python"
+		} else if strings.Contains(toolName, "scip-java") || strings.Contains(toolName, "java") {
+			language = "Java"
+		}
+	}
+
 	service := &models.Service{
 		Name:     metadata.ProjectRoot,
-		Language: "Go", // We assume Go for scip-go
+		Language: language,
 		Version:  "1.0.0", // Default version since metadata.Version is a ProtocolVersion
 	}
 
@@ -264,16 +281,38 @@ func convertRange(scipRange []int32, isStart bool) (int, int) {
 }
 
 func inferLanguage(filePath string) string {
-	if strings.HasSuffix(filePath, ".go") {
+	ext := strings.ToLower(filepath.Ext(filePath))
+
+	switch ext {
+	case ".go":
 		return "Go"
-	} else if strings.HasSuffix(filePath, ".java") {
-		return "Java"
-	} else if strings.HasSuffix(filePath, ".py") {
-		return "Python"
-	} else if strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".js") {
+	case ".ts", ".tsx":
 		return "TypeScript"
+	case ".js", ".jsx":
+		return "JavaScript"
+	case ".py":
+		return "Python"
+	case ".java":
+		return "Java"
+	case ".scala":
+		return "Scala"
+	case ".kt", ".kts":
+		return "Kotlin"
+	case ".rs":
+		return "Rust"
+	case ".rb":
+		return "Ruby"
+	case ".php":
+		return "PHP"
+	case ".c", ".h":
+		return "C"
+	case ".cpp", ".cc", ".cxx", ".hpp":
+		return "C++"
+	case ".cs":
+		return "C#"
+	default:
+		return "unknown"
 	}
-	return "unknown"
 }
 
 // DebugPrintSCIPFile prints a human-readable representation of the SCIP file
@@ -346,4 +385,216 @@ func ValidateSCIPFile(filePath string) error {
 	}
 
 	return fmt.Errorf("file does not appear to be a valid SCIP file")
+}
+
+// ExtractImports analyzes source files to extract import statements
+func (sp *SCIPParser) ExtractImports(projectPath string) ([]*models.PackageImport, error) {
+	if sp.index == nil {
+		return nil, fmt.Errorf("no SCIP index loaded")
+	}
+
+	var imports []*models.PackageImport
+	importMap := make(map[string]bool) // Deduplicate imports
+
+	for _, doc := range sp.index.Documents {
+		// Build full file path
+		fullPath := filepath.Join(projectPath, doc.RelativePath)
+
+		// Read file content
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			fmt.Printf("Warning: failed to read file %s: %v\n", fullPath, err)
+			continue
+		}
+
+		sourceCode := string(content)
+		language := inferLanguage(doc.RelativePath)
+
+		// Extract imports based on language
+		var fileImports []*models.PackageImport
+		switch language {
+		case "TypeScript", "JavaScript":
+			fileImports = extractTypeScriptImports(doc.RelativePath, sourceCode)
+		case "Go":
+			fileImports = extractGoImports(doc.RelativePath, sourceCode)
+		case "Python":
+			fileImports = extractPythonImports(doc.RelativePath, sourceCode)
+		case "Java", "Kotlin", "Scala":
+			fileImports = extractJavaImports(doc.RelativePath, sourceCode)
+		}
+
+		// Deduplicate and add to result
+		for _, imp := range fileImports {
+			key := fmt.Sprintf("%s -> %s", imp.SourceFile, imp.TargetPackage)
+			if !importMap[key] {
+				importMap[key] = true
+				imports = append(imports, imp)
+			}
+		}
+	}
+
+	return imports, nil
+}
+
+// extractTypeScriptImports parses TypeScript/JavaScript import statements
+func extractTypeScriptImports(filePath, sourceCode string) []*models.PackageImport {
+	var imports []*models.PackageImport
+
+	// Pattern: import { X, Y } from 'package'
+	namedImportRegex := regexp.MustCompile(`import\s+{([^}]+)}\s+from\s+['"]([^'"]+)['"]`)
+	matches := namedImportRegex.FindAllStringSubmatch(sourceCode, -1)
+	for _, match := range matches {
+		if len(match) > 2 {
+			importedNames := strings.Split(match[1], ",")
+			for i, name := range importedNames {
+				importedNames[i] = strings.TrimSpace(name)
+			}
+
+			packageName := match[2]
+			isExternal := !strings.HasPrefix(packageName, ".") && !strings.HasPrefix(packageName, "/")
+
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: packageName,
+				ImportedNames: importedNames,
+				IsExternal:    isExternal,
+			})
+		}
+	}
+
+	// Pattern: import * as X from 'package'
+	namespaceImportRegex := regexp.MustCompile(`import\s+\*\s+as\s+(\w+)\s+from\s+['"]([^'"]+)['"]`)
+	matches = namespaceImportRegex.FindAllStringSubmatch(sourceCode, -1)
+	for _, match := range matches {
+		if len(match) > 2 {
+			packageName := match[2]
+			isExternal := !strings.HasPrefix(packageName, ".") && !strings.HasPrefix(packageName, "/")
+
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: packageName,
+				ImportedNames: []string{match[1]},
+				IsExternal:    isExternal,
+			})
+		}
+	}
+
+	// Pattern: import X from 'package' (default import)
+	defaultImportRegex := regexp.MustCompile(`import\s+(\w+)\s+from\s+['"]([^'"]+)['"]`)
+	matches = defaultImportRegex.FindAllStringSubmatch(sourceCode, -1)
+	for _, match := range matches {
+		if len(match) > 2 {
+			packageName := match[2]
+			isExternal := !strings.HasPrefix(packageName, ".") && !strings.HasPrefix(packageName, "/")
+
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: packageName,
+				ImportedNames: []string{match[1]},
+				IsExternal:    isExternal,
+			})
+		}
+	}
+
+	return imports
+}
+
+// extractGoImports parses Go import statements
+func extractGoImports(filePath, sourceCode string) []*models.PackageImport {
+	var imports []*models.PackageImport
+
+	// Single import: import "package"
+	singleImportRegex := regexp.MustCompile(`import\s+"([^"]+)"`)
+	matches := singleImportRegex.FindAllStringSubmatch(sourceCode, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: match[1],
+				IsExternal:    !strings.Contains(match[1], "/"),
+			})
+		}
+	}
+
+	// Multi-line import block
+	importBlockRegex := regexp.MustCompile(`import\s*\(\s*([^)]+)\s*\)`)
+	blocks := importBlockRegex.FindAllStringSubmatch(sourceCode, -1)
+	for _, block := range blocks {
+		if len(block) > 1 {
+			// Extract individual imports from block
+			lines := strings.Split(block[1], "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				// Remove quotes and alias
+				packageRegex := regexp.MustCompile(`"([^"]+)"`)
+				pkgMatch := packageRegex.FindStringSubmatch(line)
+				if len(pkgMatch) > 1 {
+					imports = append(imports, &models.PackageImport{
+						SourceFile:    filePath,
+						TargetPackage: pkgMatch[1],
+						IsExternal:    strings.Contains(pkgMatch[1], "/"),
+					})
+				}
+			}
+		}
+	}
+
+	return imports
+}
+
+// extractPythonImports parses Python import statements
+func extractPythonImports(filePath, sourceCode string) []*models.PackageImport {
+	var imports []*models.PackageImport
+
+	// Pattern: import package
+	simpleImportRegex := regexp.MustCompile(`^\s*import\s+(\w+(?:\.\w+)*)`)
+	// Pattern: from package import X, Y
+	fromImportRegex := regexp.MustCompile(`^\s*from\s+(\w+(?:\.\w+)*)\s+import\s+(.+)`)
+
+	lines := strings.Split(sourceCode, "\n")
+	for _, line := range lines {
+		// Try from...import first
+		if match := fromImportRegex.FindStringSubmatch(line); len(match) > 2 {
+			importedNames := strings.Split(match[2], ",")
+			for i, name := range importedNames {
+				importedNames[i] = strings.TrimSpace(name)
+			}
+
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: match[1],
+				ImportedNames: importedNames,
+				IsExternal:    !strings.HasPrefix(match[1], "."),
+			})
+		} else if match := simpleImportRegex.FindStringSubmatch(line); len(match) > 1 {
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: match[1],
+				IsExternal:    !strings.HasPrefix(match[1], "."),
+			})
+		}
+	}
+
+	return imports
+}
+
+// extractJavaImports parses Java/Kotlin/Scala import statements
+func extractJavaImports(filePath, sourceCode string) []*models.PackageImport {
+	var imports []*models.PackageImport
+
+	// Pattern: import package.Class;
+	importRegex := regexp.MustCompile(`import\s+([\w.]+);`)
+	matches := importRegex.FindAllStringSubmatch(sourceCode, -1)
+
+	for _, match := range matches {
+		if len(match) > 1 {
+			imports = append(imports, &models.PackageImport{
+				SourceFile:    filePath,
+				TargetPackage: match[1],
+				IsExternal:    true, // Most imports in Java are external
+			})
+		}
+	}
+
+	return imports
 }

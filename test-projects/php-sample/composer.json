@@ -1,0 +1,19 @@
+{
+    "name": "codegraph/php-sample",
+    "description": "Sample PHP project for CodeGraph testing",
+    "type": "project",
+    "require": {
+        "php": ">=8.0"
+    },
+    "require-dev": {
+        "davidrjenni/scip-php": "^0.0.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "CodeGraph\\Sample\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

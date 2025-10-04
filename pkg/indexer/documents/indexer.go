@@ -9,13 +9,16 @@ import (
 
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // DocumentIndexer handles indexing documents into Neo4j
 type DocumentIndexer struct {
-	client *neo4j.Client
-	parser *DocumentParser
+	client           *neo4j.Client
+	parser           *DocumentParser
+	intelligentLinker *search.IntelligentDocumentLinker
+	useIntelligentLinking bool
 }
 
 // NewDocumentIndexer creates a new document indexer
@@ -23,7 +26,14 @@ func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 	return &DocumentIndexer{
 		client: client,
 		parser: NewDocumentParser(),
+		useIntelligentLinking: false, // Default to simple linking
 	}
+}
+
+// EnableIntelligentLinking enables semantic analysis and intelligent linking
+func (di *DocumentIndexer) EnableIntelligentLinking(embeddingService search.EmbeddingService) {
+	di.intelligentLinker = search.NewIntelligentDocumentLinker(di.client, embeddingService)
+	di.useIntelligentLinking = true
 }
 
 // IndexDocument indexes a single document file
@@ -59,7 +69,7 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 		}
 	}
 
-	// Create relationships to code symbols if they exist
+	// Create relationships to code symbols using intelligent or simple linking
 	if err := di.linkToCodeSymbols(ctx, docID, doc.Content); err != nil {
 		fmt.Printf("Warning: failed to link to code symbols: %v\n", err)
 	}
@@ -125,8 +135,27 @@ func (di *DocumentIndexer) createFeatureNode(ctx context.Context, feature *model
 
 // linkToCodeSymbols creates MENTIONS relationships between documents and code symbols
 func (di *DocumentIndexer) linkToCodeSymbols(ctx context.Context, docID string, content string) error {
+	if di.useIntelligentLinking && di.intelligentLinker != nil {
+		// Use intelligent semantic linking
+		result, err := di.intelligentLinker.LinkDocumentToCode(ctx, docID, content)
+		if err != nil {
+			fmt.Printf("Warning: intelligent linking failed, falling back to simple linking: %v\n", err)
+			return di.simpleLinkToCodeSymbols(ctx, docID, content)
+		}
+
+		fmt.Printf("Intelligent linking created %d relationships (%d direct, %d semantic, %d call graph)\n",
+			result.CreatedLinks, len(result.DirectMatches), len(result.SemanticMatches), len(result.CallGraphMatches))
+		return nil
+	}
+
+	// Use simple backtick-based linking
+	return di.simpleLinkToCodeSymbols(ctx, docID, content)
+}
+
+// simpleLinkToCodeSymbols creates MENTIONS relationships using simple backtick extraction
+func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID string, content string) error {
 	symbols := extractCodeSymbols(content)
-	
+
 	for _, symbolRef := range symbols {
 		// Try to find matching Symbol nodes in the database
 		cypher := `
@@ -135,7 +164,7 @@ func (di *DocumentIndexer) linkToCodeSymbols(ctx context.Context, docID string, 
 			RETURN s
 			LIMIT 5
 		`
-		
+
 		results, err := di.client.ExecuteQuery(ctx, cypher, map[string]any{
 			"symbolRef": symbolRef,
 		})
