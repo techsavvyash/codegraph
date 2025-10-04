@@ -1,0 +1,98 @@
+# CodeGraph Configuration File
+# This is an example configuration file. Copy to ~/.codegraph.yaml or ./.codegraph.yaml to customize.
+
+# Neo4j Database Configuration
+neo4j:
+  uri: "bolt://localhost:7687"
+  username: "neo4j"
+  password: "password123"
+  database: "neo4j"
+
+# Enable verbose logging
+verbose: false
+
+# Language-specific SCIP indexer configuration
+# These settings allow you to customize the SCIP indexer for each language
+languages:
+  # Go language configuration
+  go:
+    binary: "scip-go"
+    extensions:
+      - ".go"
+    install_command: "go install github.com/sourcegraph/scip-go/cmd/scip-go@latest"
+    index_flags: []
+
+  # TypeScript language configuration
+  typescript:
+    binary: "scip-typescript"
+    extensions:
+      - ".ts"
+      - ".tsx"
+    install_command: "npm install -g @sourcegraph/scip-typescript"
+    index_flags:
+      - "index"
+
+  # JavaScript language configuration
+  javascript:
+    binary: "scip-typescript"  # TypeScript indexer handles JS too
+    extensions:
+      - ".js"
+      - ".jsx"
+    install_command: "npm install -g @sourcegraph/scip-typescript"
+    index_flags:
+      - "index"
+
+  # Python language configuration
+  python:
+    binary: "scip-python"
+    extensions:
+      - ".py"
+    install_command: "pip install scip-python"
+    index_flags:
+      - "index"
+
+  # Java language configuration
+  java:
+    binary: "scip-java"
+    extensions:
+      - ".java"
+    install_command: "# See https://sourcegraph.github.io/scip-java/ for build tool integration"
+    index_flags: []
+
+  # Scala language configuration
+  scala:
+    binary: "scip-java"  # scip-java handles Scala too
+    extensions:
+      - ".scala"
+    install_command: "# See https://sourcegraph.github.io/scip-java/ for build tool integration"
+    index_flags: []
+
+  # Kotlin language configuration
+  kotlin:
+    binary: "scip-java"  # scip-java handles Kotlin too
+    extensions:
+      - ".kt"
+      - ".kts"
+    install_command: "# See https://sourcegraph.github.io/scip-java/ for build tool integration"
+    index_flags: []
+
+# LLM Provider Configuration (for feature linking)
+llm:
+  # Provider type: gemini, litellm, openai
+  provider: "litellm"
+
+  # API key (can also be set via LLM_API_KEY environment variable)
+  api_key: ""
+
+  # Base URL (for LiteLLM/OpenAI providers)
+  base_url: ""
+
+  # Text generation model
+  text_model: "openai/gpt-4"
+
+  # Embedding model
+  embedding_model: "openai/text-embedding-3-small"
+
+  # Model parameters
+  temperature: 0.2
+  max_tokens: 1024

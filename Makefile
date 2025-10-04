@@ -71,8 +71,16 @@ neo4j-schema-info: ## Show schema information
 index-self: ## Index this project itself using AST parsing
 	go run ./cmd/codegraph index project . --service="context-maximiser" --version="v1.0.0"
 
-index-self-scip: ## Index this project itself using SCIP
+index-self-scip: ## Index this project itself using SCIP (Go)
 	go run ./cmd/codegraph index scip . --service="context-maximiser" --version="v1.0.0"
+
+index-ts-example: ## Index a TypeScript project example
+	@echo "To index a TypeScript project:"
+	@echo "  go run ./cmd/codegraph index scip /path/to/ts/project --language=typescript --service=\"my-service\""
+
+index-python-example: ## Index a Python project example
+	@echo "To index a Python project:"
+	@echo "  go run ./cmd/codegraph index scip /path/to/python/project --language=python --service=\"my-service\""
 
 query-example: ## Run example queries
 	go run ./cmd/codegraph query search "Client"

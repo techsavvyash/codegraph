@@ -95,11 +95,16 @@ verbose: false
 # Check Neo4j connection
 ./bin/codegraph status
 
-# Index a Go project
-./bin/codegraph index project /path/to/project --service="my-service" --version="v1.0.0"
+# Index projects with SCIP (recommended, multi-language support)
+# Auto-detect language
+./bin/codegraph index scip /path/to/project --service="my-service" --version="v1.0.0"
 
-# Index using SCIP (more accurate)
-./bin/codegraph index scip /path/to/project --service="my-service"
+# Explicitly specify language (go, typescript, javascript, python, java, scala, kotlin)
+./bin/codegraph index scip /path/to/ts/project --language=typescript --service="frontend"
+./bin/codegraph index scip /path/to/py/project --language=python --service="ml-service"
+
+# Index a Go project using AST parsing (legacy, Go-only)
+./bin/codegraph index project /path/to/go/project --service="my-service"
 
 # Search for symbols
 ./bin/codegraph query search "Client"
@@ -107,6 +112,22 @@ verbose: false
 # Get function source code
 ./bin/codegraph query source "functionName"
 ```
+
+## Supported Languages
+
+CodeGraph supports multiple languages through SCIP indexers:
+
+- **Go**: `scip-go` (install: `go install github.com/sourcegraph/scip-go/cmd/scip-go@latest`)
+- **TypeScript/JavaScript**: `scip-typescript` (install: `npm install -g @sourcegraph/scip-typescript`)
+- **Python**: `scip-python` (install: `pip install scip-python`)
+- **Java/Scala/Kotlin**: `scip-java` (see https://sourcegraph.github.io/scip-java/ for build integration)
+
+Language auto-detection works by checking for:
+- Go: `go.mod`, `go.sum` files
+- TypeScript: `tsconfig.json`, `package.json` with TypeScript deps
+- JavaScript: `package.json`
+- Python: `requirements.txt`, `pyproject.toml`, `setup.py`
+- Java: `pom.xml`, `build.gradle`
 
 ## Project Structure Notes
 

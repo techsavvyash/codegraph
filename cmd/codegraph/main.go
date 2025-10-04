@@ -12,6 +12,10 @@ import (
 	"github.com/context-maximiser/code-graph/pkg/benchmarks"
 	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
+	"github.com/context-maximiser/code-graph/pkg/llm"
+	_ "github.com/context-maximiser/code-graph/pkg/llm/gemini"
+	_ "github.com/context-maximiser/code-graph/pkg/llm/litellm"
+	_ "github.com/context-maximiser/code-graph/pkg/llm/openai"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 	"github.com/context-maximiser/code-graph/pkg/schema"
 	"github.com/context-maximiser/code-graph/pkg/search"
@@ -308,9 +312,13 @@ var indexProjectCmd = &cobra.Command{
 
 var indexSCIPCmd = &cobra.Command{
 	Use:   "scip [path]",
-	Short: "Index a Go project using SCIP",
-	Long:  "Index a Go project using the SCIP (Source Code Intelligence Protocol) indexer for more accurate code intelligence",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Index a project using SCIP",
+	Long: fmt.Sprintf(`Index a project using the SCIP (Source Code Intelligence Protocol) indexer for accurate code intelligence.
+
+Supported languages: %s
+
+The language will be auto-detected from the project structure, or you can specify it explicitly with --language.`, static.FormatLanguageList()),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectPath := "."
 		if len(args) > 0 {
@@ -320,6 +328,7 @@ var indexSCIPCmd = &cobra.Command{
 		serviceName, _ := cmd.Flags().GetString("service")
 		version, _ := cmd.Flags().GetString("version")
 		repoURL, _ := cmd.Flags().GetString("repo-url")
+		languageFlag, _ := cmd.Flags().GetString("language")
 
 		if serviceName == "" {
 			serviceName = "context-maximiser" // Default service name
@@ -334,7 +343,28 @@ var indexSCIPCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		scipIndexer := static.NewSCIPIndexer(client, serviceName, version, repoURL)
+		// Determine language
+		var language static.Language
+		if languageFlag != "" {
+			// Use explicitly specified language
+			language = static.Language(strings.ToLower(languageFlag))
+			if _, err := static.GetLanguageConfig(language); err != nil {
+				return fmt.Errorf("unsupported language: %s. Supported languages: %s",
+					languageFlag, static.FormatLanguageList())
+			}
+			fmt.Printf("Using explicitly specified language: %s\n", languageFlag)
+		} else {
+			// Auto-detect language
+			detectedLang, err := static.DetectLanguage(projectPath)
+			if err != nil {
+				return fmt.Errorf("failed to detect language: %w\nPlease specify language explicitly with --language flag", err)
+			}
+			language = detectedLang
+			langConfig, _ := static.GetLanguageConfig(language)
+			fmt.Printf("Auto-detected language: %s\n", langConfig.DisplayName)
+		}
+
+		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
 
 		// Validate environment
 		if err := scipIndexer.ValidateEnvironment(); err != nil {
@@ -1216,44 +1246,35 @@ to the specific code functions that implement them.`,
 		}
 		defer client.Close(context.Background())
 
-		// Get embedding service configuration
-		gemini, _ := cmd.Flags().GetBool("gemini")
-		apiKey, _ := cmd.Flags().GetString("api-key")
-		baseURL, _ := cmd.Flags().GetString("base-url")
-		model, _ := cmd.Flags().GetString("model")
+		// Create LLM provider using new abstraction
+		providerWrapper, err := createLLMProvider(cmd)
+		if err != nil {
+			return fmt.Errorf("failed to create LLM provider: %w", err)
+		}
+		defer providerWrapper.Provider.Close()
+
+		// Get command flags
 		minConfidence, _ := cmd.Flags().GetFloat64("min-confidence")
 		maxCandidates, _ := cmd.Flags().GetInt("max-candidates")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-		// Determine embedding service
-		var embeddingService search.EmbeddingService
-		var llmService search.LLMService
-
-		if gemini {
-			if apiKey == "" {
-				apiKey = os.Getenv("GEMINI_API_KEY")
-			}
-			if apiKey == "" {
-				return fmt.Errorf("Gemini embedding service requires GEMINI_API_KEY environment variable or --api-key flag")
-			}
-			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
-			llmService = search.NewGeminiLLMService(apiKey)
-			fmt.Printf("🧠 Using Gemini embedding service (model: %s)\n", model)
-			fmt.Printf("🤖 Using Gemini LLM service for text generation and validation\n")
-		} else if apiKey != "" && baseURL != "" {
-			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
-			fmt.Printf("🔗 Using embedding service: %s (model: %s)\n", baseURL, model)
-			fmt.Printf("⚠️  LLM text generation not available - will use heuristic validation\n")
-		} else {
-			return fmt.Errorf("feature linking requires either --gemini with GEMINI_API_KEY or --api-key with --base-url")
+		// Display provider information
+		fmt.Printf("🔗 LLM Provider: %s\n", providerWrapper.Provider.Name())
+		if providerWrapper.Provider.SupportsEmbeddings() {
+			fmt.Printf("🧠 Embeddings: Enabled\n")
+		}
+		if providerWrapper.Provider.SupportsTextGeneration() {
+			fmt.Printf("🤖 Text Generation: Enabled\n")
 		}
 
-		// Create feature linker
-		featureLinker := search.NewFeatureLinker(client, embeddingService)
+		// Create feature linker with provider adapters
+		featureLinker := search.NewFeatureLinker(client, providerWrapper.EmbeddingService)
 
 		// Enable LLM service if available
-		if llmService != nil {
-			featureLinker = featureLinker.WithLLMService(llmService)
+		if providerWrapper.Provider.SupportsTextGeneration() {
+			featureLinker = featureLinker.WithLLMService(providerWrapper.LLMService)
+		} else {
+			fmt.Printf("⚠️  Text generation not available - will use heuristic validation\n")
 		}
 
 		// Configure confidence threshold
@@ -1458,6 +1479,7 @@ func init() {
 	indexSCIPCmd.Flags().StringP("service", "s", "", "Service name")
 	indexSCIPCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
 	indexSCIPCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	indexSCIPCmd.Flags().StringP("language", "l", "", fmt.Sprintf("Language to index (supported: %s). If not specified, language will be auto-detected", static.FormatLanguageList()))
 
 	// Flags for incremental command
 	indexIncrementalCmd.Flags().StringP("service", "s", "", "Service name")
@@ -1527,9 +1549,17 @@ func init() {
 	linkFeaturesCmd.Flags().Float64("min-confidence", 0.6, "Minimum confidence threshold for creating IMPLEMENTS relationships")
 	linkFeaturesCmd.Flags().Int("max-candidates", 10, "Maximum number of candidate functions to analyze per feature")
 	linkFeaturesCmd.Flags().Bool("dry-run", false, "Show what would be linked without creating relationships")
-	linkFeaturesCmd.Flags().String("api-key", "", "API key for embedding service (Gemini or OpenRouter)")
-	linkFeaturesCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
-	linkFeaturesCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
+
+	// LLM Provider flags
+	linkFeaturesCmd.Flags().String("provider", "", "LLM provider: gemini, litellm, openai (default: from LLM_PROVIDER env or litellm)")
+	linkFeaturesCmd.Flags().String("api-key", "", "API key for LLM provider")
+	linkFeaturesCmd.Flags().String("llm-base-url", "", "Base URL for LiteLLM/OpenAI provider")
+	linkFeaturesCmd.Flags().String("text-model", "", "Model for text generation (e.g., openai/gpt-4)")
+	linkFeaturesCmd.Flags().String("embedding-model", "", "Model for embeddings (e.g., openai/text-embedding-3-small)")
+
+	// Deprecated flags (backward compatibility)
+	linkFeaturesCmd.Flags().String("model", "gemini-embedding-001", "Deprecated: use --embedding-model instead")
+	linkFeaturesCmd.Flags().Bool("gemini", false, "Deprecated: use --provider=gemini instead")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")
@@ -1559,4 +1589,112 @@ func createNeo4jClient() (*neo4j.Client, error) {
 	}
 
 	return neo4j.NewClient(config)
+}
+
+// createLLMProvider creates an LLM provider from CLI flags and environment variables
+func createLLMProvider(cmd *cobra.Command) (*llm.ProviderWrapper, error) {
+	// Determine provider type
+	var providerType llm.ProviderType
+	var apiKey, baseURL, textModel, embModel string
+
+	// Check for --provider flag first
+	providerFlag, _ := cmd.Flags().GetString("provider")
+
+	// Check for --gemini flag (backward compatibility)
+	useGemini, _ := cmd.Flags().GetBool("gemini")
+
+	if providerFlag != "" {
+		// Explicit --provider flag takes precedence
+		providerType = llm.ProviderType(providerFlag)
+	} else if useGemini {
+		// Backward compatibility: --gemini flag
+		providerType = llm.ProviderGemini
+	} else {
+		// Check environment for provider type
+		providerStr := os.Getenv("LLM_PROVIDER")
+		if providerStr == "" {
+			// Check for GEMINI_API_KEY for backward compat
+			if os.Getenv("GEMINI_API_KEY") != "" {
+				providerStr = "gemini"
+			} else {
+				providerStr = "litellm" // Default to LiteLLM
+			}
+		}
+		providerType = llm.ProviderType(providerStr)
+	}
+
+	// Get API key (priority: flag > LLM_API_KEY env > GEMINI_API_KEY env)
+	apiKey, _ = cmd.Flags().GetString("api-key")
+	if apiKey == "" {
+		apiKey = os.Getenv("LLM_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY") // Backward compat
+		}
+	}
+
+	// Get base URL
+	baseURL, _ = cmd.Flags().GetString("llm-base-url")
+	if baseURL == "" {
+		baseURL = os.Getenv("LLM_BASE_URL")
+	}
+
+	// Get text model
+	textModel, _ = cmd.Flags().GetString("text-model")
+	if textModel == "" {
+		textModel = os.Getenv("LLM_TEXT_MODEL")
+		if textModel == "" {
+			// Set defaults based on provider
+			switch providerType {
+			case llm.ProviderGemini:
+				textModel = "gemini-1.5-flash"
+			case llm.ProviderLiteLLM:
+				textModel = "openai/gpt-4"
+			case llm.ProviderOpenAI:
+				textModel = "gpt-4"
+			}
+		}
+	}
+
+	// Get embedding model
+	embModel, _ = cmd.Flags().GetString("embedding-model")
+	if embModel == "" {
+		// Check deprecated --model flag for backward compat
+		embModel, _ = cmd.Flags().GetString("model")
+	}
+	if embModel == "" {
+		embModel = os.Getenv("LLM_EMBEDDING_MODEL")
+		if embModel == "" {
+			// Set defaults based on provider
+			switch providerType {
+			case llm.ProviderGemini:
+				embModel = "gemini-embedding-001"
+			case llm.ProviderLiteLLM:
+				embModel = "openai/text-embedding-3-small"
+			case llm.ProviderOpenAI:
+				embModel = "text-embedding-3-small"
+			}
+		}
+	}
+
+	// Create config
+	config := llm.Config{
+		Provider:       providerType,
+		APIKey:         apiKey,
+		BaseURL:        baseURL,
+		TextModel:      textModel,
+		EmbeddingModel: embModel,
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		TopK:           40,
+		TopP:           0.95,
+	}
+
+	// Create provider
+	provider, err := llm.NewProvider(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LLM provider: %w", err)
+	}
+
+	// Wrap provider for backward compatibility
+	return llm.WrapProvider(provider), nil
 }

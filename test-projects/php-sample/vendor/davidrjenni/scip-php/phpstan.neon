@@ -1,0 +1,10 @@
+parameters:
+  level: max
+  treatPhpDocTypesAsCertain: false
+  paths:
+    - bin
+    - src
+    - tests
+  excludePaths:
+    - src/Bindings/*
+    - tests/*/testdata/*

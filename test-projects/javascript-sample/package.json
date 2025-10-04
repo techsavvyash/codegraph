@@ -1,0 +1,17 @@
+{
+  "name": "javascript-sample",
+  "version": "1.0.0",
+  "description": "Sample JavaScript project for CodeGraph testing",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"No tests yet\""
+  },
+  "keywords": ["codegraph", "sample", "javascript"],
+  "author": "CodeGraph Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.0"
+  }
+}
