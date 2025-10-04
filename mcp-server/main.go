@@ -388,6 +388,101 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"required": []string{"doc_path"},
 			},
 		},
+		{
+			Name:        "codegraph_list_services",
+			Description: "List all services in the codebase with their metadata (language, package name, version)",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name_filter": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional filter to match service names (case-insensitive substring match)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "codegraph_service_dependencies",
+			Description: "Get all dependencies (DEPENDS_ON relationships) of a service, showing which packages/services it imports",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the service to get dependencies for",
+					},
+				},
+				"required": []string{"service_name"},
+			},
+		},
+		{
+			Name:        "codegraph_service_api_endpoints",
+			Description: "Get all API endpoints (EXPOSES_API) exposed by a service, including HTTP method, path, and framework",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the service to get API endpoints for",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of endpoints to return (default: 50)",
+						"default":     50,
+					},
+				},
+				"required": []string{"service_name"},
+			},
+		},
+		{
+			Name:        "codegraph_service_api_calls",
+			Description: "Get all API calls (CALLS_API) made by a service to other services or external APIs",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the service to get API calls for",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of calls to return (default: 50)",
+						"default":     50,
+					},
+				},
+				"required": []string{"service_name"},
+			},
+		},
+		{
+			Name:        "codegraph_cross_service_calls",
+			Description: "Get cross-service call chains showing how services communicate through API calls and SDK usage",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"from_service": map[string]interface{}{
+						"type":        "string",
+						"description": "Source service name (optional, shows all if not specified)",
+					},
+					"to_service": map[string]interface{}{
+						"type":        "string",
+						"description": "Target service name (optional, shows all if not specified)",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of call chains to return (default: 20)",
+						"default":     20,
+					},
+				},
+			},
+		},
+		{
+			Name:        "codegraph_service_architecture",
+			Description: "Get comprehensive architecture overview showing all services and their relationships (dependencies, API calls, SDK usage)",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -431,6 +526,18 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleLinkDocsToCodeTool(ctx, toolCall.Arguments)
 	case "codegraph_intelligent_link":
 		response = s.handleIntelligentLinkTool(ctx, toolCall.Arguments)
+	case "codegraph_list_services":
+		response = s.handleListServicesTool(ctx, toolCall.Arguments)
+	case "codegraph_service_dependencies":
+		response = s.handleServiceDependenciesTool(ctx, toolCall.Arguments)
+	case "codegraph_service_api_endpoints":
+		response = s.handleServiceAPIEndpointsTool(ctx, toolCall.Arguments)
+	case "codegraph_service_api_calls":
+		response = s.handleServiceAPICallsTool(ctx, toolCall.Arguments)
+	case "codegraph_cross_service_calls":
+		response = s.handleCrossServiceCallsTool(ctx, toolCall.Arguments)
+	case "codegraph_service_architecture":
+		response = s.handleServiceArchitectureTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -1684,6 +1791,413 @@ func (s *CodeGraphMCPServer) handleIntelligentLinkTool(ctx context.Context, args
 	output.WriteString(fmt.Sprintf("- **Semantic matches**: %d\n", len(linkingResult.SemanticMatches)))
 	output.WriteString(fmt.Sprintf("- **Call graph matches**: %d\n", len(linkingResult.CallGraphMatches)))
 	output.WriteString(fmt.Sprintf("- **Total relationships created**: %d\n", linkingResult.CreatedLinks))
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleListServicesTool lists all services with their metadata
+func (s *CodeGraphMCPServer) handleListServicesTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	query := `
+		MATCH (s:Service)
+		OPTIONAL MATCH (s)-[:CONTAINS]->(f:File)
+		WITH s, count(DISTINCT f) AS fileCount
+		OPTIONAL MATCH (s)-[:DEPENDS_ON]->(dep:Service)
+		WITH s, fileCount, collect(DISTINCT dep.name) AS dependencies
+		RETURN s.name AS name, s.packageName AS packageName, s.version AS version,
+		       s.language AS language, fileCount, dependencies
+		ORDER BY s.name
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, query, nil)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString("# Services\n\n")
+
+	if len(result) == 0 {
+		output.WriteString("No services found.\n")
+	} else {
+		for _, record := range result {
+			recordMap := record.AsMap()
+			name := getStringFromRecord(recordMap, "name")
+			packageName := getStringFromRecord(recordMap, "packageName")
+			version := getStringFromRecord(recordMap, "version")
+			language := getStringFromRecord(recordMap, "language")
+			fileCount := getIntFromRecord(recordMap, "fileCount")
+			dependencies := []interface{}{}
+			if deps, ok := recordMap["dependencies"].([]interface{}); ok {
+				dependencies = deps
+			}
+
+			output.WriteString(fmt.Sprintf("## %s\n\n", name))
+			if packageName != "" {
+				output.WriteString(fmt.Sprintf("- **Package**: %s\n", packageName))
+			}
+			if version != "" {
+				output.WriteString(fmt.Sprintf("- **Version**: %s\n", version))
+			}
+			if language != "" {
+				output.WriteString(fmt.Sprintf("- **Language**: %s\n", language))
+			}
+			output.WriteString(fmt.Sprintf("- **Files**: %d\n", fileCount))
+			if len(dependencies) > 0 {
+				output.WriteString("- **Dependencies**: ")
+				depNames := make([]string, len(dependencies))
+				for i, dep := range dependencies {
+					depNames[i] = dep.(string)
+				}
+				output.WriteString(strings.Join(depNames, ", "))
+				output.WriteString("\n")
+			}
+			output.WriteString("\n")
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleServiceDependenciesTool gets dependencies of a service
+func (s *CodeGraphMCPServer) handleServiceDependenciesTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	serviceName, ok := args["service_name"].(string)
+	if !ok {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: service_name is required"}},
+			IsError: true,
+		}
+	}
+
+	query := `
+		MATCH (s:Service {name: $serviceName})-[d:DEPENDS_ON]->(target:Service)
+		RETURN target.name AS targetService, target.packageName AS packageName,
+		       d.importCount AS importCount, d.packageName AS importedPackage
+		ORDER BY importCount DESC
+	`
+
+	params := map[string]interface{}{
+		"serviceName": serviceName,
+	}
+
+	result, err := s.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# Dependencies for %s\n\n", serviceName))
+
+	if len(result) == 0 {
+		output.WriteString("No dependencies found.\n")
+	} else {
+		output.WriteString("| Target Service | Package Name | Import Count | Imported Package |\n")
+		output.WriteString("|----------------|--------------|--------------|------------------|\n")
+		for _, record := range result {
+			recordMap := record.AsMap()
+			targetService := getStringFromRecord(recordMap, "targetService")
+			packageName := getStringFromRecord(recordMap, "packageName")
+			importCount := getIntFromRecord(recordMap, "importCount")
+			importedPackage := getStringFromRecord(recordMap, "importedPackage")
+
+			output.WriteString(fmt.Sprintf("| %s | %s | %d | %s |\n",
+				targetService, packageName, importCount, importedPackage))
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleServiceAPIEndpointsTool gets API endpoints exposed by a service
+func (s *CodeGraphMCPServer) handleServiceAPIEndpointsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	serviceName, ok := args["service_name"].(string)
+	if !ok {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: service_name is required"}},
+			IsError: true,
+		}
+	}
+
+	query := `
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS*]->(f:Function)-[e:EXPOSES_API]->(api:APIRoute)
+		RETURN f.name AS functionName, api.method AS method, api.endpoint AS endpoint,
+		       api.line AS line, f.file AS filePath
+		ORDER BY api.endpoint, api.method
+	`
+
+	params := map[string]interface{}{
+		"serviceName": serviceName,
+	}
+
+	result, err := s.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# API Endpoints for %s\n\n", serviceName))
+
+	if len(result) == 0 {
+		output.WriteString("No API endpoints found.\n")
+	} else {
+		output.WriteString("| Method | Endpoint | Function | File |\n")
+		output.WriteString("|--------|----------|----------|------|\n")
+		for _, record := range result {
+			recordMap := record.AsMap()
+			method := getStringFromRecord(recordMap, "method")
+			endpoint := getStringFromRecord(recordMap, "endpoint")
+			functionName := getStringFromRecord(recordMap, "functionName")
+			filePath := getStringFromRecord(recordMap, "filePath")
+
+			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				method, endpoint, functionName, filePath))
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleServiceAPICallsTool gets API calls made by a service
+func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	serviceName, ok := args["service_name"].(string)
+	if !ok {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: service_name is required"}},
+			IsError: true,
+		}
+	}
+
+	query := `
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS*]->(f:Function)-[c:CALLS_API]->(call)
+		WHERE call:HTTPCall OR call:SDKCall
+		OPTIONAL MATCH (call)-[:TARGETS_SERVICE]->(target:Service)
+		RETURN f.name AS functionName,
+		       CASE WHEN call:HTTPCall THEN 'HTTP' ELSE 'SDK' END AS callType,
+		       call.url AS url, call.method AS method, call.target AS target,
+		       target.name AS targetService,
+		       f.file AS filePath
+		ORDER BY callType, target
+	`
+
+	params := map[string]interface{}{
+		"serviceName": serviceName,
+	}
+
+	result, err := s.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# API Calls from %s\n\n", serviceName))
+
+	if len(result) == 0 {
+		output.WriteString("No API calls found.\n")
+	} else {
+		output.WriteString("| Type | Target | Method/SDK | URL/Call | Target Service | Function |\n")
+		output.WriteString("|------|--------|------------|----------|----------------|----------|\n")
+		for _, record := range result {
+			recordMap := record.AsMap()
+			callType := getStringFromRecord(recordMap, "callType")
+			target := getStringFromRecord(recordMap, "target")
+			method := getStringFromRecord(recordMap, "method")
+			url := getStringFromRecord(recordMap, "url")
+			targetService := getStringFromRecord(recordMap, "targetService")
+			functionName := getStringFromRecord(recordMap, "functionName")
+
+			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+				callType, target, method, url, targetService, functionName))
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleCrossServiceCallsTool gets cross-service call chains
+func (s *CodeGraphMCPServer) handleCrossServiceCallsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	sourceService, sourceOk := args["source_service"].(string)
+	targetService, targetOk := args["target_service"].(string)
+
+	if !sourceOk || !targetOk {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: source_service and target_service are required"}},
+			IsError: true,
+		}
+	}
+
+	query := `
+		MATCH (source:Service {name: $sourceService})
+		MATCH (target:Service {name: $targetService})
+		MATCH path = shortestPath((source)-[*..10]-(target))
+		RETURN [node in nodes(path) |
+		          CASE
+		            WHEN 'Service' IN labels(node) THEN node.name
+		            WHEN 'Function' IN labels(node) THEN node.name
+		            WHEN 'HTTPCall' IN labels(node) THEN node.url
+		            WHEN 'SDKCall' IN labels(node) THEN node.target
+		            ELSE ''
+		          END
+		       ] AS nodePath,
+		       [rel in relationships(path) | type(rel)] AS relPath,
+		       length(path) AS pathLength
+		LIMIT 10
+	`
+
+	params := map[string]interface{}{
+		"sourceService": sourceService,
+		"targetService": targetService,
+	}
+
+	result, err := s.client.ExecuteQuery(ctx, query, params)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# Call Chains: %s → %s\n\n", sourceService, targetService))
+
+	if len(result) == 0 {
+		output.WriteString("No paths found between these services.\n")
+	} else {
+		for i, record := range result {
+			recordMap := record.AsMap()
+			pathLength := getIntFromRecord(recordMap, "pathLength")
+			nodePath := []interface{}{}
+			if np, ok := recordMap["nodePath"].([]interface{}); ok {
+				nodePath = np
+			}
+			relPath := []interface{}{}
+			if rp, ok := recordMap["relPath"].([]interface{}); ok {
+				relPath = rp
+			}
+
+			output.WriteString(fmt.Sprintf("## Path %d (length: %d)\n\n", i+1, pathLength))
+
+			for j := 0; j < len(nodePath); j++ {
+				node := nodePath[j].(string)
+				output.WriteString(fmt.Sprintf("%s", node))
+				if j < len(relPath) {
+					rel := relPath[j].(string)
+					output.WriteString(fmt.Sprintf(" -[%s]→ ", rel))
+				}
+			}
+			output.WriteString("\n\n")
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleServiceArchitectureTool provides a complete architecture overview
+func (s *CodeGraphMCPServer) handleServiceArchitectureTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	query := `
+		// Get all services
+		MATCH (s:Service)
+		OPTIONAL MATCH (s)-[:DEPENDS_ON]->(dep:Service)
+		WITH s, collect(DISTINCT dep.name) AS dependencies
+
+		// Get API endpoints
+		OPTIONAL MATCH (s)-[:CONTAINS*]->(f:Function)-[:EXPOSES_API]->(api:APIRoute)
+		WITH s, dependencies, count(DISTINCT api) AS apiCount
+
+		// Get API calls
+		OPTIONAL MATCH (s)-[:CONTAINS*]->(f2:Function)-[:CALLS_API]->(call)
+		WHERE call:HTTPCall OR call:SDKCall
+		WITH s, dependencies, apiCount, count(DISTINCT call) AS callCount
+
+		RETURN s.name AS name, s.packageName AS packageName,
+		       dependencies, apiCount, callCount
+		ORDER BY s.name
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, query, nil)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString("# Service Architecture Overview\n\n")
+
+	if len(result) == 0 {
+		output.WriteString("No services found.\n")
+	} else {
+		// Summary
+		output.WriteString(fmt.Sprintf("**Total Services**: %d\n\n", len(result)))
+
+		// Service details
+		for _, record := range result {
+			recordMap := record.AsMap()
+			name := getStringFromRecord(recordMap, "name")
+			packageName := getStringFromRecord(recordMap, "packageName")
+			dependencies := []interface{}{}
+			if deps, ok := recordMap["dependencies"].([]interface{}); ok {
+				dependencies = deps
+			}
+			apiCount := getIntFromRecord(recordMap, "apiCount")
+			callCount := getIntFromRecord(recordMap, "callCount")
+
+			output.WriteString(fmt.Sprintf("## %s\n\n", name))
+			if packageName != "" {
+				output.WriteString(fmt.Sprintf("- **Package**: %s\n", packageName))
+			}
+			output.WriteString(fmt.Sprintf("- **API Endpoints**: %d\n", apiCount))
+			output.WriteString(fmt.Sprintf("- **API Calls**: %d\n", callCount))
+
+			if len(dependencies) > 0 {
+				output.WriteString("- **Dependencies**:\n")
+				for _, dep := range dependencies {
+					output.WriteString(fmt.Sprintf("  - %s\n", dep.(string)))
+				}
+			}
+			output.WriteString("\n")
+		}
+
+		// Relationship graph
+		output.WriteString("## Dependency Graph\n\n```mermaid\ngraph LR\n")
+		for _, record := range result {
+			recordMap := record.AsMap()
+			name := getStringFromRecord(recordMap, "name")
+			dependencies := []interface{}{}
+			if deps, ok := recordMap["dependencies"].([]interface{}); ok {
+				dependencies = deps
+			}
+
+			for _, dep := range dependencies {
+				depName := dep.(string)
+				output.WriteString(fmt.Sprintf("    %s --> %s\n", name, depName))
+			}
+		}
+		output.WriteString("```\n")
+	}
 
 	return ToolCallResponse{
 		Content: []ToolContent{{Type: "text", Text: output.String()}},
