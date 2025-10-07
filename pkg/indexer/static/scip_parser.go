@@ -80,7 +80,12 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 	// Process documents and their symbols
 	for _, doc := range sp.index.Documents {
 		filePath := doc.RelativePath
-		
+
+		// Skip excluded paths like node_modules, vendor, etc.
+		if shouldExcludePath(filePath) {
+			continue
+		}
+
 		// Process occurrences in this document
 		for _, occurrence := range doc.Occurrences {
 			scipSymbol, err := models.ParseSCIPSymbol(occurrence.Symbol)
@@ -138,6 +143,30 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 	return symbolDefs, nil
 }
 
+// shouldExcludePath checks if a file path should be excluded from indexing
+func shouldExcludePath(path string) bool {
+	excludedDirs := []string{
+		"node_modules/",
+		"vendor/",
+		".git/",
+		".next/",
+		".nuxt/",
+		"dist/",
+		"build/",
+		"target/", // Maven/Gradle build output
+		"venv/",   // Python virtual env
+		".venv/",
+		"__pycache__/",
+	}
+
+	for _, dir := range excludedDirs {
+		if strings.Contains(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // ExtractDocuments extracts file information from the SCIP index
 func (sp *SCIPParser) ExtractDocuments() ([]*models.File, error) {
 	if sp.index == nil {
@@ -145,8 +174,16 @@ func (sp *SCIPParser) ExtractDocuments() ([]*models.File, error) {
 	}
 
 	var files []*models.File
+	totalDocs := len(sp.index.Documents)
+	excludedCount := 0
 
 	for _, doc := range sp.index.Documents {
+		// Skip excluded paths like node_modules, vendor, etc.
+		if shouldExcludePath(doc.RelativePath) {
+			excludedCount++
+			continue
+		}
+
 		file := &models.File{
 			Path:     doc.RelativePath,
 			Language: inferLanguage(doc.RelativePath),
@@ -155,6 +192,10 @@ func (sp *SCIPParser) ExtractDocuments() ([]*models.File, error) {
 		}
 
 		files = append(files, file)
+	}
+
+	if excludedCount > 0 {
+		fmt.Printf("Filtered out %d/%d files from excluded directories (node_modules, vendor, etc.)\n", excludedCount, totalDocs)
 	}
 
 	return files, nil

@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/sourcegraph/scip v0.5.2
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
@@ -81,7 +82,6 @@ require (
 	github.com/rs/cors v1.9.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
-	github.com/sashabaranov/go-openai v1.41.2 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/sourcegraph/beaut v0.0.0-20240611013027-627e4c25335a // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
