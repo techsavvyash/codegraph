@@ -166,6 +166,24 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	case LanguageTypeScript, LanguageJavaScript:
 		// scip-typescript index --output <file>
 		args := append(si.langConfig.IndexFlags, "--output", outputFile)
+
+		// Detect workspace type and add appropriate flags
+		workspaceType := si.detectWorkspaceType(absPath)
+		switch workspaceType {
+		case "pnpm":
+			args = append(args, "--pnpm-workspaces")
+			fmt.Println("Detected pnpm workspace, using --pnpm-workspaces")
+		case "yarn":
+			args = append(args, "--yarn-workspaces")
+			fmt.Println("Detected yarn workspace, using --yarn-workspaces")
+		}
+
+		// If no tsconfig.json at root, use --infer-tsconfig
+		if _, err := os.Stat(filepath.Join(absPath, "tsconfig.json")); os.IsNotExist(err) {
+			args = append(args, "--infer-tsconfig")
+			fmt.Println("No root tsconfig.json found, using --infer-tsconfig")
+		}
+
 		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
 	case LanguagePython:
 		// scip-python index --project-name <name> --output <file>
@@ -206,6 +224,32 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	}
 
 	return outputFile, nil
+}
+
+// detectWorkspaceType detects if the project uses a workspace manager (pnpm, yarn, npm)
+func (si *SCIPIndexer) detectWorkspaceType(projectPath string) string {
+	// Check for pnpm-workspace.yaml
+	if _, err := os.Stat(filepath.Join(projectPath, "pnpm-workspace.yaml")); err == nil {
+		return "pnpm"
+	}
+
+	// Check for yarn workspaces in package.json
+	packageJSONPath := filepath.Join(projectPath, "package.json")
+	if data, err := os.ReadFile(packageJSONPath); err == nil {
+		var packageData struct {
+			Workspaces interface{} `json:"workspaces"`
+		}
+		if err := json.Unmarshal(data, &packageData); err == nil {
+			if packageData.Workspaces != nil {
+				// Check for yarn.lock to distinguish yarn from npm
+				if _, err := os.Stat(filepath.Join(projectPath, "yarn.lock")); err == nil {
+					return "yarn"
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // createServiceNode creates the service node in Neo4j
