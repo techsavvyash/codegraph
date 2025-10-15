@@ -91,7 +91,7 @@ func main() {
 	}
 	defer client.Close(context.Background())
 
-	// Initialize embedding service - require GEMINI_API_KEY
+	// Initialize embedding service - optional, only required for embedding-based tools
 	var embeddingService search.EmbeddingService
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
@@ -102,7 +102,7 @@ func main() {
 		embeddingService = search.NewGeminiEmbeddingService(apiKey, "gemini-embedding-001")
 		log.Printf("Using Gemini embedding service")
 	} else {
-		log.Fatalf("GEMINI_API_KEY environment variable is required for embedding functionality")
+		log.Printf("Warning: GEMINI_API_KEY not set - embedding-based tools will not be available")
 	}
 
 	// Initialize search managers
@@ -854,6 +854,13 @@ func (s *CodeGraphMCPServer) handleHybridSearchTool(ctx context.Context, args ma
 		}
 	}
 
+	if s.embeddingService == nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: Hybrid search requires GEMINI_API_KEY environment variable to be set for embedding generation"}},
+			IsError: true,
+		}
+	}
+
 	limit := 10
 	if l, ok := args["limit"].(float64); ok {
 		limit = int(l)
@@ -934,6 +941,13 @@ func (s *CodeGraphMCPServer) handleVectorSearchTool(ctx context.Context, args ma
 	if !ok {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: "Error: query parameter is required"}},
+			IsError: true,
+		}
+	}
+
+	if s.embeddingService == nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: Vector search requires GEMINI_API_KEY environment variable to be set for embedding generation"}},
 			IsError: true,
 		}
 	}
@@ -1431,6 +1445,13 @@ func (s *CodeGraphMCPServer) handleSearchByCommentTool(ctx context.Context, args
 	if !ok {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: "Error: query parameter is required"}},
+			IsError: true,
+		}
+	}
+
+	if s.embeddingService == nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: Comment search requires GEMINI_API_KEY environment variable to be set for embedding generation"}},
 			IsError: true,
 		}
 	}
