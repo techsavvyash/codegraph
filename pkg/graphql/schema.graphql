@@ -1,0 +1,563 @@
+# CodeGraph GraphQL Schema
+
+scalar DateTime
+scalar JSON
+
+# ====================
+# Node Types
+# ====================
+
+type Service {
+  name: String!
+  packageName: String
+  version: String
+  language: String!
+  repositoryURL: String
+  indexedAt: DateTime!
+  fileCount: Int!
+  symbolCount: Int!
+  files: [File!]!
+  metadata: [Metadata!]!
+}
+
+type File {
+  path: String!
+  serviceName: String!
+  language: String!
+  lines: Int
+  size: Int
+  hash: String
+  symbols: [Symbol!]!
+  metadata: [Metadata!]!
+}
+
+type Symbol {
+  scipSymbol: String!
+  name: String!
+  kind: SymbolKind!
+  displayName: String
+  filePath: String!
+  serviceName: String
+  startLine: Int
+  endLine: Int
+  startColumn: Int
+  endColumn: Int
+  signature: String
+  documentation: String
+  metadata: [Metadata!]!
+  references: [SymbolReference!]!
+}
+
+type Function {
+  name: String!
+  signature: String!
+  file: String!
+  startLine: Int!
+  endLine: Int!
+  complexity: Int
+  parameters: [String!]
+  returnType: String
+  metadata: [Metadata!]!
+}
+
+type Class {
+  name: String!
+  fqn: String!
+  file: String!
+  startLine: Int!
+  endLine: Int!
+  methods: [Function!]!
+  fields: [Variable!]!
+  implements: [String!]
+  extends: String
+  metadata: [Metadata!]!
+}
+
+type Variable {
+  name: String!
+  type: String
+  file: String!
+  line: Int!
+  scope: String
+}
+
+type APIRoute {
+  path: String!
+  method: HTTPMethod!
+  handler: String
+  serviceName: String!
+  file: String
+  metadata: [Metadata!]!
+}
+
+# ====================
+# Graph Types
+# ====================
+
+type GraphNode {
+  id: String!
+  type: NodeType!
+  label: String!
+  properties: JSON!
+  metadata: [Metadata!]!
+}
+
+type GraphEdge {
+  id: String!
+  source: String!
+  target: String!
+  type: EdgeType!
+  properties: JSON
+}
+
+type Graph {
+  nodes: [GraphNode!]!
+  edges: [GraphEdge!]!
+  totalNodes: Int!
+  totalEdges: Int!
+  hasMore: Boolean!
+}
+
+# ====================
+# Call Graph Types
+# ====================
+
+type CallGraphNode {
+  symbol: String!
+  name: String!
+  type: String!
+  filePath: String!
+  depth: Int!
+  callCount: Int!
+}
+
+type CallGraphEdge {
+  from: String!
+  to: String!
+  callType: CallType!
+  line: Int
+  recursive: Boolean!
+}
+
+type CallGraph {
+  rootFunction: String!
+  direction: CallDirection!
+  nodes: [CallGraphNode!]!
+  edges: [CallGraphEdge!]!
+  maxDepth: Int!
+}
+
+# ====================
+# Dependency Graph Types
+# ====================
+
+type ServiceDependency {
+  serviceName: String!
+  version: String
+  type: DependencyType!
+  callingFunctions: [String!]!
+  callCount: Int!
+}
+
+type DependencyGraph {
+  serviceName: String!
+  dependencies: [ServiceDependency!]!
+  dependents: [ServiceDependency!]!
+  nodes: [GraphNode!]!
+  edges: [GraphEdge!]!
+}
+
+# ====================
+# Reference Types
+# ====================
+
+type SymbolReference {
+  symbol: String!
+  filePath: String!
+  line: Int!
+  column: Int!
+  context: String
+  isDefinition: Boolean!
+}
+
+# ====================
+# Metadata Types
+# ====================
+
+type Metadata {
+  key: String!
+  value: String!
+  category: String
+  createdAt: DateTime!
+  updatedAt: DateTime
+  createdBy: String
+}
+
+type Annotation {
+  id: String!
+  targetId: String!
+  targetType: NodeType!
+  content: String!
+  author: String
+  createdAt: DateTime!
+  updatedAt: DateTime
+  tags: [String!]
+}
+
+# ====================
+# Search & Query Types
+# ====================
+
+type SearchResult {
+  symbol: Symbol
+  function: Function
+  class: Class
+  file: File
+  score: Float!
+  snippet: String
+}
+
+type SearchResults {
+  results: [SearchResult!]!
+  total: Int!
+  hasMore: Boolean!
+}
+
+type SavedQuery {
+  id: String!
+  name: String!
+  description: String
+  query: String!
+  type: QueryType!
+  createdAt: DateTime!
+  updatedAt: DateTime
+  createdBy: String
+}
+
+# ====================
+# Impact Analysis Types
+# ====================
+
+type ImpactAnalysis {
+  functionSymbol: String!
+  affectedEndpoints: [APIRoute!]!
+  affectedFunctions: [FunctionReference!]!
+  endpointCount: Int!
+  functionCount: Int!
+  maxDepthReached: Int!
+}
+
+type FunctionReference {
+  name: String!
+  signature: String!
+  filePath: String!
+  type: String!
+  depth: Int!
+}
+
+# ====================
+# Diff Types
+# ====================
+
+type DiffNode {
+  id: String!
+  type: NodeType!
+  label: String!
+  changeType: ChangeType!
+  properties: JSON!
+}
+
+type DiffEdge {
+  id: String!
+  source: String!
+  target: String!
+  type: EdgeType!
+  changeType: ChangeType!
+}
+
+type DiffResult {
+  serviceName: String!
+  fromVersion: String!
+  toVersion: String!
+  addedNodes: [DiffNode!]!
+  removedNodes: [DiffNode!]!
+  changedNodes: [DiffNode!]!
+  addedEdges: [DiffEdge!]!
+  removedEdges: [DiffEdge!]!
+  summary: DiffSummary!
+}
+
+type DiffSummary {
+  totalAdded: Int!
+  totalRemoved: Int!
+  totalChanged: Int!
+}
+
+# ====================
+# Statistics Types
+# ====================
+
+type ServiceStats {
+  serviceName: String!
+  totalFiles: Int!
+  totalSymbols: Int!
+  totalFunctions: Int!
+  totalClasses: Int!
+  languages: [LanguageStats!]!
+  complexity: ComplexityStats
+}
+
+type LanguageStats {
+  language: String!
+  fileCount: Int!
+  lineCount: Int!
+}
+
+type ComplexityStats {
+  averageComplexity: Float!
+  maxComplexity: Int!
+  highComplexityCount: Int!
+}
+
+# ====================
+# Enums
+# ====================
+
+enum SymbolKind {
+  FUNCTION
+  METHOD
+  CLASS
+  INTERFACE
+  VARIABLE
+  PARAMETER
+  CONSTANT
+  MODULE
+  NAMESPACE
+  TYPE
+  ENUM
+  PROPERTY
+}
+
+enum NodeType {
+  SERVICE
+  FILE
+  SYMBOL
+  FUNCTION
+  METHOD
+  CLASS
+  INTERFACE
+  VARIABLE
+  API_ROUTE
+  DOCUMENT
+  FEATURE
+}
+
+enum EdgeType {
+  CONTAINS
+  CALLS
+  DEFINES
+  REFERENCES
+  IMPLEMENTS
+  INHERITS_FROM
+  DEPENDS_ON
+  EXPOSES_API
+  CALLS_API
+  MENTIONS
+  LINKED_TO
+}
+
+enum HTTPMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+  OPTIONS
+  HEAD
+}
+
+enum CallDirection {
+  INCOMING
+  OUTGOING
+  BOTH
+}
+
+enum CallType {
+  DIRECT
+  INDIRECT
+}
+
+enum DependencyType {
+  DIRECT
+  TRANSITIVE
+}
+
+enum QueryType {
+  CYPHER
+  VISUAL
+  TEXT
+}
+
+enum ChangeType {
+  ADDED
+  REMOVED
+  MODIFIED
+  UNCHANGED
+}
+
+# ====================
+# Input Types
+# ====================
+
+input PaginationInput {
+  offset: Int!
+  limit: Int!
+}
+
+input GraphFilter {
+  nodeTypes: [NodeType!]
+  languages: [String!]
+  services: [String!]
+  minDepth: Int
+  maxDepth: Int
+}
+
+input CallGraphInput {
+  rootFunction: String!
+  direction: CallDirection!
+  maxDepth: Int
+}
+
+input SearchInput {
+  query: String!
+  types: [NodeType!]
+  services: [String!]
+  fuzzy: Boolean
+  pagination: PaginationInput
+}
+
+input MetadataInput {
+  key: String!
+  value: String!
+  category: String
+}
+
+input AnnotationInput {
+  targetId: String!
+  targetType: NodeType!
+  content: String!
+  tags: [String!]
+}
+
+input SavedQueryInput {
+  name: String!
+  description: String
+  query: String!
+  type: QueryType!
+}
+
+input DiffInput {
+  serviceName: String!
+  fromVersion: String!
+  toVersion: String!
+}
+
+# ====================
+# Queries
+# ====================
+
+type Query {
+  # Service queries
+  services: [Service!]!
+  service(name: String!): Service
+  serviceStats(name: String!): ServiceStats
+
+  # Graph queries
+  graph(
+    serviceName: String!
+    filter: GraphFilter
+    pagination: PaginationInput
+  ): Graph!
+
+  graphNode(id: String!): GraphNode
+
+  # Call graph queries
+  callGraph(input: CallGraphInput!): CallGraph!
+
+  # Dependency queries
+  dependencyGraph(serviceName: String!): DependencyGraph!
+
+  # Symbol queries
+  symbol(scipSymbol: String!): Symbol
+  symbolReferences(scipSymbol: String!): [SymbolReference!]!
+
+  # File queries
+  file(path: String!, serviceName: String!): File
+  fileHierarchy(serviceName: String!): JSON!
+
+  # Search queries
+  search(input: SearchInput!): SearchResults!
+
+  # Metadata queries
+  metadata(targetId: String!, targetType: NodeType!): [Metadata!]!
+  annotations(targetId: String!, targetType: NodeType!): [Annotation!]!
+
+  # Saved queries
+  savedQueries: [SavedQuery!]!
+  savedQuery(id: String!): SavedQuery
+
+  # Impact analysis
+  impactAnalysis(functionSymbol: String!): ImpactAnalysis!
+
+  # Diff
+  diff(input: DiffInput!): DiffResult!
+
+  # Raw Cypher execution (for advanced users)
+  executeCypher(query: String!): JSON!
+}
+
+# ====================
+# Mutations
+# ====================
+
+type Mutation {
+  # Metadata mutations
+  addMetadata(
+    targetId: String!
+    targetType: NodeType!
+    metadata: MetadataInput!
+  ): Metadata!
+
+  updateMetadata(
+    targetId: String!
+    targetType: NodeType!
+    key: String!
+    metadata: MetadataInput!
+  ): Metadata!
+
+  deleteMetadata(
+    targetId: String!
+    targetType: NodeType!
+    key: String!
+  ): Boolean!
+
+  # Annotation mutations
+  addAnnotation(input: AnnotationInput!): Annotation!
+  updateAnnotation(id: String!, content: String!, tags: [String!]): Annotation!
+  deleteAnnotation(id: String!): Boolean!
+
+  # Saved query mutations
+  saveQuery(input: SavedQueryInput!): SavedQuery!
+  updateQuery(id: String!, input: SavedQueryInput!): SavedQuery!
+  deleteQuery(id: String!): Boolean!
+
+  # Bulk operations
+  bulkAddMetadata(
+    targetIds: [String!]!
+    targetType: NodeType!
+    metadata: MetadataInput!
+  ): Int!
+
+  # Index operations (trigger reindex)
+  reindexService(serviceName: String!): Boolean!
+}

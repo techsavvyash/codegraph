@@ -17,8 +17,41 @@ install-deps: ## Install Go dependencies
 build: ## Build the CLI application
 	go build -o bin/codegraph ./cmd/codegraph
 
-build-server: ## Build the server application
+build-server: ## Build the GraphQL server application
 	go build -o bin/server ./cmd/server
+
+run-server: build-server ## Build and run the GraphQL server
+	./bin/server
+
+server-dev: ## Run GraphQL server in development mode
+	@echo "Starting GraphQL server..."
+	@echo "GraphQL endpoint will be available at http://localhost:8080/graphql"
+	@echo "GraphiQL IDE will be available at http://localhost:8080/graphql"
+	PORT=8080 go run ./cmd/server
+
+# Frontend operations
+web-install: ## Install frontend dependencies
+	cd web && npm install
+
+web-dev: ## Run frontend in development mode
+	cd web && npm run dev
+
+web-build: ## Build frontend for production
+	cd web && npm run build
+
+web-start: ## Start frontend production server
+	cd web && npm start
+
+web-clean: ## Clean frontend build artifacts
+	rm -rf web/.next web/out web/node_modules
+
+# Full stack development
+full-stack: ## Run both backend and frontend in development mode
+	@echo "Starting full stack development environment..."
+	@echo "Starting GraphQL server on port 8080..."
+	@PORT=8080 go run ./cmd/server & \
+	echo "Starting Next.js frontend on port 3000..." && \
+	cd web && npm run dev
 
 test: ## Run tests
 	go test -v ./...
