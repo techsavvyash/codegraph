@@ -1,4 +1,8 @@
 .env
 
+# Binary files
+bin/
+*.exe
+
 # SCIP index files (temporary)
 index.scip
