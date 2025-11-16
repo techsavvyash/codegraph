@@ -362,7 +362,13 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	// Second pass: Create reference relationships
-	for _, symbolDef := range symbolDefs {
+	fmt.Printf("\nCreating reference relationships...\n")
+	processedRefs := 0
+	for i, symbolDef := range symbolDefs {
+		if i%1000 == 0 {
+			fmt.Printf("Processing references for symbol %d/%d (created %d references)\n", i, len(symbolDefs), processedRefs)
+		}
+
 		symbolID, exists := symbolNodes[symbolDef.Symbol.String()]
 		if !exists {
 			continue
@@ -373,12 +379,14 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 				err := si.createReferenceRelationship(ctx, ref, symbolID, fileNodes)
 				if err != nil {
 					fmt.Printf("Warning: failed to create reference relationship: %v\n", err)
+				} else {
+					processedRefs++
 				}
 			}
 		}
 	}
 
-	fmt.Printf("Completed indexing symbols\n")
+	fmt.Printf("Completed indexing symbols (created %d reference relationships)\n", processedRefs)
 	return nil
 }
 

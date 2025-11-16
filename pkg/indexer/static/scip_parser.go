@@ -53,7 +53,8 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 		return nil, fmt.Errorf("no SCIP index loaded")
 	}
 
-	var symbolDefs []*models.SymbolDefinition
+	// Use a map for O(1) lookups instead of O(n) linear search
+	symbolMap := make(map[string]*models.SymbolDefinition)
 
 	// Process external symbols first
 	for _, symbolInfo := range sp.index.ExternalSymbols {
@@ -74,7 +75,7 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 			Refs: []*models.SymbolReference{},
 		}
 
-		symbolDefs = append(symbolDefs, symbolDef)
+		symbolMap[scipSymbol.String()] = symbolDef
 	}
 
 	// Process documents and their symbols
@@ -107,16 +108,11 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 				IsDefinition: occurrence.SymbolRoles&int32(scip.SymbolRole_Definition) != 0,
 			}
 
-			// Find or create the symbol definition
-			var targetSymbolDef *models.SymbolDefinition
-			for _, existing := range symbolDefs {
-				if existing.Symbol.String() == scipSymbol.String() {
-					targetSymbolDef = existing
-					break
-				}
-			}
+			// Find or create the symbol definition using map lookup (O(1))
+			symbolKey := scipSymbol.String()
+			targetSymbolDef, exists := symbolMap[symbolKey]
 
-			if targetSymbolDef == nil {
+			if !exists {
 				// Create new symbol definition
 				targetSymbolDef = &models.SymbolDefinition{
 					Symbol: scipSymbol,
@@ -132,12 +128,18 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 					},
 					Refs: []*models.SymbolReference{},
 				}
-				symbolDefs = append(symbolDefs, targetSymbolDef)
+				symbolMap[symbolKey] = targetSymbolDef
 			}
 
 			// Add reference to symbol definition
 			targetSymbolDef.AddReference(ref)
 		}
+	}
+
+	// Convert map to slice
+	symbolDefs := make([]*models.SymbolDefinition, 0, len(symbolMap))
+	for _, symbolDef := range symbolMap {
+		symbolDefs = append(symbolDefs, symbolDef)
 	}
 
 	return symbolDefs, nil
