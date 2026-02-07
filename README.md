@@ -25,170 +25,357 @@ The platform consists of three main pipelines:
 2. **Incremental Indexing Pipeline**: Real-time updates using tree-sitter (planned)
 3. **Document Indexing Pipeline**: Integration with business documents and specifications (planned)
 
-## 🚀 Quick Start
+## Complete Development Setup
 
-### One-Command Installation
+This section walks you through setting up CodeGraph from scratch: installing prerequisites, starting Neo4j, building the project, indexing a codebase, verifying results in the Neo4j dashboard, and wiring up the MCP server so AI assistants can query your code graph.
 
-Install CodeGraph with everything configured (CLI, Neo4j, MCP server):
+### Prerequisites
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/context-maximiser/main/install.sh | bash
-```
+| Dependency | Minimum Version | Check | Install |
+|---|---|---|---|
+| **Go** | 1.24+ | `go version` | [go.dev/dl](https://go.dev/dl/) |
+| **Docker** + **Docker Compose** | Docker 20+ | `docker --version && docker compose version` | [docker.com/get-started](https://docker.com/get-started) |
+| **Git** | any | `git --version` | Your package manager |
+| **SCIP indexer** (per language) | see table below | `which scip-go` (example) | See table below |
 
-Or download and run locally:
+### Supported Languages & SCIP Indexers
 
-```bash
-git clone <repository-url>
-cd context-maximiser
-./install.sh
-```
-
-The installer will:
-- ✅ Check prerequisites (Go, Docker)
-- ✅ Build the CodeGraph CLI
-- ✅ Start Neo4j database with Docker
-- ✅ Create default configuration (`~/.codegraph.yaml`)
-- ✅ Build and configure the MCP server for Claude Code
-- ✅ Set up everything so you can start indexing immediately
-
-**No need to specify Neo4j credentials each time** - they're stored in `~/.codegraph.yaml`!
-
-#### Installer Environment Variables
-
-Customize the installation with these environment variables:
-
-```bash
-# Custom installation directory (default: ~/.codegraph)
-export CODEGRAPH_INSTALL_DIR="/opt/codegraph"
-
-# Custom binary directory (default: /usr/local/bin)
-export CODEGRAPH_BIN_DIR="$HOME/bin"
-
-# Custom Neo4j password (default: password123)
-export CODEGRAPH_NEO4J_PASSWORD="your-secure-password"
-
-# Run installer with custom settings
-./install.sh
-```
-
-#### What the Installer Does
-
-1. **Checks Prerequisites**: Verifies Go and Docker are installed
-2. **Asks for Permission**: Before starting Docker daemon or installing to system directories
-3. **Builds Everything**: CLI and MCP server
-4. **Configures Database**: Starts Neo4j and creates schema
-5. **Creates Config**: `~/.codegraph.yaml` with credentials (no need to specify them again!)
-6. **Sets Up MCP**: Adds CodeGraph to Claude Code automatically
-
----
-
-### Manual Installation
-
-If you prefer to install manually or need more control:
-
-#### Prerequisites
-
-- Go 1.24 or later
-- Docker and Docker Compose
-- Git
-- Language-specific SCIP indexer (see [Supported Languages](#supported-languages))
-
-#### 1. Clone and Setup
-
-```bash
-git clone <repository-url>
-cd context-maximiser
-
-# Install Go dependencies
-make install-deps
-```
-
-### Supported Languages
-
-CodeGraph supports multiple programming languages through SCIP (Source Code Intelligence Protocol) indexers:
+You need the SCIP indexer binary for each language you want to index:
 
 | Language | SCIP Indexer | Installation |
-|----------|--------------|--------------|
+|---|---|---|
 | **Go** | [scip-go](https://github.com/sourcegraph/scip-go) | `go install github.com/sourcegraph/scip-go/cmd/scip-go@latest` |
 | **TypeScript** | [scip-typescript](https://github.com/sourcegraph/scip-typescript) | `npm install -g @sourcegraph/scip-typescript` |
 | **JavaScript** | [scip-typescript](https://github.com/sourcegraph/scip-typescript) | `npm install -g @sourcegraph/scip-typescript` |
 | **Python** | [scip-python](https://github.com/sourcegraph/scip-python) | `pip install scip-python` |
 | **Java/Scala/Kotlin** | [scip-java](https://sourcegraph.github.io/scip-java/) | See build tool integration docs |
 
-#### 2. Start Neo4j Database
+---
+
+### Step 1 — Clone and install dependencies
 
 ```bash
-# Start Neo4j with Docker Compose
-make docker-up
+git clone <repository-url>
+cd codegraph
 
-# Wait for Neo4j to be ready (about 30 seconds)
-# Neo4j will be available at http://localhost:7474
-# Username: neo4j, Password: password123
+# Download Go modules
+make install-deps
 ```
 
-#### 3. Initialize Database Schema
+### Step 2 — Start Neo4j
 
 ```bash
-# Create required constraints and indexes
+# Starts Neo4j 5.15 (community) with APOC plugins via Docker Compose
+make docker-up
+```
+
+This launches a container named `code-graph-neo4j` exposing:
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| `7474` | HTTP | Neo4j Browser UI |
+| `7687` | Bolt | Driver connections |
+
+Default credentials: **neo4j / password123**
+
+Verify it's running:
+
+```bash
+# Should print "Connected to Neo4j" and version info
+make neo4j-status
+```
+
+You can also open **http://localhost:7474** in your browser and log in with the credentials above.
+
+### Step 3 — Create the database schema
+
+```bash
+# Creates constraints and indexes for all node types
 make neo4j-schema
 
-# Verify schema creation
+# (Optional) Verify schema was created
 make neo4j-schema-info
 ```
 
-#### 4. Index Your First Project
+### Step 4 — Build the CLI
 
 ```bash
-# Index this Go project itself (dogfooding!)
-make index-self-scip
-
-# Or index any project with auto-detection
-./bin/codegraph index scip /path/to/your/project --service="my-service"
-
-# Explicitly specify language
-./bin/codegraph index scip /path/to/typescript/project --language=typescript --service="frontend"
-
-# Index a Python project
-./bin/codegraph index scip /path/to/python/project --language=python --service="ml-service"
+make build          # outputs bin/codegraph
 ```
 
-#### 5. Query the Graph
+### Step 5 — Install a SCIP indexer
+
+Install at least one indexer for the language you plan to index. For Go projects:
+
+```bash
+go install github.com/sourcegraph/scip-go/cmd/scip-go@latest
+```
+
+For TypeScript/JavaScript:
+
+```bash
+npm install -g @sourcegraph/scip-typescript
+```
+
+For Python:
+
+```bash
+pip install scip-python
+```
+
+### Step 6 — Index a codebase
+
+Index CodeGraph itself as a test (Go):
+
+```bash
+./bin/codegraph index scip . --service="codegraph" --version="v1.0.0"
+```
+
+Index any other project:
+
+```bash
+# Auto-detect language
+./bin/codegraph index scip /path/to/project --service="my-service"
+
+# Explicitly specify language
+./bin/codegraph index scip /path/to/project --language=typescript --service="frontend"
+./bin/codegraph index scip /path/to/project --language=python --service="ml-service"
+```
+
+### Step 7 — Verify in Neo4j Browser
+
+Open **http://localhost:7474** in your browser, log in (`neo4j` / `password123`), and run these Cypher queries to confirm data was indexed:
+
+**Count all nodes by label:**
+
+```cypher
+MATCH (n) RETURN labels(n) AS label, count(n) AS count ORDER BY count DESC
+```
+
+**Count all relationships by type:**
+
+```cypher
+MATCH ()-[r]->() RETURN type(r) AS relationship, count(r) AS count ORDER BY count DESC
+```
+
+**List indexed services:**
+
+```cypher
+MATCH (s:Service) RETURN s.name, s.version, s.language
+```
+
+**Find all functions in a service:**
+
+```cypher
+MATCH (s:Service {name: 'codegraph'})-[:CONTAINS*]->(f:Function)
+RETURN f.name, f.signature, f.filePath
+LIMIT 25
+```
+
+**Find all callers of a function:**
+
+```cypher
+MATCH (caller)-[:CALLS]->(f:Function {name: 'NewClient'})
+RETURN caller.name, caller.filePath, caller.startLine
+```
+
+**Search symbols by name pattern:**
+
+```cypher
+MATCH (sym:Symbol)
+WHERE sym.name CONTAINS 'Index'
+RETURN sym.name, sym.kind, sym.filePath
+LIMIT 20
+```
+
+You can also query from the CLI:
 
 ```bash
 # Search for symbols
-go run ./cmd/codegraph query search "Client"
+./bin/codegraph query search "Client"
+
+# Get function source code
+./bin/codegraph query source "NewClient"
 
 # Check connection status
-go run ./cmd/codegraph status
+./bin/codegraph status
 ```
 
-## 📋 Detailed Setup
+---
 
-### Manual Setup Steps
+### Step 8 — Set up the MCP Server
 
-1. **Start Neo4j**:
-   ```bash
-   docker-compose up -d
-   ```
+The MCP (Model Context Protocol) server lets AI assistants like Claude, Cursor, and Windsurf query your code graph directly.
 
-2. **Build the CLI**:
-   ```bash
-   make build
-   ```
+#### Build the MCP server
 
-3. **Create Schema**:
-   ```bash
-   ./bin/codegraph schema create
-   ```
+```bash
+cd mcp-server
+go build -o codegraph-mcp .
+cd ..
+```
 
-4. **Index a Project**:
-   ```bash
-   ./bin/codegraph index project . --service="my-service" --version="v1.0.0"
-   ```
+#### Configure for Claude Code (CLI)
+
+```bash
+claude mcp add codegraph \
+  "$(pwd)/mcp-server/codegraph-mcp" \
+  NEO4J_URI=bolt://localhost:7687 \
+  NEO4J_USERNAME=neo4j \
+  NEO4J_PASSWORD=password123
+```
+
+#### Configure for Claude Desktop
+
+Add the following to your MCP configuration file:
+
+- **macOS / Linux:** `~/.config/claude-desktop/mcp_servers.json`
+- **Windows:** `%APPDATA%\Claude\mcp_servers.json`
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "/absolute/path/to/codegraph/mcp-server/codegraph-mcp",
+      "args": [],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "password123"
+      }
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/codegraph` with the actual path to your clone.
+
+Restart Claude Desktop after saving.
+
+#### Configure for Cursor
+
+Open Cursor Settings > MCP, click **+ Add new MCP server**, and enter:
+
+- **Name:** `codegraph`
+- **Type:** `command`
+- **Command:** `/absolute/path/to/codegraph/mcp-server/codegraph-mcp`
+
+Then set the environment variables in Cursor's MCP settings:
+
+```json
+{
+  "NEO4J_URI": "bolt://localhost:7687",
+  "NEO4J_USERNAME": "neo4j",
+  "NEO4J_PASSWORD": "password123"
+}
+```
+
+Alternatively, create a `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "/absolute/path/to/codegraph/mcp-server/codegraph-mcp",
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "password123"
+      }
+    }
+  }
+}
+```
+
+#### Configure for Windsurf
+
+Create or edit `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "/absolute/path/to/codegraph/mcp-server/codegraph-mcp",
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "password123"
+      }
+    }
+  }
+}
+```
+
+Restart Windsurf after saving.
+
+#### Configure for VS Code (Copilot)
+
+Add to your VS Code `settings.json` (or `.vscode/mcp.json` in your project):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "codegraph": {
+        "command": "/absolute/path/to/codegraph/mcp-server/codegraph-mcp",
+        "env": {
+          "NEO4J_URI": "bolt://localhost:7687",
+          "NEO4J_USERNAME": "neo4j",
+          "NEO4J_PASSWORD": "password123"
+        }
+      }
+    }
+  }
+}
+```
+
+#### Available MCP Tools
+
+Once connected, your AI assistant will have access to:
+
+| Tool | Description |
+|---|---|
+| `codegraph_search` | Search functions, methods, classes by name |
+| `codegraph_get_source` | Retrieve exact source code for a function |
+| `codegraph_find_references` | Find all usages of a symbol across the codebase |
+| `codegraph_analyze_function` | Analyze callers, callees, and complexity |
+| `codegraph_hybrid_search` | Combined vector + full-text + semantic search |
+| `codegraph_vector_search` | Pure embedding similarity search |
+| `codegraph_index_documents` | Index markdown/text documents with embeddings |
+| `codegraph_show_document` | Display a document with linked code |
+| `codegraph_list_services` | List all indexed services |
+| `codegraph_service_dependencies` | Show service dependency graph |
+| `codegraph_service_api_endpoints` | List API routes exposed by a service |
+| `codegraph_service_api_calls` | Show API calls made by a service |
+| `codegraph_cross_service_calls` | Find call chains between services |
+| `codegraph_service_architecture` | Full architecture overview |
+
+---
+
+### Quick Setup (all-in-one)
+
+If you want to skip the manual steps, use the automated setup:
+
+```bash
+# Does docker-up + install-deps + neo4j-schema in one command
+make dev-setup
+
+# Build the CLI
+make build
+
+# Index and go
+./bin/codegraph index scip . --service="codegraph" --version="v1.0.0"
+```
+
+Or use the full installer script which also builds the MCP server and configures Claude Code:
+
+```bash
+./install.sh
+```
 
 ### Configuration
 
-Create `~/.codegraph.yaml` for custom configuration:
+Create `~/.codegraph.yaml` for persistent configuration (the installer creates this automatically):
 
 ```yaml
 neo4j:
@@ -199,6 +386,16 @@ neo4j:
 
 verbose: false
 ```
+
+Environment variables override the config file:
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
+| `NEO4J_USERNAME` | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | `password123` | Neo4j password |
+| `NEO4J_DATABASE` | `neo4j` | Neo4j database name |
+| `DEBUG` | `false` | Enable debug logging |
 
 ## 🔍 Usage Examples
 
@@ -291,49 +488,6 @@ func main() {
 }
 ```
 
-## 🔌 MCP Server
-
-CodeGraph provides a Model Context Protocol (MCP) server that exposes code intelligence tools to AI assistants like Claude Code.
-
-### Setup with Claude Code
-
-Add the MCP server to Claude Code using the `claude mcp add` command:
-
-```bash
-claude mcp add codegraph /Users/techsavvyash/Documents/sweatAndBlood/sabbatical/context-maximiser/mcp-server/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password123
-```
-
-Replace the path with your actual CodeGraph installation directory.
-
-### Available MCP Tools
-
-The MCP server provides the following tools for AI assistants:
-
-**Code Intelligence:**
-- `codegraph_search` - Search for symbols across the codebase
-- `codegraph_get_source` - Get function source code with syntax highlighting
-- `codegraph_analyze_function` - Analyze function with callers, callees, and complexity
-
-**Document Intelligence:**
-- `codegraph_index_documents` - Index documents and link to code
-- `codegraph_show_document` - Show document content with linked code
-- `codegraph_link_features` - Link feature descriptions to code using LLMs
-
-**Service Architecture:**
-- `codegraph_list_services` - List all services with metadata
-- `codegraph_service_dependencies` - Show service dependencies (DEPENDS_ON)
-- `codegraph_service_api_endpoints` - List API endpoints exposed by a service
-- `codegraph_service_api_calls` - Show API calls made by a service
-- `codegraph_cross_service_calls` - Find call chains between services
-- `codegraph_service_architecture` - Complete architecture overview with dependency graph
-
-### Building the MCP Server
-
-```bash
-cd mcp-server
-go build -o codegraph-mcp .
-```
-
 ## 🗄️ Graph Schema
 
 The Neo4j database uses a rich schema based on the Code Property Graph model:
@@ -416,24 +570,26 @@ make format             # Format code
 ### Project Structure
 
 ```
-context-maximiser/
+codegraph/
 ├── cmd/
-│   └── codegraph/          # CLI application
+│   └── codegraph/          # CLI application (Cobra commands)
 ├── pkg/
-│   ├── models/             # Graph data models
-│   ├── neo4j/              # Neo4j client and queries  
-│   ├── schema/             # Schema management
+│   ├── models/             # Graph node and relationship types
+│   ├── neo4j/              # Neo4j driver client and query builder
+│   ├── schema/             # Schema constraints and indexes
 │   ├── indexer/
-│   │   └── static/         # Go AST indexer
-│   └── query/              # Query services (LSP, advanced)
-├── docs/
-│   ├── rfc/                # Technical RFCs
-│   ├── architecture/       # Architecture documentation
-│   └── schema/             # Schema documentation
+│   │   ├── static/         # AST + SCIP multi-language indexer
+│   │   └── documents/      # Document and feature indexer
+│   ├── query/              # LSP-like and advanced query services
+│   ├── search/             # Vector, full-text, and hybrid search
+│   └── llm/                # Multi-provider LLM abstraction
+├── mcp-server/             # MCP server for AI assistant integration
+├── docs/                   # Guides, RFCs, and schema documentation
 ├── test/
-│   └── integration/        # Integration tests
-├── docker-compose.yml      # Neo4j setup
-└── Makefile               # Development commands
+│   └── integration/        # Integration tests (requires Neo4j)
+├── docker-compose.yml      # Neo4j 5.15 + APOC setup
+├── Makefile                # Build, test, and dev automation
+└── install.sh              # One-command installer
 ```
 
 ### Adding New Features
@@ -443,48 +599,6 @@ context-maximiser/
 3. **Schema Changes**: Update `pkg/schema/schema.go`
 4. **Indexing Logic**: Extend `pkg/indexer/static/indexer.go`
 5. **Query Patterns**: Add to `pkg/query/` services
-
-## 🔧 Configuration
-
-### Environment Variables
-
-- `DEBUG=true` - Enable debug logging
-- `NEO4J_URI` - Neo4j connection URI
-- `NEO4J_USERNAME` - Neo4j username  
-- `NEO4J_PASSWORD` - Neo4j password
-- `NEO4J_DATABASE` - Neo4j database name
-
-### CLI Flags
-
-- `--verbose, -v` - Verbose output
-- `--neo4j-uri` - Neo4j connection URI
-- `--neo4j-user` - Neo4j username
-- `--neo4j-password` - Neo4j password
-- `--config` - Custom config file path
-
-## 📊 Monitoring and Performance
-
-### Database Performance
-
-- Uses batched operations (UNWIND + MERGE) for efficient writes
-- Comprehensive indexing strategy for fast reads
-- Connection pooling for concurrent access
-- Query result caching (planned)
-
-### Monitoring Queries
-
-```cypher
-// Check node counts by type
-MATCH (n) RETURN labels(n), count(n)
-
-// Check relationship counts
-MATCH ()-[r]->() RETURN type(r), count(r)
-
-// Find expensive queries
-CALL dbms.listQueries() YIELD query, elapsedTimeMillis 
-WHERE elapsedTimeMillis > 1000 
-RETURN query, elapsedTimeMillis
-```
 
 ## 🤖 LLM Provider Support
 
