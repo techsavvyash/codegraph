@@ -516,6 +516,95 @@ var indexDocsCmd = &cobra.Command{
 	},
 }
 
+// docsSyncCmd syncs documents from an external source (Confluence, etc.)
+var docsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync documents from an external source",
+	Long:  "Fetch documents from Confluence or other external sources and index them into the graph",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
+		space, _ := cmd.Flags().GetString("space")
+		docURL, _ := cmd.Flags().GetString("url")
+		docID, _ := cmd.Flags().GetString("doc-id")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		username, _ := cmd.Flags().GetString("username")
+		apiToken, _ := cmd.Flags().GetString("api-token")
+
+		if source == "" {
+			return fmt.Errorf("--source is required (e.g., 'confluence')")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		indexer := documents.NewDocumentIndexer(client)
+
+		// Set scope if provided.
+		syncScopeFlag, _ := cmd.Flags().GetString("scope")
+		syncScopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		if syncScopeFlag == "pr" {
+			prID := syncScopeIDFlag
+			if prID == "" {
+				return fmt.Errorf("--scope-id is required when --scope=pr")
+			}
+			if strings.HasPrefix(prID, "pr-") {
+				prID = prID[3:]
+			}
+			indexer.SetScope(models.NewPRScope(prID))
+		}
+
+		ctx := context.Background()
+
+		var connector documents.DocConnector
+		switch strings.ToLower(source) {
+		case "confluence":
+			if baseURL == "" {
+				return fmt.Errorf("--base-url is required for Confluence (e.g., 'https://your-domain.atlassian.net/wiki')")
+			}
+			if username == "" || apiToken == "" {
+				return fmt.Errorf("--username and --api-token are required for Confluence")
+			}
+			connector = documents.NewConfluenceConnector(documents.ConfluenceConfig{
+				BaseURL:  baseURL,
+				Username: username,
+				APIToken: apiToken,
+			})
+		default:
+			return fmt.Errorf("unsupported source: %s (supported: confluence)", source)
+		}
+
+		// Single document sync (by URL or doc ID).
+		if docURL != "" || docID != "" {
+			id := docID
+			if id == "" {
+				id = docURL
+			}
+			fmt.Printf("Syncing single document: %s\n", id)
+			if err := indexer.SyncExternalDocument(ctx, connector, id); err != nil {
+				return fmt.Errorf("failed to sync document: %w", err)
+			}
+			fmt.Println("✓ Document synced successfully")
+			return nil
+		}
+
+		// Space sync.
+		if space != "" {
+			fmt.Printf("Syncing space: %s from %s\n", space, source)
+			synced, err := indexer.SyncExternalSpace(ctx, connector, space)
+			if err != nil {
+				return fmt.Errorf("failed to sync space: %w", err)
+			}
+			fmt.Printf("✓ Synced %d documents from space %s\n", synced, space)
+			return nil
+		}
+
+		return fmt.Errorf("provide either --space (to sync all docs) or --url/--doc-id (to sync one doc)")
+	},
+}
+
 // indexTombstoneCmd creates tombstones for deleted files/symbols in a PR overlay
 var indexTombstoneCmd = &cobra.Command{
 	Use:   "tombstone [file_paths...]",
@@ -1542,6 +1631,7 @@ func init() {
 	indexCmd.AddCommand(indexSCIPCmd)
 	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
+	indexDocsCmd.AddCommand(docsSyncCmd)
 	indexCmd.AddCommand(indexTombstoneCmd)
 
 	// Flags for project command
@@ -1566,6 +1656,17 @@ func init() {
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexDocsCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+
+	// Flags for docs sync command
+	docsSyncCmd.Flags().String("source", "", "Document source (e.g., 'confluence')")
+	docsSyncCmd.Flags().String("space", "", "Space/collection to sync (e.g., Confluence space key)")
+	docsSyncCmd.Flags().String("url", "", "Single document URL to sync")
+	docsSyncCmd.Flags().String("doc-id", "", "Single document ID to sync")
+	docsSyncCmd.Flags().String("base-url", "", "Base URL of the document source API")
+	docsSyncCmd.Flags().String("username", "", "Username for authentication")
+	docsSyncCmd.Flags().String("api-token", "", "API token for authentication")
+	docsSyncCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
+	docsSyncCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
 
 	// Flags for tombstone command
 	indexTombstoneCmd.Flags().String("scope", "pr", "Scope for tombstone creation (must be 'pr')")

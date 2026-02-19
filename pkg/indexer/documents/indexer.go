@@ -362,3 +362,70 @@ func (di *DocumentIndexer) GetDocumentStats(ctx context.Context) (map[string]any
 	
 	return map[string]any{}, nil
 }
+
+// SyncExternalDocument fetches a document from an external connector and indexes it.
+func (di *DocumentIndexer) SyncExternalDocument(ctx context.Context, connector DocConnector, docID string) error {
+	extDoc, err := connector.FetchDocument(ctx, docID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch document %s: %w", docID, err)
+	}
+
+	return di.indexExternalDocument(ctx, extDoc)
+}
+
+// SyncExternalSpace fetches all documents from a space and indexes them.
+func (di *DocumentIndexer) SyncExternalSpace(ctx context.Context, connector DocConnector, space string) (int, error) {
+	docs, err := connector.ListDocuments(ctx, space)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list documents in space %s: %w", space, err)
+	}
+
+	synced := 0
+	for _, doc := range docs {
+		fmt.Printf("Syncing: %s (%s)\n", doc.Title, doc.ID)
+		extDoc, err := connector.FetchDocument(ctx, doc.ID)
+		if err != nil {
+			fmt.Printf("Warning: failed to fetch %s: %v\n", doc.ID, err)
+			continue
+		}
+		if err := di.indexExternalDocument(ctx, extDoc); err != nil {
+			fmt.Printf("Warning: failed to index %s: %v\n", doc.ID, err)
+			continue
+		}
+		synced++
+	}
+
+	return synced, nil
+}
+
+// indexExternalDocument indexes a single external document with chunks.
+func (di *DocumentIndexer) indexExternalDocument(ctx context.Context, extDoc *ExternalDocument) error {
+	doc := &models.Document{
+		Title:     extDoc.Title,
+		Type:      fmt.Sprintf("External/%s", extDoc.Source),
+		SourceURL: extDoc.SourceURL,
+		Content:   extDoc.Content,
+	}
+
+	docID, err := di.createDocumentNode(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("failed to create document node: %w", err)
+	}
+
+	// Create chunks.
+	docNodeKey := models.DocumentNodeKey(extDoc.SourceURL)
+	chunkStats, err := di.createDocumentChunks(ctx, docID, docNodeKey, extDoc.Content)
+	if err != nil {
+		return fmt.Errorf("failed to create chunks: %w", err)
+	}
+
+	fmt.Printf("  Chunks: %d total, %d created, %d unchanged, %d updated\n",
+		chunkStats.Total, chunkStats.Created, chunkStats.Unchanged, chunkStats.Updated)
+
+	// Link to code symbols.
+	if err := di.linkToCodeSymbols(ctx, docID, extDoc.Content); err != nil {
+		fmt.Printf("  Warning: failed to link to code symbols: %v\n", err)
+	}
+
+	return nil
+}
