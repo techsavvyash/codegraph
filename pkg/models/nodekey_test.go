@@ -141,6 +141,25 @@ func TestFlowNodeKey(t *testing.T) {
 	}
 }
 
+func TestPullRequestNodeKey(t *testing.T) {
+	key := PullRequestNodeKey("123")
+	if key != "pr:123" {
+		t.Errorf("expected pr:123, got %s", key)
+	}
+}
+
+func TestGeneratedDocNodeKey(t *testing.T) {
+	key := GeneratedDocNodeKey("pr_summary", "pr:123")
+	expected := "gendoc:pr_summary:pr:123"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
+	}
+	key2 := GeneratedDocNodeKey("flow_summary", "flow:api:api:GET:/users")
+	if key == key2 {
+		t.Error("GeneratedDocNodeKey should differ for different types/sources")
+	}
+}
+
 func TestNodeKeysAreUnique(t *testing.T) {
 	keys := map[string]string{
 		"service":   ServiceNodeKey("codegraph"),
@@ -157,7 +176,9 @@ func TestNodeKeysAreUnique(t *testing.T) {
 		"api":       APIRouteNodeKey("GET", "/api/users"),
 		"comment":   CommentNodeKey("pkg/models/node.go", 10),
 		"reference": ReferenceNodeKey("pkg/models/node.go", 42, 5),
-		"flow":      FlowNodeKey("api", "api:GET:/api/users"),
+		"flow":         FlowNodeKey("api", "api:GET:/api/users"),
+		"pullrequest":  PullRequestNodeKey("123"),
+		"generateddoc": GeneratedDocNodeKey("pr_summary", "pr:123"),
 	}
 
 	seen := make(map[string]string)

@@ -24,6 +24,8 @@ const (
 	DocumentChunkNode NodeType = "DocumentChunk"
 	FlowNode          NodeType = "Flow"
 	FeatureNode       NodeType = "Feature"
+	PullRequestNode   NodeType = "PullRequest"
+	GeneratedDocNode  NodeType = "GeneratedDoc"
 )
 
 // BaseNode represents common properties for all nodes
@@ -218,6 +220,29 @@ type Feature struct {
 	Tags        []string `json:"tags" neo4j:"tags"`
 }
 
+// PullRequest represents a pull request overlay in the graph.
+type PullRequest struct {
+	BaseNode
+	PRID        string `json:"prId" neo4j:"prId"`
+	Title       string `json:"title" neo4j:"title"`
+	Author      string `json:"author" neo4j:"author"`
+	BaseBranch  string `json:"baseBranch" neo4j:"baseBranch"`
+	HeadBranch  string `json:"headBranch" neo4j:"headBranch"`
+	Status      string `json:"status" neo4j:"status"` // open, merged, closed
+	Description string `json:"description" neo4j:"description"`
+}
+
+// GeneratedDoc represents auto-generated documentation stored as a knowledge unit.
+type GeneratedDoc struct {
+	BaseNode
+	Type       string `json:"type" neo4j:"type"`       // pr_summary, flow_summary, docstring_suggestion
+	Title      string `json:"title" neo4j:"title"`
+	Content    string `json:"content" neo4j:"content"`
+	Model      string `json:"model" neo4j:"model"`           // LLM model used
+	SourceType string `json:"sourceType" neo4j:"sourceType"` // What triggered generation
+	SourceKey  string `json:"sourceKey" neo4j:"sourceKey"`   // nodeKey of the source
+}
+
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
 func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 	now := time.Now()
@@ -285,6 +310,14 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case FeatureNode:
 		return &Feature{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case PullRequestNode:
+		return &PullRequest{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case GeneratedDocNode:
+		return &GeneratedDoc{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	default:

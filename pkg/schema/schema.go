@@ -405,6 +405,50 @@ func GetIndexes() []Index {
 			Properties: []string{"flowType"},
 			Type:       "BTREE",
 		},
+		// PullRequest indexes (Task 10)
+		{
+			Name:       "pr_nodekey_idx",
+			NodeLabel:  "PullRequest",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "pr_nodekey_scope_idx",
+			NodeLabel:  "PullRequest",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "pr_prid_idx",
+			NodeLabel:  "PullRequest",
+			Properties: []string{"prId"},
+			Type:       "BTREE",
+		},
+		// GeneratedDoc indexes (Task 10)
+		{
+			Name:       "gendoc_nodekey_idx",
+			NodeLabel:  "GeneratedDoc",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "gendoc_nodekey_scope_idx",
+			NodeLabel:  "GeneratedDoc",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "gendoc_type_idx",
+			NodeLabel:  "GeneratedDoc",
+			Properties: []string{"type"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "gendoc_sourcekey_idx",
+			NodeLabel:  "GeneratedDoc",
+			Properties: []string{"sourceKey"},
+			Type:       "BTREE",
+		},
 		// Tombstone indexes (Phase 3)
 		{
 			Name:       "tombstone_nodekey_scope_idx",

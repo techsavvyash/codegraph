@@ -92,6 +92,16 @@ func FlowNodeKey(flowType, entrypointKey string) string {
 	return "flow:" + flowType + ":" + entrypointKey
 }
 
+// PullRequestNodeKey returns "pr:{prID}".
+func PullRequestNodeKey(prID string) string {
+	return "pr:" + prID
+}
+
+// GeneratedDocNodeKey returns "gendoc:{type}:{sourceKey}".
+func GeneratedDocNodeKey(docType, sourceKey string) string {
+	return "gendoc:" + docType + ":" + sourceKey
+}
+
 // ReferenceNodeKey returns "ref:{filePath}:{startLine}:{startColumn}".
 func ReferenceNodeKey(filePath string, startLine, startColumn int) string {
 	return fmt.Sprintf("ref:%s:%d:%d", filePath, startLine, startColumn)
