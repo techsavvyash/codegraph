@@ -128,6 +128,19 @@ func TestReferenceNodeKey(t *testing.T) {
 	}
 }
 
+func TestFlowNodeKey(t *testing.T) {
+	key := FlowNodeKey("api", "api:GET:/api/users")
+	expected := "flow:api:api:GET:/api/users"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
+	}
+	// Different flow types produce different keys
+	key2 := FlowNodeKey("consumer", "api:GET:/api/users")
+	if key == key2 {
+		t.Error("FlowNodeKey should differ for different flow types")
+	}
+}
+
 func TestNodeKeysAreUnique(t *testing.T) {
 	keys := map[string]string{
 		"service":   ServiceNodeKey("codegraph"),
@@ -144,6 +157,7 @@ func TestNodeKeysAreUnique(t *testing.T) {
 		"api":       APIRouteNodeKey("GET", "/api/users"),
 		"comment":   CommentNodeKey("pkg/models/node.go", 10),
 		"reference": ReferenceNodeKey("pkg/models/node.go", 42, 5),
+		"flow":      FlowNodeKey("api", "api:GET:/api/users"),
 	}
 
 	seen := make(map[string]string)

@@ -22,6 +22,7 @@ const (
 	CommentNode   NodeType = "Comment"
 	DocumentNode      NodeType = "Document"
 	DocumentChunkNode NodeType = "DocumentChunk"
+	FlowNode          NodeType = "Flow"
 	FeatureNode       NodeType = "Feature"
 )
 
@@ -198,6 +199,15 @@ type DocumentChunk struct {
 	EndOffset   int    `json:"endOffset" neo4j:"endOffset"`
 }
 
+// Flow represents a first-class execution flow (e.g., an API request path, consumer pipeline).
+type Flow struct {
+	BaseNode
+	Name           string `json:"name" neo4j:"name"`
+	EntrypointKey  string `json:"entrypointKey" neo4j:"entrypointKey"`
+	FlowType       string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
+	MaxDepth       int    `json:"maxDepth" neo4j:"maxDepth"`
+}
+
 // Feature represents a specific feature or capability
 type Feature struct {
 	BaseNode
@@ -267,6 +277,10 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case DocumentChunkNode:
 		return &DocumentChunk{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case FlowNode:
+		return &Flow{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case FeatureNode:

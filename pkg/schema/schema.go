@@ -380,6 +380,31 @@ func GetIndexes() []Index {
 			Properties: []string{"textHash"},
 			Type:       "BTREE",
 		},
+		// Flow indexes (Task 9)
+		{
+			Name:       "flow_nodekey_idx",
+			NodeLabel:  "Flow",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "flow_nodekey_scope_idx",
+			NodeLabel:  "Flow",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "flow_entrypoint_idx",
+			NodeLabel:  "Flow",
+			Properties: []string{"entrypointKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "flow_type_idx",
+			NodeLabel:  "Flow",
+			Properties: []string{"flowType"},
+			Type:       "BTREE",
+		},
 		// Tombstone indexes (Phase 3)
 		{
 			Name:       "tombstone_nodekey_scope_idx",

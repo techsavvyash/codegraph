@@ -87,6 +87,11 @@ func CommentNodeKey(filePath string, startLine int) string {
 	return fmt.Sprintf("comment:%s:%d", filePath, startLine)
 }
 
+// FlowNodeKey returns "flow:{flowType}:{entrypointKey}".
+func FlowNodeKey(flowType, entrypointKey string) string {
+	return "flow:" + flowType + ":" + entrypointKey
+}
+
 // ReferenceNodeKey returns "ref:{filePath}:{startLine}:{startColumn}".
 func ReferenceNodeKey(filePath string, startLine, startColumn int) string {
 	return fmt.Sprintf("ref:%s:%d:%d", filePath, startLine, startColumn)

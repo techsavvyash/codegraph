@@ -841,6 +841,63 @@ var queryDepsCmd = &cobra.Command{
 	},
 }
 
+// queryFlowsCmd lists or generates flow spines
+var queryFlowsCmd = &cobra.Command{
+	Use:   "flows",
+	Short: "List or generate flow spines",
+	Long:  "List existing flow spines or generate new ones from API endpoints",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		generate, _ := cmd.Flags().GetBool("generate")
+		maxDepth, _ := cmd.Flags().GetInt("max-depth")
+		flowType, _ := cmd.Flags().GetString("type")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		gen := query.NewFlowSpineGenerator(client)
+		if scopeID != "" {
+			gen.SetScope(models.NewPRScope(scopeID))
+		}
+		ctx := context.Background()
+
+		if generate {
+			results, err := gen.GenerateFromAPIEndpoints(ctx, maxDepth)
+			if err != nil {
+				return fmt.Errorf("failed to generate flows: %w", err)
+			}
+			fmt.Printf("Generated %d flow spines\n", len(results))
+			for _, r := range results {
+				fmt.Printf("  %s (%s) — %d steps\n", r.FlowName, r.FlowType, len(r.Steps))
+				for _, s := range r.Steps {
+					fmt.Printf("    [%d] %s (%s)\n", s.Order, s.Name, s.Label)
+				}
+			}
+			return nil
+		}
+
+		// List existing flows.
+		flows, err := gen.ListFlows(ctx, flowType)
+		if err != nil {
+			return fmt.Errorf("failed to list flows: %w", err)
+		}
+
+		if len(flows) == 0 {
+			fmt.Println("No flow spines found. Use --generate to create them from API endpoints.")
+			return nil
+		}
+
+		fmt.Printf("Found %d flow spines:\n", len(flows))
+		for _, f := range flows {
+			fmt.Printf("  %s [%s] (%s)\n", f.FlowName, f.FlowType, f.FlowNodeKey)
+		}
+		return nil
+	},
+}
+
 // serverCmd starts the API server
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -1733,11 +1790,18 @@ func init() {
 	queryCmd.AddCommand(querySearchCmd)
 	queryCmd.AddCommand(querySourceCmd)
 	queryCmd.AddCommand(queryDepsCmd)
+	queryCmd.AddCommand(queryFlowsCmd)
 
 	// Query flags
 	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
+
+	// Flow flags
+	queryFlowsCmd.Flags().Bool("generate", false, "Generate flow spines from API endpoints")
+	queryFlowsCmd.Flags().Int("max-depth", 2, "Maximum call graph traversal depth")
+	queryFlowsCmd.Flags().String("type", "", "Filter by flow type (api, consumer, cron)")
+	queryFlowsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware flows")
 
 	// Benchmark subcommands
 	benchmarkCmd.AddCommand(benchmarkMemoryCmd)
