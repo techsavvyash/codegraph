@@ -37,6 +37,12 @@ echo "OK: schema created"
 # Step 4: Delete all existing nodes (clean slate)
 echo ""
 echo "--- Step 4: Clearing all nodes ---"
+# Use cypher-shell to delete all nodes if available, otherwise use codegraph
+if command -v cypher-shell &>/dev/null; then
+  cypher-shell -u neo4j -p password123 "MATCH (n) DETACH DELETE n" 2>/dev/null || true
+elif docker exec code-graph-neo4j cypher-shell -u neo4j -p password123 "RETURN 1" &>/dev/null; then
+  docker exec code-graph-neo4j cypher-shell -u neo4j -p password123 "MATCH (n) DETACH DELETE n" 2>/dev/null || true
+fi
 "$BIN" schema drop || true
 "$BIN" schema create
 echo "OK: database cleared and schema recreated"

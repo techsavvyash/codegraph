@@ -519,14 +519,14 @@ func (sm *SchemaManager) createIndex(ctx context.Context, index Index) error {
 
 // DropSchema drops all constraints and indexes
 func (sm *SchemaManager) DropSchema(ctx context.Context) error {
-	// Drop all indexes first
-	if err := sm.dropAllIndexes(ctx); err != nil {
-		return fmt.Errorf("failed to drop indexes: %w", err)
-	}
-
-	// Drop all constraints
+	// Drop constraints first (constraint-backed indexes can't be dropped separately)
 	if err := sm.dropAllConstraints(ctx); err != nil {
 		return fmt.Errorf("failed to drop constraints: %w", err)
+	}
+
+	// Drop remaining indexes
+	if err := sm.dropAllIndexes(ctx); err != nil {
+		return fmt.Errorf("failed to drop indexes: %w", err)
 	}
 
 	return nil
