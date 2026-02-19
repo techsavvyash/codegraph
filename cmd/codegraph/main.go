@@ -18,6 +18,7 @@ import (
 	_ "github.com/context-maximiser/code-graph/pkg/llm/litellm"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/openai"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/context-maximiser/code-graph/pkg/query"
 	"github.com/context-maximiser/code-graph/pkg/schema"
 	"github.com/context-maximiser/code-graph/pkg/search"
@@ -675,10 +676,18 @@ var querySearchCmd = &cobra.Command{
 
 		// Get limit from flags, 0 means no limit
 		limit, _ := cmd.Flags().GetInt("limit")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
 
 		ctx := context.Background()
-		results, err := queryBuilder.SearchNodes(ctx, searchTerm,
-			[]string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}, limit)
+		nodeTypes := []string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}
+
+		// Use overlay-aware search when scope-id is provided
+		var results []*neo4jdriver.Record
+		if scopeID != "" {
+			results, err = queryBuilder.SearchNodesScoped(ctx, searchTerm, nodeTypes, limit, scopeID)
+		} else {
+			results, err = queryBuilder.SearchNodes(ctx, searchTerm, nodeTypes, limit)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to search: %w", err)
 		}
@@ -1794,6 +1803,7 @@ func init() {
 
 	// Query flags
 	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
+	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 
