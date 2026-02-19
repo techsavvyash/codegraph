@@ -355,6 +355,31 @@ func GetIndexes() []Index {
 			Properties: []string{"scope", "scopeId"},
 			Type:       "BTREE",
 		},
+		// DocumentChunk indexes (Task 4)
+		{
+			Name:       "docchunk_nodekey_idx",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "docchunk_nodekey_scope_idx",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "docchunk_dockey_scope_idx",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"documentKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "docchunk_texthash_idx",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"textHash"},
+			Type:       "BTREE",
+		},
 		// Tombstone indexes (Phase 3)
 		{
 			Name:       "tombstone_nodekey_scope_idx",

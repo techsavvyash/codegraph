@@ -158,6 +158,23 @@ func TestNodeKeysAreUnique(t *testing.T) {
 	}
 }
 
+func TestDocumentChunkNodeKey(t *testing.T) {
+	key := DocumentChunkNodeKey("doc:docs/README.md", 0)
+	expected := "chunk:doc:docs/README.md#0"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
+	}
+	key2 := DocumentChunkNodeKey("doc:docs/README.md", 3)
+	expected2 := "chunk:doc:docs/README.md#3"
+	if key2 != expected2 {
+		t.Errorf("expected %s, got %s", expected2, key2)
+	}
+	// Different indices produce different keys.
+	if key == key2 {
+		t.Error("DocumentChunkNodeKey should differ for different chunk indices")
+	}
+}
+
 func TestNodeKeyDeterminism(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		a := FunctionNodeKey("pkg/foo.go", "Bar()")

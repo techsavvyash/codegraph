@@ -1377,7 +1377,7 @@ to the specific code functions that implement them.`,
 
 		// Display results
 		fmt.Printf("\n📊 FEATURE LINKING RESULTS\n")
-		fmt.Printf("=" + strings.Repeat("=", 50) + "\n\n")
+		fmt.Println("=" + strings.Repeat("=", 50) + "\n")
 
 		totalFeatures := len(results)
 		totalLinks := 0
@@ -1411,7 +1411,7 @@ to the specific code functions that implement them.`,
 
 		// Summary statistics
 		fmt.Printf("🎉 SUMMARY\n")
-		fmt.Printf("=" + strings.Repeat("=", 30) + "\n")
+		fmt.Println("=" + strings.Repeat("=", 30))
 		fmt.Printf("Features Processed: %d\n", totalFeatures)
 		fmt.Printf("Total Candidates Evaluated: %d\n", totalCandidates)
 		fmt.Printf("Total IMPLEMENTS Links Created: %d\n", totalLinks)

@@ -67,6 +67,11 @@ func DocumentNodeKey(sourceURL string) string {
 	return "doc:" + sourceURL
 }
 
+// DocumentChunkNodeKey returns "chunk:{documentKey}#{chunkIndex}".
+func DocumentChunkNodeKey(documentKey string, chunkIndex int) string {
+	return fmt.Sprintf("chunk:%s#%d", documentKey, chunkIndex)
+}
+
 // FeatureNodeKey returns "feat:{name}".
 func FeatureNodeKey(name string) string {
 	return "feat:" + name

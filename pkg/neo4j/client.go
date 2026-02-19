@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -201,6 +202,50 @@ func (c *Client) CreateRelationship(ctx context.Context, fromID, toID, relType s
 
 	if len(result) == 0 {
 		return "", fmt.Errorf("no records returned from create relationship query")
+	}
+
+	id, ok := result[0].AsMap()["id"].(string)
+	if !ok {
+		return "", fmt.Errorf("failed to extract relationship ID from result")
+	}
+
+	return id, nil
+}
+
+// MergeRelationship creates or updates a relationship between two nodes using MERGE.
+// mergeProps are used to match an existing relationship; setProps are applied on match/create.
+func (c *Client) MergeRelationship(ctx context.Context, fromID, toID, relType string, mergeProps, setProps map[string]any) (string, error) {
+	mergeClause := ""
+	if len(mergeProps) > 0 {
+		parts := make([]string, 0, len(mergeProps))
+		for key := range mergeProps {
+			parts = append(parts, fmt.Sprintf("%s: $merge.%s", key, key))
+		}
+		mergeClause = " {" + strings.Join(parts, ", ") + "}"
+	}
+
+	cypher := fmt.Sprintf(`
+		MATCH (from), (to)
+		WHERE elementId(from) = $fromId AND elementId(to) = $toId
+		MERGE (from)-[r:%s%s]->(to)
+		SET r += $set
+		RETURN elementId(r) as id
+	`, relType, mergeClause)
+
+	params := map[string]any{
+		"fromId": fromID,
+		"toId":   toID,
+		"merge":  mergeProps,
+		"set":    setProps,
+	}
+
+	result, err := c.ExecuteQuery(ctx, cypher, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to merge relationship: %w", err)
+	}
+
+	if len(result) == 0 {
+		return "", fmt.Errorf("no records returned from merge relationship query")
 	}
 
 	id, ok := result[0].AsMap()["id"].(string)

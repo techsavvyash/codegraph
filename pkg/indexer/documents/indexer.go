@@ -76,6 +76,16 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 		}
 	}
 
+	// Create document chunks
+	docNodeKey := models.DocumentNodeKey(doc.SourceURL)
+	chunkStats, err := di.createDocumentChunks(ctx, docID, docNodeKey, doc.Content)
+	if err != nil {
+		fmt.Printf("Warning: failed to create document chunks: %v\n", err)
+	} else {
+		fmt.Printf("Chunks: %d total, %d created, %d unchanged, %d updated\n",
+			chunkStats.Total, chunkStats.Created, chunkStats.Unchanged, chunkStats.Updated)
+	}
+
 	// Create relationships to code symbols using intelligent or simple linking
 	if err := di.linkToCodeSymbols(ctx, docID, doc.Content); err != nil {
 		fmt.Printf("Warning: failed to link to code symbols: %v\n", err)
@@ -83,6 +93,118 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 
 	fmt.Printf("Successfully indexed document: %s\n", doc.Title)
 	return nil
+}
+
+// chunkStats tracks incremental chunk update statistics.
+type chunkStats struct {
+	Total     int
+	Created   int
+	Updated   int
+	Unchanged int
+}
+
+// createDocumentChunks creates DocumentChunk nodes linked to the parent Document via HAS_CHUNK.
+// Uses textHash for incremental updates — only changed chunks are written.
+func (di *DocumentIndexer) createDocumentChunks(ctx context.Context, docID, docNodeKey, content string) (chunkStats, error) {
+	chunks := di.parser.ChunkDocumentWithMeta(content)
+	var stats chunkStats
+	stats.Total = len(chunks)
+
+	// Load existing chunk hashes for this document to detect changes.
+	existingHashes, err := di.loadExistingChunkHashes(ctx, docNodeKey)
+	if err != nil {
+		// Non-fatal: just index all chunks.
+		fmt.Printf("Warning: could not load existing chunk hashes: %v\n", err)
+		existingHashes = map[string]string{}
+	}
+
+	for _, chunk := range chunks {
+		chunkNodeKey := models.DocumentChunkNodeKey(docNodeKey, chunk.ChunkIndex)
+
+		// Check if chunk already exists with the same hash.
+		if existingHash, exists := existingHashes[chunkNodeKey]; exists && existingHash == chunk.TextHash {
+			stats.Unchanged++
+			delete(existingHashes, chunkNodeKey) // Mark as still present.
+			continue
+		}
+
+		if _, exists := existingHashes[chunkNodeKey]; exists {
+			stats.Updated++
+		} else {
+			stats.Created++
+		}
+		delete(existingHashes, chunkNodeKey)
+
+		chunkProps := map[string]any{
+			"documentKey": docNodeKey,
+			"chunkIndex":  chunk.ChunkIndex,
+			"headingPath": chunk.HeadingPath,
+			"content":     chunk.Content,
+			"textHash":    chunk.TextHash,
+			"startOffset": chunk.StartOffset,
+			"endOffset":   chunk.EndOffset,
+			"nodeKey":     chunkNodeKey,
+			"scope":       di.scopeCtx.Scope,
+			"scopeId":     di.scopeCtx.ScopeID,
+		}
+
+		chunkID, err := di.client.MergeNode(ctx, []string{"DocumentChunk"},
+			map[string]any{"nodeKey": chunkNodeKey, "scopeId": di.scopeCtx.ScopeID}, chunkProps)
+		if err != nil {
+			return stats, fmt.Errorf("failed to create chunk %d: %w", chunk.ChunkIndex, err)
+		}
+
+		// Create HAS_CHUNK relationship from Document to DocumentChunk.
+		_, err = di.client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
+			map[string]any{"chunkIndex": chunk.ChunkIndex},
+			map[string]any{"chunkIndex": chunk.ChunkIndex})
+		if err != nil {
+			return stats, fmt.Errorf("failed to create HAS_CHUNK for chunk %d: %w", chunk.ChunkIndex, err)
+		}
+	}
+
+	// Remove stale chunks that no longer exist in the document.
+	for staleKey := range existingHashes {
+		di.deleteStaleChunk(ctx, staleKey)
+	}
+
+	return stats, nil
+}
+
+// loadExistingChunkHashes queries Neo4j for existing DocumentChunk nodes for this document and scope.
+func (di *DocumentIndexer) loadExistingChunkHashes(ctx context.Context, docNodeKey string) (map[string]string, error) {
+	cypher := `MATCH (c:DocumentChunk {documentKey: $docKey, scopeId: $scopeId})
+RETURN c.nodeKey AS nodeKey, c.textHash AS textHash`
+	params := map[string]any{
+		"docKey":  docNodeKey,
+		"scopeId": di.scopeCtx.ScopeID,
+	}
+	results, err := di.client.ExecuteQuery(ctx, cypher, params)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make(map[string]string, len(results))
+	for _, record := range results {
+		m := record.AsMap()
+		nk, _ := m["nodeKey"].(string)
+		th, _ := m["textHash"].(string)
+		if nk != "" {
+			hashes[nk] = th
+		}
+	}
+	return hashes, nil
+}
+
+// deleteStaleChunk removes a DocumentChunk node that no longer corresponds to any chunk in the document.
+func (di *DocumentIndexer) deleteStaleChunk(ctx context.Context, chunkNodeKey string) {
+	cypher := `MATCH (c:DocumentChunk {nodeKey: $nodeKey, scopeId: $scopeId}) DETACH DELETE c`
+	params := map[string]any{
+		"nodeKey": chunkNodeKey,
+		"scopeId": di.scopeCtx.ScopeID,
+	}
+	if _, err := di.client.ExecuteQuery(ctx, cypher, params); err != nil {
+		fmt.Printf("Warning: failed to delete stale chunk %s: %v\n", chunkNodeKey, err)
+	}
 }
 
 // IndexDirectory recursively indexes all documents in a directory

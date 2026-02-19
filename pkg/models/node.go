@@ -20,8 +20,9 @@ const (
 	SymbolNode    NodeType = "Symbol"
 	APIRouteNode  NodeType = "APIRoute"
 	CommentNode   NodeType = "Comment"
-	DocumentNode  NodeType = "Document"
-	FeatureNode   NodeType = "Feature"
+	DocumentNode      NodeType = "Document"
+	DocumentChunkNode NodeType = "DocumentChunk"
+	FeatureNode       NodeType = "Feature"
 )
 
 // BaseNode represents common properties for all nodes
@@ -185,6 +186,18 @@ type Document struct {
 	Content   string `json:"content" neo4j:"content"`
 }
 
+// DocumentChunk represents a chunk of a document for granular linking and incremental updates
+type DocumentChunk struct {
+	BaseNode
+	DocumentKey string `json:"documentKey" neo4j:"documentKey"`
+	ChunkIndex  int    `json:"chunkIndex" neo4j:"chunkIndex"`
+	HeadingPath string `json:"headingPath" neo4j:"headingPath"`
+	Content     string `json:"content" neo4j:"content"`
+	TextHash    string `json:"textHash" neo4j:"textHash"`
+	StartOffset int    `json:"startOffset" neo4j:"startOffset"`
+	EndOffset   int    `json:"endOffset" neo4j:"endOffset"`
+}
+
 // Feature represents a specific feature or capability
 type Feature struct {
 	BaseNode
@@ -250,6 +263,10 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case DocumentNode:
 		return &Document{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case DocumentChunkNode:
+		return &DocumentChunk{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case FeatureNode:
