@@ -2,6 +2,33 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow Rules
+
+### Git Workflow
+- **NEVER push directly to master.** Always create a feature branch and open a PR via `gh pr create`.
+- Branch naming: `feat/<short-description>`, `fix/<short-description>`, `refactor/<short-description>`.
+- Keep PRs focused — one task/phase per PR. Stacked PRs are fine for dependent work.
+- Commit messages follow conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`.
+
+### Planning & Implementation
+- The master implementation plan lives at `docs/12-implementation-plan.md`. Reference it for task ordering and verification steps.
+- Work through tasks sequentially (Task 4 → 5 → ... → 12). Each task should be its own branch + PR.
+- Before starting a task, read the plan entry and understand the verification criteria.
+- After implementing a task, run the verification steps from the plan before opening the PR.
+- Use `make smoke-test` as a baseline regression check between tasks.
+
+### Infrastructure
+- Neo4j runs via `docker compose up -d neo4j` (see `docker-compose.yml`).
+- `scip-go` must be installed for Go SCIP indexing (`go install github.com/sourcegraph/scip-go/cmd/scip-go@latest`).
+- Integration tests and smoke tests require a running Neo4j instance.
+
+### Enterprise Primitives (Already Implemented — Phases 0-3)
+- **nodeKey**: Every node has a deterministic `nodeKey` string. Derivation functions in `pkg/models/nodekey.go`.
+- **Scope**: Every node has `scope` ("main"|"pr") and `scopeId` ("main"|"pr-{id}"). Context in `pkg/models/scope.go`.
+- **Tombstones**: `Tombstone` nodes hide main-scope nodes in PR overlays. Creator in `pkg/indexer/static/tombstone.go`.
+- All merge operations use `(nodeKey, scopeId)` as the composite merge key for idempotency.
+- Legacy UNIQUE constraints have been dropped in favor of composite `(nodeKey, scopeId)` BTREE indexes.
+
 ## Development Commands
 
 ### Building
