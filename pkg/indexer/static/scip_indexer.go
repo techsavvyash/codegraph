@@ -138,10 +138,15 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 // generateSCIPIndex runs the appropriate SCIP indexer to generate a SCIP index file
 func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
-	// Check if the language-specific SCIP binary is available
-	if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
-		return "", fmt.Errorf("%s not found in PATH.\nInstall with: %s\nSee: %s",
+	// Resolve the SCIP binary: check IndexerManager cache first, then system PATH.
+	mgr := NewIndexerManager("")
+	resolvedBinary := mgr.ResolveBinary(si.language)
+	if resolvedBinary != "" {
+		si.langConfig.SCIPBinary = resolvedBinary
+	} else if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
+		return "", fmt.Errorf("%s not found in PATH or cache.\nInstall with: codegraph indexers install --language %s\nOr manually: %s\nSee: %s",
 			si.langConfig.SCIPBinary,
+			si.language,
 			si.langConfig.InstallCommand,
 			si.langConfig.InstallDocs)
 	}
