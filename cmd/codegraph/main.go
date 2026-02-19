@@ -18,6 +18,7 @@ import (
 	_ "github.com/context-maximiser/code-graph/pkg/llm/litellm"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/openai"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/query"
 	"github.com/context-maximiser/code-graph/pkg/schema"
 	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -784,6 +785,57 @@ var querySourceCmd = &cobra.Command{
 		fmt.Println("=" + strings.Repeat("=", len(functionName)+25))
 		fmt.Println(sourceCode)
 		fmt.Println("=" + strings.Repeat("=", len(functionName)+25))
+
+		return nil
+	},
+}
+
+// queryDepsCmd queries service-level dependencies
+var queryDepsCmd = &cobra.Command{
+	Use:   "deps",
+	Short: "Query service dependencies",
+	Long:  "Show inter-service dependencies (CALLS_SERVICE relationships)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		serviceName, _ := cmd.Flags().GetString("service")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+
+		if serviceName == "" {
+			return fmt.Errorf("--service is required")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		depsQuery := query.NewServiceDepsQuery(client)
+		ctx := context.Background()
+
+		deps, err := depsQuery.GetDependencies(ctx, serviceName, scopeID)
+		if err != nil {
+			return fmt.Errorf("failed to query dependencies: %w", err)
+		}
+
+		if len(deps) == 0 {
+			fmt.Printf("No dependencies found for service '%s'\n", serviceName)
+			return nil
+		}
+
+		fmt.Printf("Dependencies for service '%s':\n", serviceName)
+		for _, dep := range deps {
+			direction := "→"
+			peer := dep.ToService
+			if dep.ToService == serviceName {
+				direction = "←"
+				peer = dep.FromService
+			}
+			fmt.Printf("  %s %s %s (confidence: %.2f, source: %s)\n",
+				serviceName, direction, peer, dep.Confidence, dep.Source)
+			for _, ev := range dep.Evidence {
+				fmt.Printf("    evidence: %s\n", ev)
+			}
+		}
 
 		return nil
 	},
@@ -1680,9 +1732,12 @@ func init() {
 	// Query subcommands
 	queryCmd.AddCommand(querySearchCmd)
 	queryCmd.AddCommand(querySourceCmd)
+	queryCmd.AddCommand(queryDepsCmd)
 
 	// Query flags
 	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
+	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
+	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 
 	// Benchmark subcommands
 	benchmarkCmd.AddCommand(benchmarkMemoryCmd)
