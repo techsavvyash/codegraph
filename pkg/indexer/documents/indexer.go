@@ -18,6 +18,7 @@ type DocumentIndexer struct {
 	client                *neo4j.Client
 	parser                *DocumentParser
 	intelligentLinker     *search.IntelligentDocumentLinker
+	chunkLinker           *search.ChunkLinker
 	useIntelligentLinking bool
 	scopeCtx              models.ScopeContext
 }
@@ -27,6 +28,7 @@ func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 	return &DocumentIndexer{
 		client:                client,
 		parser:                NewDocumentParser(),
+		chunkLinker:           search.NewChunkLinker(client),
 		useIntelligentLinking: false,
 		scopeCtx:              models.DefaultScope(),
 	}
@@ -84,6 +86,17 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 	} else {
 		fmt.Printf("Chunks: %d total, %d created, %d unchanged, %d updated\n",
 			chunkStats.Total, chunkStats.Created, chunkStats.Unchanged, chunkStats.Updated)
+	}
+
+	// Create chunk-level MENTIONS links with provenance.
+	if di.chunkLinker != nil {
+		docNodeKey2 := models.DocumentNodeKey(doc.SourceURL)
+		linkCount, err := di.chunkLinker.LinkChunksForDocument(ctx, docNodeKey2, di.scopeCtx.ScopeID)
+		if err != nil {
+			fmt.Printf("Warning: chunk-level linking failed: %v\n", err)
+		} else if linkCount > 0 {
+			fmt.Printf("Chunk MENTIONS links: %d\n", linkCount)
+		}
 	}
 
 	// Create relationships to code symbols using intelligent or simple linking
