@@ -322,6 +322,81 @@ func (qb *QueryBuilder) DiscoverServiceDependencies(ctx context.Context, service
 	return dependencies, nil
 }
 
+// TombstoneFilter returns a Cypher WHERE clause fragment that excludes nodes
+// which have been tombstoned in the given scopeID. If scopeID is empty or "main",
+// no filtering is applied.
+func TombstoneFilter(nodeVar, scopeID string) string {
+	if scopeID == "" || scopeID == "main" {
+		return ""
+	}
+	return fmt.Sprintf(` AND NOT EXISTS {
+		MATCH (t:Tombstone {scopeId: "%s"})
+		WHERE t.targetNodeKey = %s.nodeKey
+	}`, scopeID, nodeVar)
+}
+
+// SearchNodesScoped performs a search with tombstone filtering for PR overlays.
+// It returns nodes visible in the given scopeID by:
+// 1. Including nodes from the PR scope
+// 2. Including main-scope nodes NOT tombstoned in this PR scope
+func (qb *QueryBuilder) SearchNodesScoped(ctx context.Context, searchTerm string, nodeTypes []string, limit int, scopeID string) ([]*neo4j.Record, error) {
+	if scopeID == "" || scopeID == "main" {
+		// No overlay — just search main scope
+		return qb.SearchNodes(ctx, searchTerm, nodeTypes, limit)
+	}
+
+	var labelFilters []string
+	for _, nodeType := range nodeTypes {
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", nodeType))
+	}
+	labelFilter := ""
+	if len(labelFilters) > 0 {
+		labelFilter = "AND (" + strings.Join(labelFilters, " OR ") + ")"
+	}
+
+	tombstoneClause := TombstoneFilter("n", scopeID)
+
+	cypher := fmt.Sprintf(`
+		MATCH (n)
+		WHERE (n.scopeId = $scopeId OR n.scopeId = 'main')
+		%s
+		%s
+		AND (
+			toLower(n.name) CONTAINS toLower($searchTerm) OR
+			toLower(n.displayName) CONTAINS toLower($searchTerm) OR
+			toLower(n.signature) CONTAINS toLower($searchTerm) OR
+			toLower(n.symbol) CONTAINS toLower($searchTerm) OR
+			toLower(n.path) CONTAINS toLower($searchTerm) OR
+			toLower(n.description) CONTAINS toLower($searchTerm) OR
+			toLower(n.content) CONTAINS toLower($searchTerm) OR
+			toLower(n.title) CONTAINS toLower($searchTerm)
+		)
+		RETURN n, labels(n) AS nodeLabels
+		ORDER BY
+			CASE WHEN n.scopeId = $scopeId THEN 0 ELSE 1 END,
+			CASE
+				WHEN n:Function OR n:Method THEN 1
+				WHEN n:Class OR n:Interface THEN 2
+				WHEN n:Variable OR n:Parameter THEN 3
+				WHEN n:File OR n:Feature OR n:Document THEN 4
+				WHEN n:Symbol THEN 5
+				ELSE 6
+			END,
+			n.name
+	`, labelFilter, tombstoneClause)
+
+	if limit > 0 {
+		cypher += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	params := map[string]any{
+		"searchTerm": searchTerm,
+		"scopeId":    scopeID,
+	}
+
+	return qb.client.ExecuteQuery(ctx, cypher, params)
+}
+
 // Helper functions to safely extract values from record maps
 func getString(m map[string]any, key string) string {
 	if v, ok := m[key]; ok {

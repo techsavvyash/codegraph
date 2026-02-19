@@ -21,6 +21,7 @@ type SCIPIndexer struct {
 	repoURL      string
 	language     Language
 	langConfig   *LanguageConfig
+	scopeCtx     models.ScopeContext
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -45,6 +46,7 @@ func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repo
 		repoURL:     repoURL,
 		language:    lang,
 		langConfig:  langConfig,
+		scopeCtx:    models.DefaultScope(),
 	}
 }
 
@@ -263,16 +265,20 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 		}
 	}
 
+	nodeKey := models.ServiceNodeKey(si.serviceName)
 	serviceProps := map[string]any{
 		"name":          si.serviceName,
-		"packageName":   actualPackageName, // Store package name for dependency matching
+		"nodeKey":       nodeKey,
+		"packageName":   actualPackageName,
 		"language":      si.langConfig.DisplayName,
 		"version":       si.version,
 		"repositoryUrl": si.repoURL,
+		"scope":         si.scopeCtx.Scope,
+		"scopeId":       si.scopeCtx.ScopeID,
 	}
 
 	return si.client.MergeNode(ctx, []string{"Service"},
-		map[string]any{"name": si.serviceName}, serviceProps)
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, serviceProps)
 }
 
 // extractNPMPackageName reads package.json and extracts the package name
@@ -296,16 +302,20 @@ func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
 
 // createFileNode creates a file node in Neo4j
 func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, serviceID string) (string, error) {
+	nodeKey := models.FileNodeKey(file.Path)
 	fileProps := map[string]any{
 		"path":         file.Path,
-		"absolutePath": file.Path, // SCIP only provides relative paths
+		"nodeKey":      nodeKey,
+		"absolutePath": file.Path,
 		"language":     file.Language,
-		"hash":         "", // Not available from SCIP
-		"lineCount":    0,  // Not available from SCIP
+		"hash":         "",
+		"lineCount":    0,
+		"scope":        si.scopeCtx.Scope,
+		"scopeId":      si.scopeCtx.ScopeID,
 	}
 
-	fileID, err := si.client.MergeNode(ctx, []string{"File"}, 
-		map[string]any{"path": file.Path}, fileProps)
+	fileID, err := si.client.MergeNode(ctx, []string{"File"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, fileProps)
 	if err != nil {
 		return "", err
 	}
@@ -473,15 +483,19 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 
 // createSymbolNode creates a Symbol node in Neo4j
 func (si *SCIPIndexer) createSymbolNode(ctx context.Context, symbolInfo *models.SymbolInfo) (string, error) {
+	nodeKey := models.SymbolNodeKey(symbolInfo.Symbol.String())
 	symbolProps := map[string]any{
 		"symbol":        symbolInfo.Symbol.String(),
+		"nodeKey":       nodeKey,
 		"kind":          string(symbolInfo.Kind),
 		"displayName":   symbolInfo.DisplayName,
 		"documentation": symbolInfo.Documentation,
+		"scope":         si.scopeCtx.Scope,
+		"scopeId":       si.scopeCtx.ScopeID,
 	}
 
-	return si.client.MergeNode(ctx, []string{"Symbol"}, 
-		map[string]any{"symbol": symbolInfo.Symbol.String()}, symbolProps)
+	return si.client.MergeNode(ctx, []string{"Symbol"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, symbolProps)
 }
 
 // createDefinitionNode creates a definition node (Function, Class, etc.) in Neo4j
@@ -510,28 +524,50 @@ func (si *SCIPIndexer) createDefinitionNode(ctx context.Context, symbolInfo *mod
 		nodeLabel = "Variable"
 	}
 
+	// Derive nodeKey based on node type
+	var nodeKey string
+	switch nodeLabel {
+	case "Function":
+		nodeKey = models.FunctionNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+	case "Method":
+		nodeKey = models.MethodNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+	case "Class":
+		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+	case "Interface":
+		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+	case "Variable":
+		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+	case "Parameter":
+		nodeKey = models.ParameterNodeKey(symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
+	case "Module":
+		nodeKey = models.ModuleNodeKey(symbolInfo.Symbol.String())
+	default:
+		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+	}
+
 	props := map[string]any{
 		"name":        symbolInfo.DisplayName,
+		"nodeKey":     nodeKey,
 		"signature":   symbolInfo.Signature,
 		"filePath":    symbolInfo.FilePath,
 		"startLine":   symbolInfo.StartLine,
 		"endLine":     symbolInfo.EndLine,
 		"startColumn": symbolInfo.StartColumn,
 		"endColumn":   symbolInfo.EndColumn,
+		"scope":       si.scopeCtx.Scope,
+		"scopeId":     si.scopeCtx.ScopeID,
 	}
 
 	// Calculate additional metadata for Functions and Methods
 	if nodeLabel == "Function" || nodeLabel == "Method" {
-		// Calculate lines of code
 		if symbolInfo.EndLine > symbolInfo.StartLine {
 			props["linesOfCode"] = symbolInfo.EndLine - symbolInfo.StartLine + 1
 		} else {
 			props["linesOfCode"] = 1
 		}
 
-		// Calculate byte offsets if we have the file content
 		if symbolInfo.FilePath != "" {
-			startByte, endByte := si.calculateByteOffsets(symbolInfo.FilePath, 
+			startByte, endByte := si.calculateByteOffsets(symbolInfo.FilePath,
 				symbolInfo.StartLine, symbolInfo.StartColumn,
 				symbolInfo.EndLine, symbolInfo.EndColumn)
 			if startByte >= 0 && endByte >= 0 {
@@ -555,39 +591,40 @@ func (si *SCIPIndexer) createDefinitionNode(ctx context.Context, symbolInfo *mod
 		props["docstring"] = symbolInfo.Documentation
 	case "Variable":
 		props["type"] = ""
-		props["scope"] = "unknown"
 		props["isConstant"] = symbolInfo.Kind == models.ConstantSymbol
 	}
 
-	return si.client.MergeNode(ctx, []string{nodeLabel}, 
-		map[string]any{"signature": symbolInfo.Signature, "filePath": symbolInfo.FilePath}, props)
+	return si.client.MergeNode(ctx, []string{nodeLabel},
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, props)
 }
 
 // createReferenceRelationship creates reference relationships
 func (si *SCIPIndexer) createReferenceRelationship(ctx context.Context, ref *models.SymbolReference, symbolID string, fileNodes map[string]string) error {
-	// For now, we'll create a simple reference node and link it to the symbol
-	// In a full implementation, we might want to find the exact AST node that contains the reference
-	
+	nodeKey := models.ReferenceNodeKey(ref.FilePath, ref.StartLine, ref.StartColumn)
 	refProps := map[string]any{
 		"filePath":    ref.FilePath,
+		"nodeKey":     nodeKey,
 		"startLine":   ref.StartLine,
 		"endLine":     ref.EndLine,
 		"startColumn": ref.StartColumn,
 		"endColumn":   ref.EndColumn,
 		"context":     ref.Context,
+		"scope":       si.scopeCtx.Scope,
+		"scopeId":     si.scopeCtx.ScopeID,
 	}
 
-	refID, err := si.client.CreateNode(ctx, []string{"Reference"}, refProps)
+	refID, err := si.client.MergeNode(ctx, []string{"Reference"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, refProps)
 	if err != nil {
 		return err
 	}
 
 	// Link reference to symbol
-	_, err = si.client.CreateRelationship(ctx, refID, symbolID, "REFERENCES", 
+	_, err = si.client.CreateRelationship(ctx, refID, symbolID, "REFERENCES",
 		map[string]any{
 			"isDefinition": ref.IsDefinition,
-			"line": ref.StartLine,
-			"column": ref.StartColumn,
+			"line":         ref.StartLine,
+			"column":       ref.StartColumn,
 		})
 	if err != nil {
 		return err
@@ -618,6 +655,11 @@ func (si *SCIPIndexer) ValidateEnvironment() error {
 			si.langConfig.InstallDocs)
 	}
 	return nil
+}
+
+// SetScope sets the scope context for the indexer.
+func (si *SCIPIndexer) SetScope(scope models.ScopeContext) {
+	si.scopeCtx = scope
 }
 
 // GetLanguage returns the language this indexer is configured for

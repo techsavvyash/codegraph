@@ -27,8 +27,11 @@ const (
 // BaseNode represents common properties for all nodes
 type BaseNode struct {
 	ID        string            `json:"id,omitempty" neo4j:"id,omitempty"`
+	NodeKey   string            `json:"nodeKey,omitempty" neo4j:"nodeKey,omitempty"`
 	Labels    []string          `json:"labels,omitempty" neo4j:"labels,omitempty"`
 	Props     map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
+	Scope     string            `json:"scope,omitempty" neo4j:"scope,omitempty"`
+	ScopeID   string            `json:"scopeId,omitempty" neo4j:"scopeId,omitempty"`
 	CreatedAt time.Time         `json:"createdAt" neo4j:"createdAt"`
 	UpdatedAt time.Time         `json:"updatedAt" neo4j:"updatedAt"`
 }

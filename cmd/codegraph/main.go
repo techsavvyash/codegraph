@@ -13,6 +13,7 @@ import (
 	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
 	"github.com/context-maximiser/code-graph/pkg/llm"
+	"github.com/context-maximiser/code-graph/pkg/models"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/gemini"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/litellm"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/openai"
@@ -366,6 +367,24 @@ The language will be auto-detected from the project structure, or you can specif
 
 		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
 
+		// Set scope if provided
+		scopeFlag, _ := cmd.Flags().GetString("scope")
+		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		if scopeFlag == "pr" {
+			prID := scopeIDFlag
+			if prID == "" {
+				return fmt.Errorf("--scope-id is required when --scope=pr")
+			}
+			// Strip "pr-" prefix if user included it
+			if strings.HasPrefix(prID, "pr-") {
+				prID = prID[3:]
+			}
+			scipIndexer.SetScope(models.NewPRScope(prID))
+			fmt.Printf("Indexing into PR scope: pr-%s\n", prID)
+		} else if scopeIDFlag != "" && scopeIDFlag != "main" {
+			return fmt.Errorf("--scope-id should only be used with --scope=pr")
+		}
+
 		// Validate environment
 		if err := scipIndexer.ValidateEnvironment(); err != nil {
 			return fmt.Errorf("environment validation failed: %w", err)
@@ -439,6 +458,22 @@ var indexDocsCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		indexer := documents.NewDocumentIndexer(client)
+
+		// Set scope if provided
+		docScopeFlag, _ := cmd.Flags().GetString("scope")
+		docScopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		if docScopeFlag == "pr" {
+			prID := docScopeIDFlag
+			if prID == "" {
+				return fmt.Errorf("--scope-id is required when --scope=pr")
+			}
+			if strings.HasPrefix(prID, "pr-") {
+				prID = prID[3:]
+			}
+			indexer.SetScope(models.NewPRScope(prID))
+			fmt.Printf("Indexing docs into PR scope: pr-%s\n", prID)
+		}
+
 		ctx := context.Background()
 
 		// Check if path is a file or directory
@@ -477,6 +512,50 @@ var indexDocsCmd = &cobra.Command{
 		}
 
 		fmt.Println("✓ Documents indexed successfully")
+		return nil
+	},
+}
+
+// indexTombstoneCmd creates tombstones for deleted files/symbols in a PR overlay
+var indexTombstoneCmd = &cobra.Command{
+	Use:   "tombstone [file_paths...]",
+	Short: "Create tombstones for deleted files in a PR overlay",
+	Long:  "Create Tombstone nodes that hide main-scope nodes from queries in a PR scope",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		scopeFlag, _ := cmd.Flags().GetString("scope")
+		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+
+		if scopeFlag != "pr" {
+			return fmt.Errorf("tombstones can only be created in PR scope (use --scope=pr --scope-id=pr-<id>)")
+		}
+		if scopeIDFlag == "" {
+			return fmt.Errorf("--scope-id is required for tombstone creation")
+		}
+
+		prID := scopeIDFlag
+		if strings.HasPrefix(prID, "pr-") {
+			prID = prID[3:]
+		}
+		scopeCtx := models.NewPRScope(prID)
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		creator := static.NewTombstoneCreator(client, scopeCtx)
+
+		fmt.Printf("Creating tombstones in scope %s for %d file(s)...\n", scopeCtx.ScopeID, len(args))
+		ctx := context.Background()
+
+		created, err := creator.CreateFileDeletedTombstones(ctx, args)
+		if err != nil {
+			return fmt.Errorf("failed to create tombstones: %w", err)
+		}
+
+		fmt.Printf("Created %d tombstone(s) in scope %s\n", created, scopeCtx.ScopeID)
 		return nil
 	},
 }
@@ -1463,6 +1542,7 @@ func init() {
 	indexCmd.AddCommand(indexSCIPCmd)
 	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
+	indexCmd.AddCommand(indexTombstoneCmd)
 
 	// Flags for project command
 	indexProjectCmd.Flags().StringP("service", "s", "", "Service name")
@@ -1480,6 +1560,16 @@ func init() {
 	indexSCIPCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
 	indexSCIPCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
 	indexSCIPCmd.Flags().StringP("language", "l", "", fmt.Sprintf("Language to index (supported: %s). If not specified, language will be auto-detected", static.FormatLanguageList()))
+	indexSCIPCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
+	indexSCIPCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+
+	// Flags for docs command
+	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
+	indexDocsCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+
+	// Flags for tombstone command
+	indexTombstoneCmd.Flags().String("scope", "pr", "Scope for tombstone creation (must be 'pr')")
+	indexTombstoneCmd.Flags().String("scope-id", "", "Scope ID for the PR (e.g., 'pr-42')")
 
 	// Flags for incremental command
 	indexIncrementalCmd.Flags().StringP("service", "s", "", "Service name")

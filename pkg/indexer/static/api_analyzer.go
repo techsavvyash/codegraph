@@ -275,17 +275,18 @@ func (aa *APIAnalyzer) detectHTTPCalls(sourceCode string) []*APIPattern {
 
 // createAPIEndpoint creates an APIRoute node and EXPOSES_API relationship
 func (aa *APIAnalyzer) createAPIEndpoint(ctx context.Context, functionID string, endpoint *APIPattern) error {
-	// Create APIRoute node
+	nodeKey := models.APIRouteNodeKey(endpoint.Method, endpoint.Path)
 	routeProps := map[string]any{
 		"path":        endpoint.Path,
 		"method":      endpoint.Method,
+		"nodeKey":     nodeKey,
 		"protocol":    "HTTP",
 		"description": fmt.Sprintf("%s endpoint exposed by %s", endpoint.Method, aa.serviceName),
 		"framework":   endpoint.Framework,
 	}
 
 	routeID, err := aa.client.MergeNode(ctx, []string{"APIRoute"},
-		map[string]any{"path": endpoint.Path, "method": endpoint.Method},
+		map[string]any{"nodeKey": nodeKey},
 		routeProps)
 	if err != nil {
 		return fmt.Errorf("failed to create APIRoute node: %w", err)

@@ -15,19 +15,26 @@ import (
 
 // DocumentIndexer handles indexing documents into Neo4j
 type DocumentIndexer struct {
-	client           *neo4j.Client
-	parser           *DocumentParser
-	intelligentLinker *search.IntelligentDocumentLinker
+	client                *neo4j.Client
+	parser                *DocumentParser
+	intelligentLinker     *search.IntelligentDocumentLinker
 	useIntelligentLinking bool
+	scopeCtx              models.ScopeContext
 }
 
 // NewDocumentIndexer creates a new document indexer
 func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 	return &DocumentIndexer{
-		client: client,
-		parser: NewDocumentParser(),
-		useIntelligentLinking: false, // Default to simple linking
+		client:                client,
+		parser:                NewDocumentParser(),
+		useIntelligentLinking: false,
+		scopeCtx:              models.DefaultScope(),
 	}
+}
+
+// SetScope sets the scope context for the document indexer.
+func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
+	di.scopeCtx = scope
 }
 
 // EnableIntelligentLinking enables semantic analysis and intelligent linking
@@ -106,31 +113,37 @@ func (di *DocumentIndexer) IndexDirectory(ctx context.Context, dirPath string) e
 
 // createDocumentNode creates a Document node in Neo4j
 func (di *DocumentIndexer) createDocumentNode(ctx context.Context, doc *models.Document) (string, error) {
+	nodeKey := models.DocumentNodeKey(doc.SourceURL)
 	docProps := map[string]any{
 		"title":     doc.Title,
 		"type":      doc.Type,
 		"sourceUrl": doc.SourceURL,
 		"content":   doc.Content,
+		"nodeKey":   nodeKey,
+		"scope":     di.scopeCtx.Scope,
+		"scopeId":   di.scopeCtx.ScopeID,
 	}
 
-	// Use sourceUrl as the unique identifier for merging
-	return di.client.MergeNode(ctx, []string{"Document"}, 
-		map[string]any{"sourceUrl": doc.SourceURL}, docProps)
+	return di.client.MergeNode(ctx, []string{"Document"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": di.scopeCtx.ScopeID}, docProps)
 }
 
 // createFeatureNode creates a Feature node in Neo4j
 func (di *DocumentIndexer) createFeatureNode(ctx context.Context, feature *models.Feature) (string, error) {
+	nodeKey := models.FeatureNodeKey(feature.Name)
 	featureProps := map[string]any{
 		"name":        feature.Name,
 		"description": feature.Description,
 		"status":      feature.Status,
 		"priority":    feature.Priority,
 		"tags":        feature.Tags,
+		"nodeKey":     nodeKey,
+		"scope":       di.scopeCtx.Scope,
+		"scopeId":     di.scopeCtx.ScopeID,
 	}
 
-	// Use name as the unique identifier for merging (features with same name are considered the same)
-	return di.client.MergeNode(ctx, []string{"Feature"}, 
-		map[string]any{"name": feature.Name}, featureProps)
+	return di.client.MergeNode(ctx, []string{"Feature"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": di.scopeCtx.ScopeID}, featureProps)
 }
 
 // linkToCodeSymbols creates MENTIONS relationships between documents and code symbols

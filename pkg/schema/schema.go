@@ -34,47 +34,26 @@ type Index struct {
 	Type       string // "BTREE", "TEXT", "POINT", "LOOKUP"
 }
 
-// GetConstraints returns all constraint definitions for the code graph schema
+// GetConstraints returns all constraint definitions for the code graph schema.
+// Note: Old UNIQUE constraints (symbol_unique, service_name_unique, file_path_unique,
+// class_fqn_unique, interface_fqn_unique, module_fqn_unique) have been removed
+// because the same entity can now exist in multiple scopes (main + PR overlays).
+// Uniqueness is enforced via composite (nodeKey, scopeId) indexes instead.
 func GetConstraints() []Constraint {
-	return []Constraint{
-		// Unique constraints for key identifiers
-		{
-			Name:      "symbol_unique",
-			NodeLabel: "Symbol",
-			Property:  "symbol",
-			Type:      "UNIQUE",
-		},
-		{
-			Name:      "service_name_unique",
-			NodeLabel: "Service",
-			Property:  "name",
-			Type:      "UNIQUE",
-		},
-		{
-			Name:      "file_path_unique",
-			NodeLabel: "File", 
-			Property:  "path",
-			Type:      "UNIQUE",
-		},
-		// Node key constraints for composite uniqueness
-		{
-			Name:      "class_fqn_unique",
-			NodeLabel: "Class",
-			Property:  "fqn",
-			Type:      "UNIQUE",
-		},
-		{
-			Name:      "interface_fqn_unique",
-			NodeLabel: "Interface",
-			Property:  "fqn",
-			Type:      "UNIQUE",
-		},
-		{
-			Name:      "module_fqn_unique",
-			NodeLabel: "Module",
-			Property:  "fqn",
-			Type:      "UNIQUE",
-		},
+	return []Constraint{}
+}
+
+// GetDroppedConstraints returns the names of old constraints that should be dropped
+// during schema migration. These were single-property UNIQUE constraints that conflict
+// with the multi-scope model.
+func GetDroppedConstraints() []string {
+	return []string{
+		"symbol_unique",
+		"service_name_unique",
+		"file_path_unique",
+		"class_fqn_unique",
+		"interface_fqn_unique",
+		"module_fqn_unique",
 	}
 }
 
@@ -199,12 +178,211 @@ func GetIndexes() []Index {
 			Properties: []string{"serviceName", "kind"},
 			Type:       "BTREE",
 		},
+		// nodeKey indexes for stable identity (Phase 1)
+		{
+			Name:       "service_nodekey_idx",
+			NodeLabel:  "Service",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "file_nodekey_idx",
+			NodeLabel:  "File",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "symbol_nodekey_idx",
+			NodeLabel:  "Symbol",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_nodekey_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_nodekey_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "class_nodekey_idx",
+			NodeLabel:  "Class",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "interface_nodekey_idx",
+			NodeLabel:  "Interface",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "module_nodekey_idx",
+			NodeLabel:  "Module",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "variable_nodekey_idx",
+			NodeLabel:  "Variable",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "parameter_nodekey_idx",
+			NodeLabel:  "Parameter",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "apiroute_nodekey_idx",
+			NodeLabel:  "APIRoute",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "document_nodekey_idx",
+			NodeLabel:  "Document",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "feature_nodekey_idx",
+			NodeLabel:  "Feature",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "reference_nodekey_idx",
+			NodeLabel:  "Reference",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		// Composite (nodeKey, scopeId) indexes for scoped merge lookups (Phase 2)
+		{
+			Name:       "service_nodekey_scope_idx",
+			NodeLabel:  "Service",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "file_nodekey_scope_idx",
+			NodeLabel:  "File",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "symbol_nodekey_scope_idx",
+			NodeLabel:  "Symbol",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_nodekey_scope_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_nodekey_scope_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "class_nodekey_scope_idx",
+			NodeLabel:  "Class",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "interface_nodekey_scope_idx",
+			NodeLabel:  "Interface",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "variable_nodekey_scope_idx",
+			NodeLabel:  "Variable",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "reference_nodekey_scope_idx",
+			NodeLabel:  "Reference",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "document_nodekey_scope_idx",
+			NodeLabel:  "Document",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "feature_nodekey_scope_idx",
+			NodeLabel:  "Feature",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		// Scope filter indexes for querying by scope (Phase 2)
+		{
+			Name:       "function_scope_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"scope", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "symbol_scope_idx",
+			NodeLabel:  "Symbol",
+			Properties: []string{"scope", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "file_scope_idx",
+			NodeLabel:  "File",
+			Properties: []string{"scope", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "service_scope_idx",
+			NodeLabel:  "Service",
+			Properties: []string{"scope", "scopeId"},
+			Type:       "BTREE",
+		},
+		// Tombstone indexes (Phase 3)
+		{
+			Name:       "tombstone_nodekey_scope_idx",
+			NodeLabel:  "Tombstone",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "tombstone_target_scope_idx",
+			NodeLabel:  "Tombstone",
+			Properties: []string{"targetNodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
 	}
 }
 
 // CreateSchema creates all constraints and indexes for the code graph
 func (sm *SchemaManager) CreateSchema(ctx context.Context) error {
-	// Create constraints first
+	// Drop legacy constraints that conflict with scope model
+	for _, name := range GetDroppedConstraints() {
+		cypher := fmt.Sprintf("DROP CONSTRAINT %s IF EXISTS", name)
+		if _, err := sm.client.ExecuteQuery(ctx, cypher, nil); err != nil {
+			// Non-fatal: constraint may not exist
+			fmt.Printf("Note: could not drop legacy constraint %s: %v\n", name, err)
+		}
+	}
+
+	// Create constraints
 	if err := sm.createConstraints(ctx); err != nil {
 		return fmt.Errorf("failed to create constraints: %w", err)
 	}
@@ -441,28 +619,7 @@ func (sm *SchemaManager) GetSchemaInfo(ctx context.Context) (map[string]any, err
 
 // ValidateSchema checks if the required schema elements exist
 func (sm *SchemaManager) ValidateSchema(ctx context.Context) error {
-	requiredConstraints := GetConstraints()
 	requiredIndexes := GetIndexes()
-
-	// Check constraints
-	constraintsCypher := "SHOW CONSTRAINTS YIELD name"
-	constraintsResult, err := sm.client.ExecuteQuery(ctx, constraintsCypher, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check constraints: %w", err)
-	}
-
-	existingConstraints := make(map[string]bool)
-	for _, record := range constraintsResult {
-		if name, ok := record.AsMap()["name"].(string); ok {
-			existingConstraints[name] = true
-		}
-	}
-
-	for _, constraint := range requiredConstraints {
-		if !existingConstraints[constraint.Name] {
-			return fmt.Errorf("missing constraint: %s", constraint.Name)
-		}
-	}
 
 	// Check indexes
 	indexesCypher := "SHOW INDEXES YIELD name"

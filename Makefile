@@ -1,6 +1,6 @@
 # Code Graph Makefile
 
-.PHONY: help build test clean docker-up docker-down docker-logs install-deps generate-mocks lint format
+.PHONY: help build test clean docker-up docker-down docker-logs install-deps generate-mocks lint format smoke-test
 
 # Default target
 help: ## Show this help message
@@ -135,6 +135,10 @@ dev-scip: build index-self-scip ## Build and index project with SCIP
 # Database utilities  
 db-reset: docker-down docker-up neo4j-schema ## Reset database completely
 	@echo "Database reset complete"
+
+# Smoke test
+smoke-test: ## Run end-to-end smoke test (requires Neo4j + scip-go)
+	@bash scripts/smoke-test.sh
 
 # Testing utilities
 test-coverage: ## Generate test coverage report
