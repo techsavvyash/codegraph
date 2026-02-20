@@ -72,7 +72,8 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 		}
 
 		// Create DESCRIBES relationship from document to feature
-		_, err = di.client.CreateRelationship(ctx, docID, featureID, "DESCRIBES", nil)
+		_, err = di.client.CreateRelationship(ctx, docID, featureID, "DESCRIBES",
+			map[string]any{"scope": di.scopeCtx.Scope, "scopeId": di.scopeCtx.ScopeID})
 		if err != nil {
 			fmt.Printf("Warning: failed to create DESCRIBES relationship: %v\n", err)
 		}
@@ -170,7 +171,7 @@ func (di *DocumentIndexer) createDocumentChunks(ctx context.Context, docID, docN
 		// Create HAS_CHUNK relationship from Document to DocumentChunk.
 		_, err = di.client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
 			map[string]any{"chunkIndex": chunk.ChunkIndex},
-			map[string]any{"chunkIndex": chunk.ChunkIndex})
+			map[string]any{"chunkIndex": chunk.ChunkIndex, "scope": di.scopeCtx.Scope, "scopeId": di.scopeCtx.ScopeID})
 		if err != nil {
 			return stats, fmt.Errorf("failed to create HAS_CHUNK for chunk %d: %w", chunk.ChunkIndex, err)
 		}
@@ -325,8 +326,8 @@ func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID st
 			recordMap := record.AsMap()
 			if symbolObj, ok := recordMap["s"]; ok {
 				if symbolNode, ok := symbolObj.(dbtype.Node); ok {
-					_, err = di.client.CreateRelationship(ctx, docID, symbolNode.ElementId, "MENTIONS", 
-						map[string]any{"context": symbolRef})
+					_, err = di.client.CreateRelationship(ctx, docID, symbolNode.ElementId, "MENTIONS",
+						map[string]any{"context": symbolRef, "scope": di.scopeCtx.Scope, "scopeId": di.scopeCtx.ScopeID})
 					if err != nil {
 						continue // Skip failed relationships
 					}

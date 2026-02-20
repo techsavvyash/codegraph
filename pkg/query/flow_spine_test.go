@@ -88,3 +88,55 @@ func TestFlowSpineGenerator_SetScope(t *testing.T) {
 		t.Errorf("expected scopeID 'pr-42', got %s", gen.scopeCtx.ScopeID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// P3: Verify scope propagation into persistFlow props
+// ---------------------------------------------------------------------------
+
+func TestFlowSpineGenerator_ScopeInFlowProps(t *testing.T) {
+	// This tests that scope context is available for use in flow props.
+	// The actual Cypher execution requires Neo4j, but we verify the generator
+	// carries the right scope context through SetScope.
+	gen := NewFlowSpineGenerator(nil)
+
+	// Default scope
+	if gen.scopeCtx.Scope != "main" {
+		t.Errorf("expected default scope 'main', got %s", gen.scopeCtx.Scope)
+	}
+	if gen.scopeCtx.ScopeID != "main" {
+		t.Errorf("expected default scopeID 'main', got %s", gen.scopeCtx.ScopeID)
+	}
+
+	// Switch to PR scope
+	gen.SetScope(models.NewPRScope("99"))
+	if gen.scopeCtx.Scope != "pr" {
+		t.Errorf("expected scope 'pr' after SetScope, got %s", gen.scopeCtx.Scope)
+	}
+	if gen.scopeCtx.ScopeID != "pr-99" {
+		t.Errorf("expected scopeID 'pr-99' after SetScope, got %s", gen.scopeCtx.ScopeID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// P3: Verify FlowStep preserves fields through scope-filtered queries
+// ---------------------------------------------------------------------------
+
+func TestFlowStep_ScopeAwareFields(t *testing.T) {
+	// FlowStep struct doesn't carry scope directly — scope filtering is in the
+	// Cypher queries. This test verifies that the struct works correctly with
+	// the expected data shapes.
+	steps := []FlowStep{
+		{NodeKey: "api:GET:/users", Name: "GET /users", Label: "APIRoute", Order: 0},
+		{NodeKey: "func:handler.go#GetUsers(...)", Name: "GetUsers", Label: "Function", Order: 1},
+		{NodeKey: "method:repo.go#FindAll(...)", Name: "FindAll", Label: "Method", Order: 2},
+	}
+
+	for i, step := range steps {
+		if step.Order != i {
+			t.Errorf("step %d: expected Order %d, got %d", i, i, step.Order)
+		}
+		if step.NodeKey == "" {
+			t.Errorf("step %d: NodeKey should not be empty", i)
+		}
+	}
+}

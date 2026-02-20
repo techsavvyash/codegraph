@@ -2,6 +2,8 @@ package query
 
 import (
 	"testing"
+
+	"github.com/context-maximiser/code-graph/pkg/models"
 )
 
 func TestInterServiceEdge_Fields(t *testing.T) {
@@ -42,5 +44,54 @@ func TestStrVal(t *testing.T) {
 	}
 	if strVal(m, "missing") != "" {
 		t.Error("expected empty string for missing key")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// P4: Verify CallsServiceRel constant is available
+// ---------------------------------------------------------------------------
+
+func TestCallsServiceRelConstant(t *testing.T) {
+	if string(models.CallsServiceRel) != "CALLS_SERVICE" {
+		t.Errorf("expected CALLS_SERVICE, got %s", models.CallsServiceRel)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// P4: Verify NewServiceDepsQuery constructor
+// ---------------------------------------------------------------------------
+
+func TestNewServiceDepsQuery(t *testing.T) {
+	q := NewServiceDepsQuery(nil)
+	if q == nil {
+		t.Fatal("expected non-nil ServiceDepsQuery")
+	}
+	if q.client != nil {
+		t.Error("expected nil client in test")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// P4: Verify InterServiceEdge uses sdk_call_inference source naming
+// ---------------------------------------------------------------------------
+
+func TestInterServiceEdge_SDKSource(t *testing.T) {
+	dep := InterServiceEdge{
+		FromService: "api-gateway",
+		ToService:   "user-service",
+		RelType:     string(models.CallsServiceRel),
+		Confidence:  0.7,
+		Source:      "sdk_call_inference",
+		Evidence:    []string{"/api/users", "/api/users/profile"},
+	}
+
+	if dep.RelType != "CALLS_SERVICE" {
+		t.Errorf("expected RelType CALLS_SERVICE, got %s", dep.RelType)
+	}
+	if dep.Source != "sdk_call_inference" {
+		t.Errorf("expected Source sdk_call_inference, got %s", dep.Source)
+	}
+	if len(dep.Evidence) != 2 {
+		t.Errorf("expected 2 evidence items, got %d", len(dep.Evidence))
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
@@ -392,9 +393,16 @@ The language will be auto-detected from the project structure, or you can specif
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
 
-		// Validate environment
-		if err := scipIndexer.ValidateEnvironment(); err != nil {
-			return fmt.Errorf("environment validation failed: %w", err)
+		// Validate environment (with optional auto-install)
+		noAutoInstall, _ := cmd.Flags().GetBool("no-auto-install")
+		if noAutoInstall {
+			if err := scipIndexer.ValidateEnvironmentNoInstall(); err != nil {
+				return fmt.Errorf("environment validation failed: %w", err)
+			}
+		} else {
+			if err := scipIndexer.ValidateEnvironment(); err != nil {
+				return fmt.Errorf("environment validation failed: %w", err)
+			}
 		}
 
 		fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
@@ -1193,6 +1201,111 @@ var benchmarkIncrementalCmd = &cobra.Command{
 	},
 }
 
+var benchmarkPipelineCmd = &cobra.Command{
+	Use:   "pipeline [path]",
+	Short: "Benchmark SCIP indexing pipeline phases",
+	Long:  "Profile each phase of the SCIP indexing pipeline and identify bottlenecks",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		languageFlag, _ := cmd.Flags().GetString("language")
+		pprofFlag, _ := cmd.Flags().GetBool("pprof")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+
+		if serviceName == "" {
+			serviceName = "benchmark-pipeline"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		// Start CPU profiling if requested
+		if pprofFlag {
+			f, err := os.Create("cpu.prof")
+			if err != nil {
+				return fmt.Errorf("failed to create CPU profile: %w", err)
+			}
+			defer f.Close()
+			if err := pprof.StartCPUProfile(f); err != nil {
+				return fmt.Errorf("failed to start CPU profile: %w", err)
+			}
+			defer pprof.StopCPUProfile()
+			fmt.Println("CPU profiling enabled, will write to cpu.prof")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		ctx := context.Background()
+
+		// Wipe database
+		fmt.Println("Wiping database...")
+		_, err = client.ExecuteQuery(ctx, "MATCH (n) DETACH DELETE n", nil)
+		if err != nil {
+			return fmt.Errorf("failed to wipe database: %w", err)
+		}
+
+		// Create schema
+		fmt.Println("Creating schema...")
+		schemaManager := schema.NewSchemaManager(client)
+		if err := schemaManager.CreateSchema(ctx); err != nil {
+			return fmt.Errorf("failed to create schema: %w", err)
+		}
+
+		// Determine language
+		var language static.Language
+		if languageFlag != "" {
+			language = static.Language(strings.ToLower(languageFlag))
+			if _, err := static.GetLanguageConfig(language); err != nil {
+				return fmt.Errorf("unsupported language: %s", languageFlag)
+			}
+		} else {
+			detectedLang, err := static.DetectLanguage(projectPath)
+			if err != nil {
+				return fmt.Errorf("failed to detect language: %w", err)
+			}
+			language = detectedLang
+		}
+
+		// Create indexer with timer
+		timer := benchmarks.NewPhaseTimer()
+		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
+		scipIndexer.SetBenchmarkTimer(timer)
+
+		fmt.Printf("Benchmarking SCIP pipeline for %s project at %s...\n\n", language, projectPath)
+
+		if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
+			return fmt.Errorf("indexing failed: %w", err)
+		}
+
+		// Output results
+		if jsonFlag {
+			if err := timer.PrintJSON(os.Stdout); err != nil {
+				return fmt.Errorf("failed to write JSON: %w", err)
+			}
+		} else {
+			timer.PrintTable(os.Stdout)
+		}
+
+		if pprofFlag {
+			fmt.Println("CPU profile written to cpu.prof")
+			fmt.Println("Analyze with: go tool pprof cpu.prof")
+		}
+
+		return nil
+	},
+}
+
 // searchCmd manages advanced search capabilities
 var searchCmd = &cobra.Command{
 	Use:   "search",
@@ -1846,6 +1959,7 @@ func init() {
 	indexSCIPCmd.Flags().StringP("language", "l", "", fmt.Sprintf("Language to index (supported: %s). If not specified, language will be auto-detected", static.FormatLanguageList()))
 	indexSCIPCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexSCIPCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+	indexSCIPCmd.Flags().Bool("no-auto-install", false, "Skip automatic SCIP indexer installation (fail if not found)")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
@@ -1893,6 +2007,15 @@ func init() {
 	benchmarkCmd.AddCommand(benchmarkMemoryCmd)
 	benchmarkCmd.AddCommand(benchmarkFullCmd)
 	benchmarkCmd.AddCommand(benchmarkIncrementalCmd)
+	benchmarkCmd.AddCommand(benchmarkPipelineCmd)
+
+	// Benchmark pipeline flags
+	benchmarkPipelineCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkPipelineCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	benchmarkPipelineCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkPipelineCmd.Flags().StringP("language", "l", "", "Language to index (auto-detected if not specified)")
+	benchmarkPipelineCmd.Flags().Bool("pprof", false, "Write CPU profile to cpu.prof")
+	benchmarkPipelineCmd.Flags().Bool("json", false, "Output results as JSON instead of table")
 
 	// Benchmark flags
 	benchmarkMemoryCmd.Flags().StringP("service", "s", "", "Service name")

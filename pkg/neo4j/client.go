@@ -256,6 +256,87 @@ func (c *Client) MergeRelationship(ctx context.Context, fromID, toID, relType st
 	return id, nil
 }
 
+// MergeNodesBatch merges nodes in UNWIND batches of batchSize, using pure Cypher (no APOC).
+// label is the single Neo4j label for all items.
+// Each item must have "nodeKey", "scopeId", and "props" keys.
+// Returns a map of nodeKey → elementId for every merged node.
+func (c *Client) MergeNodesBatch(ctx context.Context, label string, items []map[string]any, batchSize int) (map[string]string, error) {
+	if len(items) == 0 {
+		return make(map[string]string), nil
+	}
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+
+	cypher := fmt.Sprintf(`
+		UNWIND $batch AS item
+		MERGE (n:%s {nodeKey: item.nodeKey, scopeId: item.scopeId})
+		SET n += item.props
+		RETURN item.nodeKey AS nodeKey, elementId(n) AS id
+	`, label)
+
+	result := make(map[string]string, len(items))
+
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+
+		records, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+		if err != nil {
+			return nil, fmt.Errorf("MergeNodesBatch(%s) chunk %d-%d failed: %w", label, start, end, err)
+		}
+
+		for _, rec := range records {
+			m := rec.AsMap()
+			nk, _ := m["nodeKey"].(string)
+			id, _ := m["id"].(string)
+			if nk != "" && id != "" {
+				result[nk] = id
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// CreateRelsBatch creates relationships in UNWIND batches of batchSize, using pure Cypher (no APOC).
+// relType is the single relationship type for all items.
+// Each item must have "fromId" and "toId" (elementId strings) and "props" (map).
+func (c *Client) CreateRelsBatch(ctx context.Context, relType string, items []map[string]any, batchSize int) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+
+	cypher := fmt.Sprintf(`
+		UNWIND $batch AS item
+		MATCH (a), (b)
+		WHERE elementId(a) = item.fromId AND elementId(b) = item.toId
+		CREATE (a)-[r:%s]->(b)
+		SET r = item.props
+	`, relType)
+
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+
+		_, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+		if err != nil {
+			return fmt.Errorf("CreateRelsBatch(%s) chunk %d-%d failed: %w", relType, start, end, err)
+		}
+	}
+
+	return nil
+}
+
 // BatchCreateNodes creates multiple nodes in a single transaction
 func (c *Client) BatchCreateNodes(ctx context.Context, nodes []BatchNode) error {
 	cypher := `

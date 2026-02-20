@@ -111,23 +111,24 @@ func (q *ServiceDepsQuery) CreateServiceEdge(ctx context.Context, from, to strin
 	return nil
 }
 
-// InferServiceDependencies analyzes HTTPCall/SDKCall nodes to infer CALLS_SERVICE edges.
+// InferServiceDependencies analyzes SDKCall nodes (created by the symbol analyzer
+// via CALLS_API relationships) to infer CALLS_SERVICE edges between services.
 func (q *ServiceDepsQuery) InferServiceDependencies(ctx context.Context, scopeID string) (int, error) {
 	if scopeID == "" {
 		scopeID = "main"
 	}
 
-	// Find HTTPCall nodes that reference external services.
 	cypher := `
-		MATCH (caller:Service)-[:CONTAINS*]->(f:File)-[:CONTAINS]->(fn)-[:MAKES_HTTP_CALL]->(call)
-		WHERE call.targetUrl IS NOT NULL
+		MATCH (caller:Service)-[:CONTAINS*]->(f:File)-[:CONTAINS]->(fn)-[:CALLS_API]->(call:SDKCall)
+		WHERE call.url IS NOT NULL
+		  AND (call.scopeId = $scopeId OR call.scopeId = 'main')
 		WITH caller, call
 		MATCH (target:Service)-[:CONTAINS*]->(targetFile:File)
-		WHERE call.targetUrl CONTAINS target.name AND caller.name <> target.name
-		WITH DISTINCT caller, target, collect(call.targetUrl) AS urls
+		WHERE call.url CONTAINS target.name AND caller.name <> target.name
+		WITH DISTINCT caller, target, collect(call.url) AS urls
 		MERGE (caller)-[r:CALLS_SERVICE {scopeId: $scopeId}]->(target)
 		SET r.confidence = 0.7,
-		    r.source = 'http_call_inference',
+		    r.source = 'sdk_call_inference',
 		    r.evidence = urls,
 		    r.scope = CASE WHEN $scopeId = 'main' THEN 'main' ELSE 'pr' END,
 		    r.scopeId = $scopeId

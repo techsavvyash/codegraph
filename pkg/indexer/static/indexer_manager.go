@@ -31,21 +31,25 @@ func DefaultReleases() []IndexerRelease {
 			Language: LanguageGo,
 			Binary:   "scip-go",
 			Version:  "v0.1.26",
+			URL:      "https://github.com/sourcegraph/scip-go/releases/download/{version}/scip-go_{os}_{arch}",
 		},
 		{
 			Language: LanguageTypeScript,
 			Binary:   "scip-typescript",
 			Version:  "latest",
+			// npm package — installed via installViaCommand()
 		},
 		{
 			Language: LanguagePython,
 			Binary:   "scip-python",
 			Version:  "latest",
+			// pip package — installed via installViaCommand()
 		},
 		{
 			Language: LanguageJava,
 			Binary:   "scip-java",
 			Version:  "latest",
+			// Build tool plugin — see install docs
 		},
 	}
 }

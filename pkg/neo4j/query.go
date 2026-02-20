@@ -371,9 +371,11 @@ func (qb *QueryBuilder) SearchNodesScoped(ctx context.Context, searchTerm string
 			toLower(n.content) CONTAINS toLower($searchTerm) OR
 			toLower(n.title) CONTAINS toLower($searchTerm)
 		)
-		RETURN n, labels(n) AS nodeLabels
+		WITH n
+		ORDER BY CASE WHEN n.scopeId = $scopeId THEN 0 ELSE 1 END
+		WITH n.nodeKey AS nk, collect(n)[0] AS n
+		WITH n, labels(n) AS nodeLabels
 		ORDER BY
-			CASE WHEN n.scopeId = $scopeId THEN 0 ELSE 1 END,
 			CASE
 				WHEN n:Function OR n:Method THEN 1
 				WHEN n:Class OR n:Interface THEN 2
@@ -383,6 +385,7 @@ func (qb *QueryBuilder) SearchNodesScoped(ctx context.Context, searchTerm string
 				ELSE 6
 			END,
 			n.name
+		RETURN n, nodeLabels
 	`, labelFilter, tombstoneClause)
 
 	if limit > 0 {

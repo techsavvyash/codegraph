@@ -23,7 +23,8 @@ const (
 	CallsAPIRel   RelationshipType = "CALLS_API"
 
 	// Service Relationships
-	DependsOnRel RelationshipType = "DEPENDS_ON"
+	DependsOnRel     RelationshipType = "DEPENDS_ON"
+	CallsServiceRel  RelationshipType = "CALLS_SERVICE"
 
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"

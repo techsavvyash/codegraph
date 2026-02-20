@@ -160,6 +160,17 @@ func TestGeneratedDocNodeKey(t *testing.T) {
 	}
 }
 
+func TestSDKCallNodeKey(t *testing.T) {
+	key := SDKCallNodeKey("go-http-client.NewRequestWithContext")
+	if key != "sdkcall:go-http-client.NewRequestWithContext" {
+		t.Errorf("expected sdkcall:go-http-client.NewRequestWithContext, got %s", key)
+	}
+	// Deterministic
+	if SDKCallNodeKey("axios.get") != SDKCallNodeKey("axios.get") {
+		t.Error("SDKCallNodeKey is not deterministic")
+	}
+}
+
 func TestNodeKeysAreUnique(t *testing.T) {
 	keys := map[string]string{
 		"service":   ServiceNodeKey("codegraph"),
@@ -174,6 +185,7 @@ func TestNodeKeysAreUnique(t *testing.T) {
 		"document":  DocumentNodeKey("docs/README.md"),
 		"feature":   FeatureNodeKey("SCIP Indexing"),
 		"api":       APIRouteNodeKey("GET", "/api/users"),
+		"sdkcall":   SDKCallNodeKey("go-http-client.Get"),
 		"comment":   CommentNodeKey("pkg/models/node.go", 10),
 		"reference": ReferenceNodeKey("pkg/models/node.go", 42, 5),
 		"flow":         FlowNodeKey("api", "api:GET:/api/users"),

@@ -53,13 +53,14 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 	// Find API endpoints and their handler functions.
 	cypher := `
 		MATCH (route:APIRoute)
+		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
 		OPTIONAL MATCH (route)<-[:EXPOSES_API]-(handler)
 		WHERE handler:Function OR handler:Method
 		RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
 		       handler.nodeKey AS handlerKey, handler.name AS handlerName,
 		       labels(handler) AS handlerLabels`
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, nil)
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to query API endpoints: %w", err)
 	}
@@ -133,11 +134,12 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 
 	cypher := `
 		MATCH (caller {nodeKey: $nodeKey})-[:CALLS]->(callee)
-		WHERE callee:Function OR callee:Method
+		WHERE (callee:Function OR callee:Method)
+		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
 		LIMIT 20`
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey})
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey, "scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
 		return nil, err
 	}
@@ -201,15 +203,17 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 	for _, step := range steps {
 		cypher := `
 			MATCH (target {nodeKey: $targetKey})
-			WHERE target:Function OR target:Method OR target:APIRoute OR target:Service
+			WHERE (target:Function OR target:Method OR target:APIRoute OR target:Service)
+			  AND (target.scopeId = $scopeId OR target.scopeId = 'main')
 			WITH target LIMIT 1
 			MATCH (flow:Flow {nodeKey: $flowKey, scopeId: $scopeId})
 			MERGE (flow)-[r:HAS_STEP {order: $order}]->(target)
-			SET r.stepName = $stepName`
+			SET r.stepName = $stepName, r.scope = $scope, r.scopeId = $scopeId`
 
 		_, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
 			"flowKey":   flowNodeKey,
 			"scopeId":   g.scopeCtx.ScopeID,
+			"scope":     g.scopeCtx.Scope,
 			"targetKey": step.NodeKey,
 			"order":     step.Order,
 			"stepName":  step.Name,
@@ -227,13 +231,14 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*FlowSpineResult, error) {
 	cypher := `
 		MATCH (f:Flow {nodeKey: $flowKey})
+		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
 		OPTIONAL MATCH (f)-[r:HAS_STEP]->(step)
 		RETURN f.name AS flowName, f.flowType AS flowType, f.nodeKey AS flowNodeKey,
 		       step.nodeKey AS stepKey, step.name AS stepName, labels(step) AS stepLabels,
 		       r.order AS stepOrder
 		ORDER BY r.order`
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"flowKey": flowNodeKey})
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"flowKey": flowNodeKey, "scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get flow: %w", err)
 	}
@@ -288,13 +293,16 @@ func (g *FlowSpineGenerator) ListFlows(ctx context.Context, flowType string) ([]
 	var cypher string
 	params := map[string]any{}
 
+	params["scopeId"] = g.scopeCtx.ScopeID
 	if flowType != "" {
 		cypher = `MATCH (f:Flow {flowType: $flowType})
+			WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
 			RETURN f.nodeKey AS flowNodeKey, f.name AS flowName, f.flowType AS flowType
 			ORDER BY f.name`
 		params["flowType"] = flowType
 	} else {
 		cypher = `MATCH (f:Flow)
+			WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
 			RETURN f.nodeKey AS flowNodeKey, f.name AS flowName, f.flowType AS flowType
 			ORDER BY f.name`
 	}

@@ -130,6 +130,15 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 					Refs: []*models.SymbolReference{},
 				}
 				symbolMap[symbolKey] = targetSymbolDef
+			} else if ref.IsDefinition {
+				// Update location to the actual definition site.
+				// Without this, the symbol inherits the location of its
+				// first reference (which may be in a different file).
+				targetSymbolDef.Info.FilePath = filePath
+				targetSymbolDef.Info.StartLine = startLine
+				targetSymbolDef.Info.EndLine = endLine
+				targetSymbolDef.Info.StartColumn = startColumn
+				targetSymbolDef.Info.EndColumn = endColumn
 			}
 
 			// Add reference to symbol definition

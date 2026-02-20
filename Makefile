@@ -145,3 +145,12 @@ test-coverage: ## Generate test coverage report
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
+
+# Pre-commit
+pre-commit: format lint build test ## Run all checks (format, lint, build, test)
+
+install-hooks: ## Install git pre-commit hook
+	@mkdir -p .git/hooks
+	@printf '#!/bin/sh\nmake pre-commit\n' > .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed"

@@ -102,6 +102,11 @@ func GeneratedDocNodeKey(docType, sourceKey string) string {
 	return "gendoc:" + docType + ":" + sourceKey
 }
 
+// SDKCallNodeKey returns "sdkcall:{target}".
+func SDKCallNodeKey(target string) string {
+	return "sdkcall:" + target
+}
+
 // ReferenceNodeKey returns "ref:{filePath}:{startLine}:{startColumn}".
 func ReferenceNodeKey(filePath string, startLine, startColumn int) string {
 	return fmt.Sprintf("ref:%s:%d:%d", filePath, startLine, startColumn)
