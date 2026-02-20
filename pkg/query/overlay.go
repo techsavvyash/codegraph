@@ -65,7 +65,8 @@ func (r *OverlayResolver) ResolveNode(ctx context.Context, nodeKey, scopeID stri
 
 func (r *OverlayResolver) resolveMainOnly(ctx context.Context, nodeKey string) (map[string]any, error) {
 	cypher := `
-		MATCH (n {nodeKey: $nodeKey, scopeId: 'main'})
+		MATCH (n {nodeKey: $nodeKey})
+		WHERE n.scopeId = 'main' OR n.scopeId IS NULL
 		RETURN n, labels(n) AS nodeLabels
 		LIMIT 1`
 	records, err := r.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey})
@@ -120,7 +121,8 @@ func (r *OverlayResolver) ResolveSymbol(ctx context.Context, symbol, scopeID str
 
 func (r *OverlayResolver) resolveSymbolMain(ctx context.Context, symbol string) (map[string]any, error) {
 	cypher := `
-		MATCH (s:Symbol {symbol: $symbol, scopeId: 'main'})
+		MATCH (s:Symbol {symbol: $symbol})
+		WHERE s.scopeId = 'main' OR s.scopeId IS NULL
 		RETURN s, labels(s) AS nodeLabels
 		LIMIT 1`
 	records, err := r.client.ExecuteQuery(ctx, cypher, map[string]any{"symbol": symbol})
@@ -173,7 +175,8 @@ func (r *OverlayResolver) ResolveFlow(ctx context.Context, flowNodeKey, scopeID 
 
 func (r *OverlayResolver) resolveFlowMain(ctx context.Context, flowNodeKey string) (map[string]any, error) {
 	cypher := `
-		MATCH (f:Flow {nodeKey: $flowKey, scopeId: 'main'})
+		MATCH (f:Flow {nodeKey: $flowKey})
+		WHERE f.scopeId = 'main' OR f.scopeId IS NULL
 		RETURN f, labels(f) AS nodeLabels
 		LIMIT 1`
 	records, err := r.client.ExecuteQuery(ctx, cypher, map[string]any{"flowKey": flowNodeKey})
