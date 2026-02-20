@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/context-maximiser/code-graph/pkg/indexer/generated"
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 )
@@ -209,6 +210,34 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")
+	}
+
+	// Step 11: Generate context for PR overlays (creates PullRequest node + PR summary)
+	if si.scopeCtx.Scope == models.ScopePR && si.client != nil {
+		ctxGen := generated.NewContextGenerator(si.client)
+		ctxGen.SetScope(si.scopeCtx)
+
+		// Extract PR ID from scopeId (format: "pr-{id}")
+		prID := strings.TrimPrefix(si.scopeCtx.ScopeID, "pr-")
+
+		if _, err := ctxGen.CreatePullRequestNode(ctx, prID,
+			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName),
+			"", "", "", ""); err != nil {
+			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
+		} else {
+			// Store a basic PR summary with indexed file list
+			fileKeys := make([]string, 0)
+			for _, f := range fileNodes {
+				fileKeys = append(fileKeys, f)
+			}
+			summary := fmt.Sprintf("Indexed %d files and %d symbols for service %s",
+				len(fileNodes), len(symbolDefs), si.serviceName)
+			if _, err := ctxGen.StorePRSummary(ctx, prID,
+				fmt.Sprintf("Indexing summary for %s", si.serviceName),
+				summary, "scip-indexer", fileKeys); err != nil {
+				fmt.Printf("Warning: failed to store PR summary: %v\n", err)
+			}
+		}
 	}
 
 	fmt.Println("SCIP indexing completed successfully")

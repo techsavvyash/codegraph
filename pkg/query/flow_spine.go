@@ -134,7 +134,8 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 
 	cypher := `
 		MATCH (caller {nodeKey: $nodeKey})-[:CALLS]->(callee)
-		WHERE (callee:Function OR callee:Method)
+		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		  AND (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
 		LIMIT 20`
@@ -233,6 +234,7 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		MATCH (f:Flow {nodeKey: $flowKey})
 		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
 		OPTIONAL MATCH (f)-[r:HAS_STEP]->(step)
+		WHERE step.scopeId = $scopeId OR step.scopeId = 'main'
 		RETURN f.name AS flowName, f.flowType AS flowType, f.nodeKey AS flowNodeKey,
 		       step.nodeKey AS stepKey, step.name AS stepName, labels(step) AS stepLabels,
 		       r.order AS stepOrder

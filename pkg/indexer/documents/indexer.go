@@ -40,8 +40,8 @@ func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
 }
 
 // EnableIntelligentLinking enables semantic analysis and intelligent linking
-func (di *DocumentIndexer) EnableIntelligentLinking(embeddingService search.EmbeddingService) {
-	di.intelligentLinker = search.NewIntelligentDocumentLinker(di.client, embeddingService)
+func (di *DocumentIndexer) EnableIntelligentLinking(embeddingService search.EmbeddingService, vectorStore search.VectorStore) {
+	di.intelligentLinker = search.NewIntelligentDocumentLinker(di.client, embeddingService, vectorStore)
 	di.useIntelligentLinking = true
 }
 

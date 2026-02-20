@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 
+	"github.com/context-maximiser/code-graph/pkg/indexer/generated"
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 	queryPkg "github.com/context-maximiser/code-graph/pkg/query"
 	"github.com/context-maximiser/code-graph/pkg/schema"
+	"github.com/context-maximiser/code-graph/pkg/search"
 )
 
 // ---------------------------------------------------------------------------
@@ -705,6 +708,211 @@ func TestP3c_HAS_STEP_ScopeProps(t *testing.T) {
 // P4: Service dependency inference with CALLS_API → SDKCall
 // ===========================================================================
 
+// ===========================================================================
+// Round-Trip Regression Test: SCIP index → query back all nodes & rels
+// ===========================================================================
+
+func TestRoundTrip_SCIPIndexThenQuery(t *testing.T) {
+	scopeID := "pr-roundtrip"
+	client, cleanup := setupTestDBWithScopeCleanup(t, scopeID)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Create a tiny Go project.
+	projectDir := writeTempGoProject(t, "example.com/roundtrip")
+
+	// Index it with the real SCIP pipeline.
+	indexer := static.NewSCIPIndexerWithLanguage(client, "roundtrip-svc", "v1", "", static.LanguageGo)
+	indexer.SetScope(models.NewPRScope("roundtrip"))
+
+	if err := indexer.ValidateEnvironment(); err != nil {
+		t.Skipf("scip-go not available: %v", err)
+	}
+
+	if err := indexer.IndexProject(ctx, projectDir); err != nil {
+		t.Fatalf("IndexProject failed: %v", err)
+	}
+
+	// 1. Verify Service node exists.
+	records, err := client.ExecuteQuery(ctx, `
+		MATCH (s:Service)
+		WHERE s.scopeId = $scopeId AND s.name CONTAINS 'roundtrip'
+		RETURN s.name AS name, s.scopeId AS scopeId
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query Service failed: %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected Service node")
+	}
+
+	// 2. Verify File nodes exist (2 files: lib.go and main.go).
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (f:File)
+		WHERE f.scopeId = $scopeId
+		RETURN f.path AS path
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query File failed: %v", err)
+	}
+	if len(records) < 2 {
+		t.Errorf("expected at least 2 File nodes, got %d", len(records))
+	}
+	filePaths := map[string]bool{}
+	for _, r := range records {
+		m := r.AsMap()
+		if p, ok := m["path"].(string); ok {
+			filePaths[p] = true
+		}
+	}
+	if !filePaths["lib.go"] {
+		t.Error("expected lib.go File node")
+	}
+	if !filePaths["main.go"] {
+		t.Error("expected main.go File node")
+	}
+
+	// 3. Verify Service -[:CONTAINS]-> File relationships.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (s:Service)-[:CONTAINS]->(f:File)
+		WHERE s.scopeId = $scopeId AND f.scopeId = $scopeId
+		RETURN count(f) AS cnt
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query CONTAINS failed: %v", err)
+	}
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		cnt, _ := m["cnt"].(int64)
+		if cnt < 2 {
+			t.Errorf("expected at least 2 CONTAINS rels (Service->File), got %d", cnt)
+		}
+	}
+
+	// 4. Verify Symbol nodes exist.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (sym:Symbol)
+		WHERE sym.scopeId = $scopeId
+		RETURN count(sym) AS cnt
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query Symbol failed: %v", err)
+	}
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		cnt, _ := m["cnt"].(int64)
+		if cnt == 0 {
+			t.Error("expected Symbol nodes, found none")
+		}
+	}
+
+	// 5. Verify Function nodes exist (Greet and main).
+	// Note: SCIP display names may include parens/dot suffixes like "Greet()." so we use CONTAINS.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (fn:Function)
+		WHERE fn.scopeId = $scopeId
+		RETURN fn.name AS name
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query Function failed: %v", err)
+	}
+	foundGreet := false
+	foundMain := false
+	for _, r := range records {
+		m := r.AsMap()
+		if n, ok := m["name"].(string); ok {
+			if strings.Contains(n, "Greet") {
+				foundGreet = true
+			}
+			if strings.Contains(n, "main") {
+				foundMain = true
+			}
+		}
+	}
+	if !foundGreet {
+		t.Error("expected Function node for Greet")
+	}
+	if !foundMain {
+		t.Error("expected Function node for main")
+	}
+
+	// 6. Verify DEFINES relationships exist (Function/Method -> Symbol).
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH ()-[r:DEFINES]->(:Symbol)
+		WHERE r.scopeId = $scopeId
+		RETURN count(r) AS cnt
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query DEFINES failed: %v", err)
+	}
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		cnt, _ := m["cnt"].(int64)
+		if cnt == 0 {
+			t.Error("expected DEFINES relationships, found none")
+		}
+	}
+
+	// 7. Verify REFERENCES relationships exist.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH ()-[r:REFERENCES]->(:Symbol)
+		WHERE r.scopeId = $scopeId
+		RETURN count(r) AS cnt
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query REFERENCES failed: %v", err)
+	}
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		cnt, _ := m["cnt"].(int64)
+		if cnt == 0 {
+			t.Error("expected REFERENCES relationships, found none")
+		}
+	}
+
+	// 8. Verify CALLS relationships exist (main -> Greet, from call graph builder).
+	// Note: SCIP display names may include suffixes, so use CONTAINS matching.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (caller:Function)-[r:CALLS]->(callee:Function)
+		WHERE caller.scopeId = $scopeId AND callee.scopeId = $scopeId
+		RETURN caller.name AS caller, callee.name AS callee
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("query CALLS failed: %v", err)
+	}
+	foundMainCallsGreet := false
+	for _, r := range records {
+		m := r.AsMap()
+		caller, _ := m["caller"].(string)
+		callee, _ := m["callee"].(string)
+		if strings.Contains(caller, "main") && strings.Contains(callee, "Greet") {
+			foundMainCallsGreet = true
+		}
+	}
+	if !foundMainCallsGreet {
+		t.Error("expected CALLS relationship: main -> Greet")
+	}
+
+	// 9. Verify all nodes have correct scope/scopeId.
+	records, err = client.ExecuteQuery(ctx, `
+		MATCH (n)
+		WHERE n.scopeId = $scopeId AND (n.scope IS NULL OR n.scope <> 'pr')
+		RETURN labels(n) AS labels, n.nodeKey AS nodeKey
+		LIMIT 5
+	`, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		t.Fatalf("scope check query failed: %v", err)
+	}
+	if len(records) > 0 {
+		for _, r := range records {
+			m := r.AsMap()
+			t.Errorf("node with scopeId=%s has wrong scope: labels=%v nodeKey=%v", scopeID, m["labels"], m["nodeKey"])
+		}
+	}
+}
+
 func TestP4_InferServiceDependencies(t *testing.T) {
 	prefix := "audit-p4-infer-"
 	client, cleanup := setupTestDB(t, prefix)
@@ -864,5 +1072,414 @@ func TestP4_InferServiceDependencies_NoSelfDeps(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("expected 0 inferred dependencies (self-calls excluded), got %d", count)
+	}
+}
+
+// ===========================================================================
+// Task 11: Chunk linker scope isolation — integration tests
+// ===========================================================================
+
+func TestChunkLinker_FindCodeNodes_ScopeIsolation(t *testing.T) {
+	prefix := "audit-cl-scope-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create a Function in main scope.
+	// The backtick extractor gets "HandleRequest()" from content, so names should match.
+	mainFnKey := prefix + "func:pkg/main.go#HandleRequest(...)"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": mainFnKey, "scopeId": "main"},
+		map[string]any{
+			"name": "HandleRequest()", "displayName": "HandleRequest()", "nodeKey": mainFnKey,
+			"scope": "main", "scopeId": "main",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a Function in pr-42 scope with same name.
+	prFnKey := prefix + "func:pkg/main.go#HandleRequest(...):pr42"
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": prFnKey, "scopeId": "pr-42"},
+		map[string]any{
+			"name": "HandleRequest()", "displayName": "HandleRequest()", "nodeKey": prFnKey,
+			"scope": "pr", "scopeId": "pr-42",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a Function in pr-99 scope — should not be visible to pr-42.
+	otherFnKey := prefix + "func:pkg/other.go#HandleRequest(...):pr99"
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": otherFnKey, "scopeId": "pr-99"},
+		map[string]any{
+			"name": "HandleRequest()", "displayName": "HandleRequest()", "nodeKey": otherFnKey,
+			"scope": "pr", "scopeId": "pr-99",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a DocumentChunk and link it.
+	chunkKey := prefix + "chunk:doc1:ch1"
+	_, err = client.MergeNode(ctx, []string{"DocumentChunk"},
+		map[string]any{"nodeKey": chunkKey, "scopeId": "pr-42"},
+		map[string]any{
+			"nodeKey": chunkKey, "documentKey": prefix + "doc1",
+			"content": "The `HandleRequest()` function processes incoming requests.",
+			"headingPath": "API > HandleRequest",
+			"scope": "pr", "scopeId": "pr-42",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Use ChunkLinker with pr-42 scope.
+	cl := search.NewChunkLinker(client)
+	cl.SetScope("pr-42")
+
+	links, err := cl.LinkChunksForDocument(ctx, prefix+"doc1", "pr-42")
+	if err != nil {
+		t.Fatalf("LinkChunksForDocument failed: %v", err)
+	}
+
+	if links == 0 {
+		t.Error("expected at least 1 link from chunk to code node")
+	}
+
+	// Verify MENTIONS edges only point to main or pr-42 nodes, NOT pr-99.
+	cypher := `
+		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})-[:MENTIONS]->(target)
+		RETURN target.nodeKey AS targetKey, target.scopeId AS scopeId`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range records {
+		m := r.AsMap()
+		targetScopeID, _ := m["scopeId"].(string)
+		if targetScopeID == "pr-99" {
+			t.Errorf("chunk should NOT link to pr-99 scoped node, but found target %v", m["targetKey"])
+		}
+	}
+}
+
+func TestChunkLinker_MentionEdge_ScopeProps(t *testing.T) {
+	prefix := "audit-cl-edge-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create a Function in main scope.
+	// The backtick extractor will extract "ProcessOrder()" from content.
+	// The findCodeNodesByName query checks: name = $name OR displayName = $name OR signature CONTAINS $name
+	// So we set both name and displayName to "ProcessOrder()" to match the extracted reference.
+	fnKey := prefix + "func:pkg/srv.go#ProcessOrder(...)"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": fnKey, "scopeId": "main"},
+		map[string]any{
+			"name": "ProcessOrder()", "displayName": "ProcessOrder()", "nodeKey": fnKey,
+			"signature": "ProcessOrder(ctx context.Context, order Order) error",
+			"scope": "main", "scopeId": "main",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a DocumentChunk.
+	chunkKey := prefix + "chunk:doc2:ch1"
+	_, err = client.MergeNode(ctx, []string{"DocumentChunk"},
+		map[string]any{"nodeKey": chunkKey, "scopeId": "pr-77"},
+		map[string]any{
+			"nodeKey": chunkKey, "documentKey": prefix + "doc2",
+			"content": "Use `ProcessOrder()` for order processing.",
+			"headingPath": "",
+			"scope": "pr", "scopeId": "pr-77",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cl := search.NewChunkLinker(client)
+	cl.SetScope("pr-77")
+
+	links, err := cl.LinkChunksForDocument(ctx, prefix+"doc2", "pr-77")
+	if err != nil {
+		t.Fatalf("LinkChunksForDocument failed: %v", err)
+	}
+
+	if links == 0 {
+		t.Fatal("expected at least 1 link")
+	}
+
+	// Verify MENTIONS edge has correct scopeId.
+	cypher := `
+		MATCH (:DocumentChunk {nodeKey: $chunkKey})-[r:MENTIONS]->(:Function {nodeKey: $fnKey})
+		RETURN r.scopeId AS scopeId, r.confidence AS confidence, r.model AS model`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey, "fnKey": fnKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected MENTIONS edge between chunk and function")
+	}
+
+	m := records[0].AsMap()
+	if scopeID, _ := m["scopeId"].(string); scopeID != "pr-77" {
+		t.Errorf("expected MENTIONS scopeId 'pr-77', got %q", scopeID)
+	}
+	if conf, ok := m["confidence"].(float64); !ok || conf <= 0 {
+		t.Errorf("expected positive confidence, got %v", m["confidence"])
+	}
+}
+
+// ===========================================================================
+// Task 13: Generated context lifecycle — integration tests
+// ===========================================================================
+
+func TestContextGenerator_CreatePullRequestNode(t *testing.T) {
+	prefix := "audit-ctx-pr-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	gen := generated.NewContextGenerator(client)
+	gen.SetScope(models.NewPRScope("100"))
+
+	prID, err := gen.CreatePullRequestNode(ctx, "100", "Add auth module", "alice",
+		"main", "feat/auth", "Adds OAuth2 support")
+	if err != nil {
+		t.Fatalf("CreatePullRequestNode failed: %v", err)
+	}
+	if prID == "" {
+		t.Fatal("expected non-empty PR node ID")
+	}
+
+	// Verify the node exists with correct properties.
+	cypher := `
+		MATCH (pr:PullRequest {scopeId: $scopeId})
+		RETURN pr.prId AS prId, pr.title AS title, pr.author AS author,
+		       pr.scope AS scope, pr.scopeId AS scopeId`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": "pr-100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected PullRequest node")
+	}
+
+	m := records[0].AsMap()
+	if v, _ := m["prId"].(string); v != "100" {
+		t.Errorf("expected prId '100', got %q", v)
+	}
+	if v, _ := m["title"].(string); v != "Add auth module" {
+		t.Errorf("expected title 'Add auth module', got %q", v)
+	}
+	if v, _ := m["scope"].(string); v != "pr" {
+		t.Errorf("expected scope 'pr', got %q", v)
+	}
+}
+
+func TestContextGenerator_StorePRSummary(t *testing.T) {
+	prefix := "audit-ctx-summary-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	gen := generated.NewContextGenerator(client)
+	gen.SetScope(models.NewPRScope("200"))
+
+	// Create the PullRequest node first.
+	_, err := gen.CreatePullRequestNode(ctx, "200", "Refactor DB layer", "bob",
+		"main", "refactor/db", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create some File nodes to serve as changed files.
+	fileKey1 := prefix + "file:pkg/db/client.go"
+	_, err = client.MergeNode(ctx, []string{"File"},
+		map[string]any{"nodeKey": fileKey1, "scopeId": "pr-200"},
+		map[string]any{"path": "pkg/db/client.go", "nodeKey": fileKey1, "scope": "pr", "scopeId": "pr-200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fileKey2 := prefix + "file:pkg/db/query.go"
+	_, err = client.MergeNode(ctx, []string{"File"},
+		map[string]any{"nodeKey": fileKey2, "scopeId": "pr-200"},
+		map[string]any{"path": "pkg/db/query.go", "nodeKey": fileKey2, "scope": "pr", "scopeId": "pr-200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Store the PR summary.
+	docID, err := gen.StorePRSummary(ctx, "200", "DB Refactor Summary",
+		"This PR refactors the database layer for better connection pooling.",
+		"test-model", []string{fileKey1, fileKey2})
+	if err != nil {
+		t.Fatalf("StorePRSummary failed: %v", err)
+	}
+	if docID == "" {
+		t.Fatal("expected non-empty GeneratedDoc ID")
+	}
+
+	// Verify GeneratedDoc node exists.
+	cypher := `
+		MATCH (gd:GeneratedDoc {scopeId: $scopeId})
+		WHERE gd.type = 'pr_summary'
+		RETURN gd.title AS title, gd.type AS type, gd.model AS model, gd.content AS content`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": "pr-200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected GeneratedDoc node for PR summary")
+	}
+
+	m := records[0].AsMap()
+	if v, _ := m["title"].(string); v != "DB Refactor Summary" {
+		t.Errorf("expected title 'DB Refactor Summary', got %q", v)
+	}
+	if v, _ := m["type"].(string); v != "pr_summary" {
+		t.Errorf("expected type 'pr_summary', got %q", v)
+	}
+
+	// Verify DOCUMENTS relationship (GeneratedDoc -> PullRequest).
+	cypher = `
+		MATCH (gd:GeneratedDoc {scopeId: $scopeId})-[:DOCUMENTS]->(pr:PullRequest {scopeId: $scopeId})
+		RETURN pr.prId AS prId`
+	records, err = client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": "pr-200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected DOCUMENTS edge from GeneratedDoc to PullRequest")
+	}
+
+	// Verify DERIVED_FROM relationships (GeneratedDoc -> File).
+	cypher = `
+		MATCH (gd:GeneratedDoc {scopeId: $scopeId})-[:DERIVED_FROM]->(f:File)
+		RETURN f.nodeKey AS fileKey`
+	records, err = client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": "pr-200"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) < 2 {
+		t.Errorf("expected 2 DERIVED_FROM edges to files, got %d", len(records))
+	}
+}
+
+func TestContextGenerator_ListGeneratedDocs(t *testing.T) {
+	prefix := "audit-ctx-list-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	gen := generated.NewContextGenerator(client)
+	gen.SetScope(models.NewPRScope("300"))
+
+	// Create PR node and summary.
+	_, err := gen.CreatePullRequestNode(ctx, "300", "Test PR", "alice", "main", "test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = gen.StorePRSummary(ctx, "300", "Test Summary", "content", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// List docs.
+	docs, err := gen.ListGeneratedDocs(ctx, "pr_summary", "")
+	if err != nil {
+		t.Fatalf("ListGeneratedDocs failed: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Fatal("expected at least 1 generated doc")
+	}
+
+	found := false
+	for _, d := range docs {
+		if title, _ := d["title"].(string); title == "Test Summary" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected to find 'Test Summary' in listed docs")
+	}
+
+	// List with wrong scope — should not find our doc.
+	gen2 := generated.NewContextGenerator(client)
+	gen2.SetScope(models.NewPRScope("999"))
+	docs2, err := gen2.ListGeneratedDocs(ctx, "pr_summary", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range docs2 {
+		if title, _ := d["title"].(string); title == "Test Summary" {
+			t.Error("should NOT find pr-300's doc from pr-999 scope")
+		}
+	}
+}
+
+func TestContextGenerator_StoreFlowSummary(t *testing.T) {
+	prefix := "audit-ctx-flow-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create a Flow node.
+	flowKey := prefix + "flow:api:GET:/health"
+	_, err := client.MergeNode(ctx, []string{"Flow"},
+		map[string]any{"nodeKey": flowKey, "scopeId": "main"},
+		map[string]any{
+			"name": "GET /health", "flowType": "api",
+			"nodeKey": flowKey, "scope": "main", "scopeId": "main",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gen := generated.NewContextGenerator(client)
+	gen.SetScope(models.DefaultScope())
+
+	docID, err := gen.StoreFlowSummary(ctx, flowKey, "Health Check Flow",
+		"Simple liveness probe endpoint.", "test-model")
+	if err != nil {
+		t.Fatalf("StoreFlowSummary failed: %v", err)
+	}
+	if docID == "" {
+		t.Fatal("expected non-empty doc ID")
+	}
+
+	// Verify DOCUMENTS edge.
+	cypher := `
+		MATCH (gd:GeneratedDoc)-[:DOCUMENTS]->(f:Flow {nodeKey: $flowKey})
+		RETURN gd.title AS title, gd.type AS type`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"flowKey": flowKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected DOCUMENTS edge from GeneratedDoc to Flow")
+	}
+	m := records[0].AsMap()
+	if v, _ := m["type"].(string); v != "flow_summary" {
+		t.Errorf("expected type 'flow_summary', got %q", v)
 	}
 }

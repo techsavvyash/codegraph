@@ -1,6 +1,8 @@
 package static
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -13,43 +15,75 @@ import (
 	"strings"
 )
 
+// InstallMethod describes how a SCIP indexer should be installed.
+type InstallMethod string
+
+const (
+	InstallBinaryDownload InstallMethod = "binary"
+	InstallNPM            InstallMethod = "npm"
+	InstallCoursier       InstallMethod = "coursier"
+	InstallGoInstall      InstallMethod = "go_install"
+	InstallComposer       InstallMethod = "composer"
+)
+
 // IndexerRelease describes a downloadable SCIP indexer binary.
 type IndexerRelease struct {
-	Language Language
-	Binary   string // e.g. "scip-go"
-	Version  string // e.g. "v0.1.26"
-	// URL pattern: {BaseURL}/{os}/{arch}/{binary} or full URL
-	URL      string
-	Checksum string // SHA-256 hex (optional; skip verification if empty)
+	Language  Language
+	Binary    string            // e.g. "scip-go"
+	Version   string            // e.g. "v0.1.26"
+	Method    InstallMethod     // primary install method
+	URL       string            // for binary downloads
+	Checksums map[string]string // SHA-256 hex keyed by "os/arch"
+	Package   string            // npm package name or Maven coordinate
+	MainClass string            // for coursier (Java)
+	FallbackCmd string          // fallback install command (e.g. go install ...)
 }
 
 // DefaultReleases returns the known-good release definitions for each language.
-// URLs point to GitHub release assets; they may need updating when new versions ship.
 func DefaultReleases() []IndexerRelease {
 	return []IndexerRelease{
 		{
 			Language: LanguageGo,
 			Binary:   "scip-go",
 			Version:  "v0.1.26",
-			URL:      "https://github.com/sourcegraph/scip-go/releases/download/{version}/scip-go_{os}_{arch}",
+			Method:   InstallBinaryDownload,
+			URL:      "https://github.com/sourcegraph/scip-go/releases/download/{version}/scip-go_{version_num}_{os}_{arch}.tar.gz",
+			Checksums: map[string]string{
+				"linux/amd64":  "66257b6db74e13c2e756c9abba8e7d34e62eb91d16cdbe087a0b0c170c89c37d",
+				"linux/arm64":  "bc8e5abb959521912d60181de8922e5158a609a2e9d87e6ed2b7801c11c0efab",
+				"darwin/amd64": "768d8048d537f1e2a26735b37fa0481296c6a1010392b2750c88b73716b529cf",
+				"darwin/arm64": "1b87a5e0b2af4e41bc1cc49220e7d3a84a831468ae6944a9574e7d4c1270909c",
+			},
+			FallbackCmd: "go install github.com/sourcegraph/scip-go/cmd/scip-go@v0.1.26",
 		},
 		{
 			Language: LanguageTypeScript,
 			Binary:   "scip-typescript",
-			Version:  "latest",
-			// npm package — installed via installViaCommand()
+			Version:  "0.3.11",
+			Method:   InstallNPM,
+			Package:  "@sourcegraph/scip-typescript",
 		},
 		{
 			Language: LanguagePython,
 			Binary:   "scip-python",
-			Version:  "latest",
-			// pip package — installed via installViaCommand()
+			Version:  "0.5.3",
+			Method:   InstallNPM,
+			Package:  "@sourcegraph/scip-python",
 		},
 		{
 			Language: LanguageJava,
 			Binary:   "scip-java",
-			Version:  "latest",
-			// Build tool plugin — see install docs
+			Version:  "0.8.23",
+			Method:   InstallCoursier,
+			Package:  "com.sourcegraph:scip-java_2.13",
+			MainClass: "com.sourcegraph.scip_java.ScipJava",
+		},
+		{
+			Language: LanguagePHP,
+			Binary:   "scip-php",
+			Version:  "0.0.2",
+			Method:   InstallComposer,
+			Package:  "davidrjenni/scip-php",
 		},
 	}
 }
@@ -123,25 +157,37 @@ func (m *IndexerManager) IsInstalled(lang Language) bool {
 }
 
 // Install downloads and caches the SCIP indexer for the given language.
-// If the binary is already installed from a URL, it downloads it.
-// If no URL is configured, it falls back to the language's install command.
+// It dispatches based on the release's InstallMethod.
 func (m *IndexerManager) Install(lang Language) error {
-	config, err := GetLanguageConfig(lang)
-	if err != nil {
-		return fmt.Errorf("unsupported language: %s", lang)
-	}
-
 	release := m.findRelease(lang)
 	if release == nil {
+		// No release definition — fall back to language config
+		config, err := GetLanguageConfig(lang)
+		if err != nil {
+			return fmt.Errorf("unsupported language: %s", lang)
+		}
 		return m.installViaCommand(config)
 	}
 
-	if release.URL != "" {
+	switch release.Method {
+	case InstallBinaryDownload:
 		return m.downloadAndCache(release)
+	case InstallNPM:
+		return m.installNPM(release)
+	case InstallCoursier:
+		return m.installCoursier(release)
+	case InstallGoInstall:
+		return m.installGoInstall(release)
+	case InstallComposer:
+		return m.installComposer(release)
+	default:
+		// Unknown method — fall back to language config
+		config, err := GetLanguageConfig(lang)
+		if err != nil {
+			return fmt.Errorf("unsupported language: %s", lang)
+		}
+		return m.installViaCommand(config)
 	}
-
-	// No download URL — fall back to the language's standard install command.
-	return m.installViaCommand(config)
 }
 
 // InstallAll installs indexers for the given languages.
@@ -190,6 +236,7 @@ type IndexerStatus struct {
 }
 
 // downloadAndCache downloads a binary from URL and stores it in the cache directory.
+// Supports both raw binaries and .tar.gz archives.
 func (m *IndexerManager) downloadAndCache(release *IndexerRelease) error {
 	destDir := filepath.Join(m.cacheDir, string(release.Language), release.Version)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -232,25 +279,172 @@ func (m *IndexerManager) downloadAndCache(release *IndexerRelease) error {
 	tmpFile.Close()
 
 	// Verify checksum if provided
-	if release.Checksum != "" {
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	if expectedHash, ok := release.Checksums[platform]; ok && expectedHash != "" {
 		actualHash := hex.EncodeToString(hasher.Sum(nil))
-		if actualHash != release.Checksum {
+		if actualHash != expectedHash {
 			return fmt.Errorf("checksum mismatch for %s: expected %s, got %s",
-				release.Binary, release.Checksum, actualHash)
+				release.Binary, expectedHash, actualHash)
 		}
 	}
 
-	// Make executable
-	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
-		return fmt.Errorf("failed to set executable bit: %w", err)
-	}
-
-	// Atomic rename to final path
-	if err := os.Rename(tmpFile.Name(), destPath); err != nil {
-		return fmt.Errorf("failed to move binary to cache: %w", err)
+	// Extract from tar.gz if needed, otherwise treat as raw binary
+	if strings.HasSuffix(url, ".tar.gz") || strings.HasSuffix(url, ".tgz") {
+		if err := extractTarGz(tmpFile.Name(), release.Binary, destPath); err != nil {
+			return fmt.Errorf("failed to extract archive: %w", err)
+		}
+	} else {
+		// Raw binary — just move it
+		if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
+			return fmt.Errorf("failed to set executable bit: %w", err)
+		}
+		if err := os.Rename(tmpFile.Name(), destPath); err != nil {
+			return fmt.Errorf("failed to move binary to cache: %w", err)
+		}
 	}
 
 	fmt.Printf("Installed %s %s at %s\n", release.Binary, release.Version, destPath)
+	return nil
+}
+
+// extractTarGz extracts binaryName from a .tar.gz archive and writes it to destPath.
+func extractTarGz(archivePath, binaryName, destPath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read: %w", err)
+		}
+
+		// Match the binary by base name (it may be nested in a directory)
+		if filepath.Base(hdr.Name) == binaryName && hdr.Typeflag == tar.TypeReg {
+			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			if err != nil {
+				return fmt.Errorf("create dest file: %w", err)
+			}
+			if _, err := io.Copy(out, tr); err != nil {
+				out.Close()
+				return fmt.Errorf("extract binary: %w", err)
+			}
+			out.Close()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("binary %q not found in archive", binaryName)
+}
+
+// installNPM installs a SCIP indexer via npm.
+func (m *IndexerManager) installNPM(release *IndexerRelease) error {
+	npmPath, err := exec.LookPath("npm")
+	if err != nil {
+		return fmt.Errorf("npm not found on PATH; install Node.js first")
+	}
+
+	pkg := release.Package + "@" + release.Version
+	fmt.Printf("Installing %s via: npm install -g %s\n", release.Binary, pkg)
+
+	cmd := exec.Command(npmPath, "install", "-g", pkg)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("npm install failed: %w", err)
+	}
+	return nil
+}
+
+// installCoursier installs a SCIP indexer via coursier bootstrap.
+func (m *IndexerManager) installCoursier(release *IndexerRelease) error {
+	csPath, err := exec.LookPath("cs")
+	if err != nil {
+		csPath, err = exec.LookPath("coursier")
+		if err != nil {
+			return fmt.Errorf("coursier (cs) not found on PATH; install from https://get-coursier.io")
+		}
+	}
+
+	destDir := filepath.Join(m.cacheDir, string(release.Language), release.Version)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
+	destPath := filepath.Join(destDir, release.Binary)
+
+	coordinate := release.Package + ":" + release.Version
+	fmt.Printf("Installing %s via: %s bootstrap %s\n", release.Binary, filepath.Base(csPath), coordinate)
+
+	cmd := exec.Command(csPath, "bootstrap", "--standalone",
+		"-o", destPath,
+		coordinate,
+		"--main", release.MainClass,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("coursier bootstrap failed: %w", err)
+	}
+
+	fmt.Printf("Installed %s %s at %s\n", release.Binary, release.Version, destPath)
+	return nil
+}
+
+// installGoInstall installs a SCIP indexer via go install.
+func (m *IndexerManager) installGoInstall(release *IndexerRelease) error {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		return fmt.Errorf("go not found on PATH; install Go first")
+	}
+
+	if release.FallbackCmd == "" {
+		return fmt.Errorf("no go install command configured for %s", release.Binary)
+	}
+
+	fmt.Printf("Installing %s via: go install %s\n", release.Binary, release.FallbackCmd)
+
+	// FallbackCmd is like "go install github.com/.../scip-go@v0.1.26"
+	// Extract the package path (everything after "go install ")
+	pkgPath := release.FallbackCmd
+	pkgPath = strings.TrimPrefix(pkgPath, "go install ")
+
+	cmd := exec.Command(goPath, "install", pkgPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go install failed: %w", err)
+	}
+	return nil
+}
+
+// installComposer installs a SCIP indexer via composer global require.
+func (m *IndexerManager) installComposer(release *IndexerRelease) error {
+	composerPath, err := exec.LookPath("composer")
+	if err != nil {
+		return fmt.Errorf("composer not found on PATH; install Composer first (https://getcomposer.org)")
+	}
+
+	pkg := release.Package + ":" + release.Version
+	fmt.Printf("Installing %s via: composer global require %s\n", release.Binary, pkg)
+
+	cmd := exec.Command(composerPath, "global", "require", pkg)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("composer global require failed: %w", err)
+	}
 	return nil
 }
 
@@ -283,6 +477,8 @@ func (m *IndexerManager) resolveURL(release *IndexerRelease) string {
 	url = strings.ReplaceAll(url, "{arch}", runtime.GOARCH)
 	url = strings.ReplaceAll(url, "{binary}", release.Binary)
 	url = strings.ReplaceAll(url, "{version}", release.Version)
+	// {version_num} strips the leading "v" (e.g. "v0.1.26" -> "0.1.26")
+	url = strings.ReplaceAll(url, "{version_num}", strings.TrimPrefix(release.Version, "v"))
 	return url
 }
 

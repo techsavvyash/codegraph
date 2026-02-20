@@ -14,12 +14,22 @@ import (
 // ChunkLinker creates MENTIONS relationships between DocumentChunk nodes and code nodes.
 // Each MENTIONS edge carries provenance: confidence, reasons, model, createdAt.
 type ChunkLinker struct {
-	client *neo4j.Client
+	client  *neo4j.Client
+	scopeID string // Scope filter for target node lookup
 }
 
 // NewChunkLinker creates a new chunk-level linker.
 func NewChunkLinker(client *neo4j.Client) *ChunkLinker {
-	return &ChunkLinker{client: client}
+	return &ChunkLinker{client: client, scopeID: "main"}
+}
+
+// SetScope sets the scope ID used for target node lookups.
+// This ensures chunk linking only finds code nodes visible in the given scope.
+func (cl *ChunkLinker) SetScope(scopeID string) {
+	if scopeID == "" {
+		scopeID = "main"
+	}
+	cl.scopeID = scopeID
 }
 
 // ChunkMentionEdge represents a MENTIONS relationship from a DocumentChunk to a code node.
@@ -141,9 +151,10 @@ func (cl *ChunkLinker) findCodeNodesByName(ctx context.Context, name string) []c
 		MATCH (n)
 		WHERE (n:Function OR n:Method OR n:Class OR n:Interface OR n:Symbol)
 		AND (n.name = $name OR n.displayName = $name OR n.signature CONTAINS $name)
+		AND (n.scopeId = $scopeId OR n.scopeId = 'main')
 		RETURN n.nodeKey AS nodeKey, labels(n)[0] AS label
 		LIMIT 3`
-	params := map[string]any{"name": name}
+	params := map[string]any{"name": name, "scopeId": cl.scopeID}
 
 	records, err := cl.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
@@ -166,6 +177,8 @@ func (cl *ChunkLinker) createMentionEdge(ctx context.Context, edge ChunkMentionE
 	cypher := `
 		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey, scopeId: $scopeId})
 		MATCH (target {nodeKey: $targetKey})
+		WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
+		WITH chunk, target LIMIT 1
 		MERGE (chunk)-[r:MENTIONS]->(target)
 		SET r.confidence = $confidence,
 		    r.reasons = $reasons,

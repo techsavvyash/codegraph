@@ -17,17 +17,17 @@ import (
 type IntelligentDocumentLinker struct {
 	client           *neo4j.Client
 	semanticAnalyzer *SemanticDocumentAnalyzer
-	vectorSearch     *VectorSearchManager
+	vectorStore      VectorStore
 	hybridSearch     *HybridSearchManager
 }
 
 // NewIntelligentDocumentLinker creates a new intelligent document linker
-func NewIntelligentDocumentLinker(client *neo4j.Client, embeddingService EmbeddingService) *IntelligentDocumentLinker {
+func NewIntelligentDocumentLinker(client *neo4j.Client, embeddingService EmbeddingService, vectorStore VectorStore) *IntelligentDocumentLinker {
 	return &IntelligentDocumentLinker{
 		client:           client,
 		semanticAnalyzer: NewSemanticDocumentAnalyzer(embeddingService),
-		vectorSearch:     NewVectorSearchManager(client),
-		hybridSearch:     NewHybridSearchManager(client, embeddingService),
+		vectorStore:      vectorStore,
+		hybridSearch:     NewHybridSearchManager(client, embeddingService, vectorStore),
 	}
 }
 
@@ -154,22 +154,31 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 		return nil, fmt.Errorf("failed to generate document embedding: %w", err)
 	}
 
-	// Search for similar functions using vector search
-	vectorResults, err := idl.vectorSearch.HybridVectorSearch(ctx, docEmbedding, 20)
-	if err == nil {
-		for _, result := range vectorResults.Results {
-			confidence := idl.calculateSemanticConfidence(result.Score)
-			if confidence > 0.3 { // Only include reasonably confident matches
-				allMatches = append(allMatches, CodeMatch{
-					NodeID:       getStringValue(result.Node, "id"),
-					NodeType:     getStringValue(result.Node, "nodeType"),
-					Name:         getStringValue(result.Node, "name"),
-					Signature:    getStringValue(result.Node, "signature"),
-					FilePath:     getStringValue(result.Node, "filePath"),
-					Confidence:   confidence,
-					MatchReasons: []string{"vector_similarity"},
-					CallGraphDepth: 0,
-				})
+	// Search for similar functions using vector store
+	if idl.vectorStore != nil {
+		vectorResults, err := idl.vectorStore.Query(ctx, VectorQuery{
+			Vector: docEmbedding,
+			Limit:  20,
+		})
+		if err == nil {
+			for _, result := range vectorResults {
+				confidence := idl.calculateSemanticConfidence(result.Score)
+				if confidence > 0.3 {
+					name, _ := result.Metadata["name"].(string)
+					sig, _ := result.Metadata["signature"].(string)
+					fp, _ := result.Metadata["filePath"].(string)
+					nl, _ := result.Metadata["nodeLabel"].(string)
+					allMatches = append(allMatches, CodeMatch{
+						NodeID:         result.ID,
+						NodeType:       nl,
+						Name:           name,
+						Signature:      sig,
+						FilePath:       fp,
+						Confidence:     confidence,
+						MatchReasons:   []string{"vector_similarity"},
+						CallGraphDepth: 0,
+					})
+				}
 			}
 		}
 	}

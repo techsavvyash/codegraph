@@ -12,7 +12,6 @@ import (
 type CommentEmbeddingService struct {
 	client           *neo4j.Client
 	embeddingService EmbeddingService
-	vectorSearch     *VectorSearchManager
 }
 
 // NewCommentEmbeddingService creates a new comment-focused embedding service
@@ -20,7 +19,6 @@ func NewCommentEmbeddingService(client *neo4j.Client, embeddingService Embedding
 	return &CommentEmbeddingService{
 		client:           client,
 		embeddingService: embeddingService,
-		vectorSearch:     NewVectorSearchManager(client),
 	}
 }
 
@@ -210,6 +208,9 @@ func (ces *CommentEmbeddingService) createCommentNodes(ctx context.Context, upda
 
 // SearchFunctionsByComment searches for functions/methods/classes through their comment embeddings
 func (ces *CommentEmbeddingService) SearchFunctionsByComment(ctx context.Context, query string, limit int) (*CommentSearchResponse, error) {
+	if ces.embeddingService == nil {
+		return &CommentSearchResponse{Results: nil}, nil
+	}
 	// Generate embedding for the query
 	embedding, err := ces.embeddingService.GenerateEmbedding(ctx, query)
 	if err != nil {

@@ -258,18 +258,18 @@ func (ges *GeminiEmbeddingService) GenerateEmbedding(ctx context.Context, text s
 	return embeddings[0], nil
 }
 
-// GenerateBatchEmbeddings generates embeddings for multiple texts using Gemini
+// GenerateBatchEmbeddings generates embeddings for multiple texts using Gemini.
+// It uses the batch EmbedContent API (up to 100 texts per call) for efficient
+// quota usage, with automatic retry and backoff on rate limit (429) errors.
 func (ges *GeminiEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float64, error) {
 	if len(texts) == 0 {
 		return nil, fmt.Errorf("no texts provided")
 	}
 
-	// If no API key provided, return error
 	if ges.APIKey == "" {
 		return nil, fmt.Errorf("Google API key is required for Gemini embedding service")
 	}
 
-	// Create client with API key
 	clientConfig := &genai.ClientConfig{
 		Backend: genai.BackendGeminiAPI,
 		APIKey:  ges.APIKey,
@@ -279,51 +279,100 @@ func (ges *GeminiEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, 
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	var allEmbeddings [][]float64
-
-	// Process texts in batches (Gemini supports batch processing)
-	for _, text := range texts {
-		// Validate text has minimum content (Gemini requires non-empty, meaningful text)
-		trimmedText := strings.TrimSpace(text)
-		if len(trimmedText) < 3 {
-			// For very short text, pad with generic context
-			trimmedText = trimmedText + " code element"
-		}
-
-		// Create content from text
-		contents := genai.Text(trimmedText)
-
-		// Generate embedding with semantic similarity task type and 768 dimensions
-		embedConfig := &genai.EmbedContentConfig{
-			TaskType:             "SEMANTIC_SIMILARITY",
-			OutputDimensionality: genai.Ptr(int32(768)), // Request 768 dimensions to fit Neo4j limit
-		}
-
-		result, err := client.Models.EmbedContent(ctx, ges.Model, contents, embedConfig)
-		if err != nil {
-			return nil, fmt.Errorf("Gemini embedding failed for text '%s': %w", text[:min(50, len(text))], err)
-		}
-
-		if result == nil || result.Embeddings == nil || len(result.Embeddings) == 0 {
-			return nil, fmt.Errorf("no embedding returned for text '%s'", text[:min(50, len(text))])
-		}
-
-		// Get the first (and only) embedding
-		embedding := result.Embeddings[0]
-		if len(embedding.Values) == 0 {
-			return nil, fmt.Errorf("empty embedding values for text '%s'", text[:min(50, len(text))])
-		}
-
-		// Convert float32 to float64
-		embeddingVec := make([]float64, len(embedding.Values))
-		for i, v := range embedding.Values {
-			embeddingVec[i] = float64(v)
-		}
-
-		allEmbeddings = append(allEmbeddings, embeddingVec)
+	embedConfig := &genai.EmbedContentConfig{
+		TaskType:             "SEMANTIC_SIMILARITY",
+		OutputDimensionality: genai.Ptr(int32(768)),
 	}
 
-	log.Printf("✓ Generated %d embeddings using Gemini %s", len(allEmbeddings), ges.Model)
+	allEmbeddings := make([][]float64, 0, len(texts))
+
+	// Process in chunks of up to 100 texts per API call (Gemini batch limit).
+	// Each batch call counts as 1 API request against the daily quota.
+	const maxBatchSize = 100
+	for batchStart := 0; batchStart < len(texts); batchStart += maxBatchSize {
+		batchEnd := batchStart + maxBatchSize
+		if batchEnd > len(texts) {
+			batchEnd = len(texts)
+		}
+		batchTexts := texts[batchStart:batchEnd]
+
+		// Build multi-content batch: each text becomes a *genai.Content
+		contents := make([]*genai.Content, len(batchTexts))
+		for i, text := range batchTexts {
+			trimmedText := strings.TrimSpace(text)
+			if len(trimmedText) < 3 {
+				trimmedText = trimmedText + " code element"
+			}
+			contents[i] = genai.NewContentFromText(trimmedText, genai.RoleUser)
+		}
+
+		var result *genai.EmbedContentResponse
+		maxRetries := 5
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			result, err = client.Models.EmbedContent(ctx, ges.Model, contents, embedConfig)
+			if err == nil {
+				break
+			}
+
+			// Check for rate limit error (429) and retry with backoff
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "429") || strings.Contains(errMsg, "RESOURCE_EXHAUSTED") {
+				if attempt == maxRetries {
+					return nil, fmt.Errorf("Gemini rate limit exceeded after %d retries for batch %d-%d: %w",
+						maxRetries, batchStart+1, batchEnd, err)
+				}
+				// Exponential backoff: 10s, 20s, 40s, 60s, 60s
+				backoff := time.Duration(10*(1<<attempt)) * time.Second
+				if backoff > 60*time.Second {
+					backoff = 60 * time.Second
+				}
+				log.Printf("⏳ Rate limited, waiting %s before retry (%d/%d)...", backoff, attempt+1, maxRetries)
+				select {
+				case <-time.After(backoff):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				continue
+			}
+
+			// Non-retryable error
+			return nil, fmt.Errorf("Gemini embedding failed for batch %d-%d: %w", batchStart+1, batchEnd, err)
+		}
+
+		if result == nil || result.Embeddings == nil {
+			return nil, fmt.Errorf("no embeddings returned for batch %d-%d", batchStart+1, batchEnd)
+		}
+
+		if len(result.Embeddings) != len(batchTexts) {
+			return nil, fmt.Errorf("expected %d embeddings for batch %d-%d, got %d",
+				len(batchTexts), batchStart+1, batchEnd, len(result.Embeddings))
+		}
+
+		for i, embedding := range result.Embeddings {
+			if len(embedding.Values) == 0 {
+				return nil, fmt.Errorf("empty embedding values for text %d in batch %d-%d",
+					i, batchStart+1, batchEnd)
+			}
+			embeddingVec := make([]float64, len(embedding.Values))
+			for j, v := range embedding.Values {
+				embeddingVec[j] = float64(v)
+			}
+			allEmbeddings = append(allEmbeddings, embeddingVec)
+		}
+
+		log.Printf("✓ Batch %d-%d: generated %d embeddings (1 API call)", batchStart+1, batchEnd, len(result.Embeddings))
+
+		// Brief pause between batch calls to respect rate limits (100 RPM)
+		if batchEnd < len(texts) {
+			select {
+			case <-time.After(700 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+
+	log.Printf("✓ Generated %d total embeddings using Gemini %s", len(allEmbeddings), ges.Model)
 	return allEmbeddings, nil
 }
 

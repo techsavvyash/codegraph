@@ -94,6 +94,34 @@ func TestIsCodeLikeReference(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ChunkLinker scope tests
+// ---------------------------------------------------------------------------
+
+func TestChunkLinker_NewDefaultsToMain(t *testing.T) {
+	cl := NewChunkLinker(nil)
+	if cl.scopeID != "main" {
+		t.Errorf("expected default scopeID 'main', got %q", cl.scopeID)
+	}
+}
+
+func TestChunkLinker_SetScope(t *testing.T) {
+	cl := NewChunkLinker(nil)
+	cl.SetScope("pr-42")
+	if cl.scopeID != "pr-42" {
+		t.Errorf("expected scopeID 'pr-42', got %q", cl.scopeID)
+	}
+}
+
+func TestChunkLinker_SetScope_EmptyDefaultsToMain(t *testing.T) {
+	cl := NewChunkLinker(nil)
+	cl.SetScope("pr-42")
+	cl.SetScope("") // reset
+	if cl.scopeID != "main" {
+		t.Errorf("expected scopeID 'main' after empty SetScope, got %q", cl.scopeID)
+	}
+}
+
 func TestDeduplicateEdges(t *testing.T) {
 	edges := []ChunkMentionEdge{
 		{ChunkNodeKey: "c1", TargetNodeKey: "t1", Confidence: 0.6, Reasons: []string{"heading"}},
