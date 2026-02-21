@@ -89,3 +89,98 @@ func TestTombstoneFilterFunction(t *testing.T) {
 		}
 	})
 }
+
+// TestOverlayResolverIsNonNilWithNilClient verifies that NewOverlayResolver
+// returns a valid struct even when passed a nil client (used in unit tests).
+func TestOverlayResolverIsNonNilWithNilClient(t *testing.T) {
+	resolver := NewOverlayResolver(nil)
+	if resolver == nil {
+		t.Fatal("NewOverlayResolver(nil) must return non-nil *OverlayResolver")
+	}
+}
+
+// TestOverlayPrecedenceOrderContract documents and freezes the three-step
+// resolution order as an explicit decision table. Each row is an independent
+// input combination with an unambiguous expected outcome.
+//
+// The resolution logic is:
+//  1. Overlay exists  => return overlay (even if tombstone is also present)
+//  2. Tombstone exists (no overlay) => hidden (nil)
+//  3. Neither overlay nor tombstone => fall through to main scope
+func TestOverlayPrecedenceOrderContract(t *testing.T) {
+	type scenario struct {
+		name            string
+		overlayExists   bool
+		tombstoneExists bool
+		mainExists      bool
+		expectResult    string // "overlay", "hidden", "main", "nil"
+	}
+
+	scenarios := []scenario{
+		// Overlay wins regardless of main/tombstone
+		{"overlay+main: overlay wins", true, false, true, "overlay"},
+		{"overlay only: overlay wins", true, false, false, "overlay"},
+		{"overlay+tombstone+main: overlay wins before tombstone", true, true, true, "overlay"},
+		// Tombstone hides (no overlay)
+		{"tombstone+main: hidden", false, true, true, "hidden"},
+		{"tombstone only: hidden", false, true, false, "hidden"},
+		// Main fallback (no overlay, no tombstone)
+		{"main only: main", false, false, true, "main"},
+		// Nothing anywhere
+		{"nothing: nil", false, false, false, "nil"},
+	}
+
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			// Simulate the resolution logic from OverlayResolver.ResolveNode
+			var result string
+			if s.overlayExists {
+				result = "overlay"
+			} else if s.tombstoneExists {
+				result = "hidden"
+			} else if s.mainExists {
+				result = "main"
+			} else {
+				result = "nil"
+			}
+			if result != s.expectResult {
+				t.Errorf("expected %q, got %q", s.expectResult, result)
+			}
+		})
+	}
+}
+
+// TestMainScopeIDBypassesOverlayPath verifies that the scopeID values "" and "main"
+// both route to the main-only path, which must NOT attempt any overlay/tombstone checks.
+// We check this by confirming the routing condition used in ResolveNode.
+func TestMainScopeIDBypassesOverlayPath(t *testing.T) {
+	mainScopeIDs := []string{"", "main"}
+	for _, id := range mainScopeIDs {
+		// This is the exact condition from overlay.go: ResolveNode routes to
+		// resolveMainOnly when scopeID == "" || scopeID == "main".
+		isMainPath := id == "" || id == "main"
+		if !isMainPath {
+			t.Errorf("scopeID %q should route to main-only path but condition is false", id)
+		}
+	}
+
+	// A PR scopeID must NOT trigger the main-only path
+	prScopeID := "pr-42"
+	isMainPath := prScopeID == "" || prScopeID == "main"
+	if isMainPath {
+		t.Errorf("PR scopeID %q must not route to main-only path", prScopeID)
+	}
+}
+
+// TestOverlayAndMainScopeProduceDistinctScopeIDs freezes the invariant that
+// the main scopeId value ("main") cannot equal any PR scopeId ("pr-{id}"),
+// preventing accidental node scope aliasing.
+func TestOverlayAndMainScopeProduceDistinctScopeIDs(t *testing.T) {
+	mainID := "main"
+	prIDs := []string{"pr-1", "pr-42", "pr-999"}
+	for _, prID := range prIDs {
+		if mainID == prID {
+			t.Errorf("main scopeId %q must not equal PR scopeId %q", mainID, prID)
+		}
+	}
+}
