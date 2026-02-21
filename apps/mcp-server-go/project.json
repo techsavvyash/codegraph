@@ -5,7 +5,7 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go build -o bin/codegraph-mcp-new ./apps/mcp-server-go/",
+        "command": "cd mcp-server && go build -o ../bin/codegraph-mcp-new ./...",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
     },
