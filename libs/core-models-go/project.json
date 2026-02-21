@@ -1,0 +1,20 @@
+{
+  "name": "core-models-go",
+  "root": "libs/core-models-go",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build ./libs/core-models-go/...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test ./libs/core-models-go/...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    }
+  }
+}
