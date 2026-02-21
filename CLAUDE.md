@@ -136,3 +136,52 @@ Language auto-detection works by checking for:
 - **docker-compose.yml** - Neo4j 5.15 with APOC plugins
 - Uses Go 1.24+ with modern dependency management
 - Integration tests require running Neo4j instance
+
+## Git Workflow — Stacked PRs
+
+This project uses **stacked PRs** (also called stacked diffs). Each phase of work lives on its own branch and has its own PR that targets the previous phase's branch (not master directly). This keeps PRs small and reviewable.
+
+### Branch naming convention
+
+```
+master
+  └── feat/polyglot-monorepo            # umbrella branch, base for stack
+        └── feat/monorepo-phase0-tests  # Phase 0: invariant tests
+              └── feat/monorepo-phase1-nx       # Phase 1: Nx bootstrap
+                    └── feat/monorepo-phase2-libs     # Phase 2: lib moves
+                          └── feat/monorepo-phase2-services  # Phase 2: service moves
+                                └── feat/monorepo-phase2-apps     # Phase 2: app moves
+                                      └── feat/monorepo-phase3-stores   # Phase 3: store abstractions
+                                            └── ...
+```
+
+### Rules
+
+1. **Each task gets its own branch** branched from the previous task's branch.
+2. **Each PR targets the previous branch** (not master) — this keeps diffs small.
+3. **Before opening a PR**, verify with `go build ./...` and `make test` (or relevant subset).
+4. **PR description must include proof of validation**: test output, build output, or `nx run` output.
+5. **Merge order** follows the stack from bottom up — never merge a child PR before its parent.
+6. When a parent PR is merged into master, rebase all child branches.
+
+### Opening a stacked PR
+
+```bash
+# Create branch off previous phase branch
+git checkout -b feat/monorepo-phase2-libs feat/monorepo-phase1-nx
+
+# ... do work, commit ...
+
+# Push and open PR targeting previous branch
+git push -u origin feat/monorepo-phase2-libs
+gh pr create --base feat/monorepo-phase1-nx --title "..." --body "..."
+```
+
+### Claude Code behaviour
+
+When Claude Code completes a task it should:
+1. Run the relevant validation commands and capture output
+2. Commit with a descriptive message including `Co-Authored-By`
+3. Push the branch
+4. Open a PR targeting the correct parent branch with validation output in the body
+5. Update the task status and move to the next task
