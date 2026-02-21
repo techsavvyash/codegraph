@@ -2,3 +2,8 @@
 
 # SCIP index files (temporary)
 index.scip
+
+# Node / Nx
+node_modules/
+.nx/cache
+pnpm-lock.yaml

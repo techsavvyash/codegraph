@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "targetDefaults": {
+    "build": { "cache": true },
+    "test": { "cache": true },
+    "lint": { "cache": true },
+    "integration": { "cache": false },
+    "smoke": { "cache": false }
+  },
+  "defaultBase": "master"
+}

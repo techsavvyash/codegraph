@@ -1,0 +1,20 @@
+{
+  "name": "mcp-server-go",
+  "root": "apps/mcp-server-go",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cd mcp-server && go build -o ../bin/codegraph-mcp ./...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cd mcp-server && go test ./...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    }
+  }
+}
