@@ -1,0 +1,34 @@
+{
+  "name": "cli-go",
+  "root": "apps/cli-go",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "make build",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "make test",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "make lint",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "make test-integration",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "codegraph",
+  "private": true,
+  "scripts": {},
+  "devDependencies": {
+    "nx": "19.8.14"
+  }
+}
