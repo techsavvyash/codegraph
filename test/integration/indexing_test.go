@@ -538,6 +538,6 @@ func min(a, b int) int {
 }
 
 func (s *IndexingTestSuite) TearDownTest() {
-	// Clean up test files
-	os.RemoveAll(s.testDir)
+	// Note: s.testDir is shared across all tests in the suite and is cleaned
+	// up in TearDownSuite — do NOT remove it here or later tests will lose it.
 }
