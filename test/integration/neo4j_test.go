@@ -109,18 +109,17 @@ func TestSchemaCreation(t *testing.T) {
 		t.Fatalf("Failed to get schema info: %v", err)
 	}
 
-	// Check that we have constraints and indexes
-	constraints, ok := info["constraints"].([]map[string]any)
-	if !ok || len(constraints) == 0 {
-		t.Error("Expected constraints to be created")
-	}
+	// Check that we have indexes.
+	// Note: GetConstraints() returns [] by design (multi-scope model removed all
+	// single-property unique constraints); only check that indexes were created.
+	constraints, _ := info["constraints"].([]map[string]any)
 
 	indexes, ok := info["indexes"].([]map[string]any)
 	if !ok || len(indexes) == 0 {
 		t.Error("Expected indexes to be created")
 	}
 
-	t.Logf("Created %d constraints and %d indexes", len(constraints), len(indexes))
+	t.Logf("Schema: %d constraints (intentionally 0 in multi-scope model), %d indexes", len(constraints), len(indexes))
 }
 
 func TestBasicNodeOperations(t *testing.T) {

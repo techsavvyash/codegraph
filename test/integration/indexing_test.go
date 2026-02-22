@@ -44,15 +44,20 @@ func (s *IndexingTestSuite) SetupSuite() {
 	s.client = client
 	s.ctx = context.Background()
 
-	// Create test directory
-	s.testDir = filepath.Join("test", "fixtures")
-	os.MkdirAll(s.testDir, 0755)
+	// Create test directory using os.MkdirTemp so the directory is guaranteed
+	// to exist regardless of the working directory during test execution.
+	var mkErr error
+	s.testDir, mkErr = os.MkdirTemp("", "codegraph-integration-*")
+	require.NoError(s.T(), mkErr, "Failed to create temp test directory")
 	
 	// Setup test schema (clean slate)
 	s.setupTestSchema()
 }
 
 func (s *IndexingTestSuite) TearDownSuite() {
+	if s.testDir != "" {
+		os.RemoveAll(s.testDir)
+	}
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}
