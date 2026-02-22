@@ -133,10 +133,42 @@ func GetLanguageConfig(lang Language) (*LanguageConfig, error) {
 	return config, nil
 }
 
+// parseGoWork reads a go.work file and returns the module paths listed under
+// the use (...) stanza, as written (e.g. ".", "./libs/core-models-go").
+func parseGoWork(goWorkPath string) []string {
+	data, err := os.ReadFile(goWorkPath)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	inUse := false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "use (":
+			inUse = true
+		case inUse && line == ")":
+			inUse = false
+		case inUse && line != "" && !strings.HasPrefix(line, "//"):
+			paths = append(paths, line)
+		}
+	}
+	return paths
+}
+
 // DetectAllLanguages walks the project directory tree and returns every
-// (language, directory) root found. It is monorepo-aware: once a language root
-// is found at a given path, nested sub-directories are not re-checked for that
-// language. JavaScript roots colocated with TypeScript roots are suppressed.
+// (language, directory) root found. It is monorepo-aware:
+//
+//   - Go workspaces (go.work): each "use" entry becomes its own root; the
+//     workspace root itself is skipped since it typically only contains test/
+//     files. Nested go.mod files are suppressed via the normal dedup logic.
+//
+//   - JavaScript workspaces: TypeScript roots that are sub-directories of a
+//     detected JavaScript root are suppressed, because the JavaScript pass
+//     uses --pnpm-workspaces / --yarn-workspaces which already covers them.
+//
+//   - Same-directory dedup: when TypeScript and JavaScript are both found in
+//     the same directory, TypeScript wins and JavaScript is suppressed.
 //
 // Directories named node_modules, .git, vendor, .venv, __pycache__, dist,
 // build, .svelte-kit, .nx, bin, and tmp are skipped entirely. The walk is
@@ -147,8 +179,7 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 		return nil, fmt.Errorf("failed to resolve project path: %w", err)
 	}
 
-	// Priority order: TypeScript before JavaScript so TS wins when both
-	// detection files coexist in the same directory.
+	// Priority order: TypeScript before JavaScript so TS wins same-dir dedup.
 	detectionOrder := []Language{
 		LanguageGo,
 		LanguageTypeScript,
@@ -171,6 +202,24 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 	// foundLangDirs tracks directories already claimed per language so that
 	// nested sub-modules of the same language are not double-counted.
 	foundLangDirs := make(map[Language][]string)
+
+	// ── Go workspace pre-processing ─────────────────────────────────────────
+	// If go.work exists at the project root, expand each "use" entry into its
+	// own LanguageRoot and claim the workspace root for Go so the WalkDir loop
+	// does not re-detect any Go root inside the workspace.
+	goWorkPath := filepath.Join(absRoot, "go.work")
+	if _, err := os.Stat(goWorkPath); err == nil {
+		for _, usePath := range parseGoWork(goWorkPath) {
+			if usePath == "." {
+				// Workspace root only hosts test/ wrappers; skip.
+				continue
+			}
+			absUsePath := filepath.Clean(filepath.Join(absRoot, usePath))
+			roots = append(roots, LanguageRoot{Language: LanguageGo, Path: absUsePath})
+		}
+		// Claim the whole workspace root for Go so WalkDir skips nested go.mod dirs.
+		foundLangDirs[LanguageGo] = append(foundLangDirs[LanguageGo], absRoot)
+	}
 
 	const maxSeparators = 3 // walk up to 4 levels deep (0-indexed)
 
@@ -238,16 +287,39 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 		return nil, fmt.Errorf("failed to walk project directory: %w", walkErr)
 	}
 
-	// Suppress JavaScript roots colocated with a TypeScript root (same directory).
-	tsRoots := make(map[string]bool)
+	// ── Post-walk deduplication ──────────────────────────────────────────────
+
+	// Build index sets for the two JS/TS languages.
+	tsRootPaths := make(map[string]bool)
+	jsRootPaths := make(map[string]bool)
 	for _, r := range roots {
-		if r.Language == LanguageTypeScript {
-			tsRoots[r.Path] = true
+		switch r.Language {
+		case LanguageTypeScript:
+			tsRootPaths[r.Path] = true
+		case LanguageJavaScript:
+			jsRootPaths[r.Path] = true
 		}
 	}
-	filtered := roots[:0]
+
+	// isInsideJSRoot reports whether path is a sub-directory of any JS root.
+	isInsideJSRoot := func(path string) bool {
+		for jsPath := range jsRootPaths {
+			if strings.HasPrefix(path, jsPath+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var filtered []LanguageRoot
 	for _, r := range roots {
-		if r.Language == LanguageJavaScript && tsRoots[r.Path] {
+		// Same-dir dedup: drop JS when TS is at the exact same directory.
+		if r.Language == LanguageJavaScript && tsRootPaths[r.Path] {
+			continue
+		}
+		// Workspace dedup: drop TS when inside a JS workspace root (the JS pass
+		// uses --pnpm-workspaces / --yarn-workspaces and already covers the TS subdir).
+		if r.Language == LanguageTypeScript && isInsideJSRoot(r.Path) {
 			continue
 		}
 		filtered = append(filtered, r)
