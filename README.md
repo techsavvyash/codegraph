@@ -76,7 +76,7 @@ docker compose -f infra/docker/compose.platform.yml up -d
 Install CodeGraph with everything configured (CLI, Neo4j, MCP server):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/context-maximiser/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yourusername/context-maximiser/main/scripts/install.sh | bash
 ```
 
 Or download and run locally:
@@ -84,7 +84,7 @@ Or download and run locally:
 ```bash
 git clone <repository-url>
 cd context-maximiser
-./install.sh
+./scripts/install.sh
 ```
 
 The installer will:
@@ -112,7 +112,7 @@ export CODEGRAPH_BIN_DIR="$HOME/bin"
 export CODEGRAPH_NEO4J_PASSWORD="your-secure-password"
 
 # Run installer with custom settings
-./install.sh
+./scripts/install.sh
 ```
 
 #### What the Installer Does
@@ -615,10 +615,10 @@ To completely remove CodeGraph from your system:
 
 ```bash
 # Run the uninstall script
-./uninstall.sh
+./scripts/uninstall.sh
 
 # Or with curl (if available online)
-curl -fsSL https://raw.githubusercontent.com/yourusername/context-maximiser/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yourusername/context-maximiser/main/scripts/uninstall.sh | bash
 ```
 
 The uninstaller will:
