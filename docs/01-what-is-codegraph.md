@@ -256,7 +256,7 @@ RETURN path
 
 ```bash
 # One-command installation
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/install.sh | bash
 
 # Index your project
 codegraph index scip ./my-project --service="my-service"

@@ -5,7 +5,7 @@
 The fastest way to install CodeGraph:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/install.sh | bash
 ```
 
 This one-command installer will:
@@ -63,7 +63,7 @@ This one-command installer will:
 
 ```bash
 # One command - installs everything
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/install.sh | bash
 ```
 
 #### What It Does
@@ -111,7 +111,7 @@ export CODEGRAPH_BIN_DIR="$HOME/bin"
 export CODEGRAPH_NEO4J_PASSWORD="your-secure-password"
 
 # Run installer with custom settings
-./install.sh
+./scripts/install.sh
 ```
 
 #### Post-Installation
@@ -460,7 +460,7 @@ go build -o codegraph-mcp .
 
 ```bash
 # Re-run installer
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/install.sh | bash
 ```
 
 ### Manual Upgrade
@@ -490,7 +490,7 @@ codegraph schema create
 
 ```bash
 # Run uninstaller
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/uninstall.sh | bash
 
 # Or manually:
 

@@ -32,7 +32,7 @@ sequenceDiagram
 
 ```bash
 # Using the one-command installer (recommended)
-curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/techsavvyash/codegraph/master/scripts/install.sh | bash
 
 # Or manual setup
 cd mcp-server
