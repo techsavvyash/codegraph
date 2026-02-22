@@ -44,16 +44,23 @@ func (s *IndexingTestSuite) SetupSuite() {
 	s.client = client
 	s.ctx = context.Background()
 
-	// Use testing.T.TempDir() so the directory is auto-cleaned when the suite
-	// finishes and is guaranteed to exist for all test methods.
-	s.testDir = s.T().TempDir()
+	// Use os.MkdirTemp (not s.T().TempDir()) because in testify v1.8+,
+	// SetupSuite runs inside the first test's subtest T. If we used
+	// s.T().TempDir(), the directory would be deleted when that first test
+	// finishes — before later tests (e.g. TestDocumentIndexingIntegration) run.
+	// os.MkdirTemp has no T lifecycle dependency; we clean it up in TearDownSuite.
+	dir, err := os.MkdirTemp("", "codegraph-integration-*")
+	require.NoError(s.T(), err)
+	s.testDir = dir
 	
 	// Setup test schema (clean slate)
 	s.setupTestSchema()
 }
 
 func (s *IndexingTestSuite) TearDownSuite() {
-	// Note: s.testDir is managed by s.T().TempDir() — no manual cleanup needed.
+	if s.testDir != "" {
+		os.RemoveAll(s.testDir)
+	}
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}
