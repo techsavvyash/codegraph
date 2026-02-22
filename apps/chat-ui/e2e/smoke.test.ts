@@ -82,9 +82,9 @@ test.describe('Input behaviour', () => {
   test('Enter key sends message', async ({ page }) => {
     await page.goto('/')
     const input = page.getByRole('textbox', { name: 'Message input' })
-    await input.click()
-    await page.keyboard.type('hello via enter')
-    await page.keyboard.press('Enter')
+    // Use locator-based press so the keydown is dispatched directly to the textarea element
+    await input.pressSequentially('hello via enter')
+    await input.press('Enter')
     // User bubble appears and input clears — proves Enter submitted the form
     await expect(page.getByText('hello via enter', { exact: true })).toBeVisible()
     await expect(input).toHaveValue('')

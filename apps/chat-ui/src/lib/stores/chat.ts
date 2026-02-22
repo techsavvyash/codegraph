@@ -100,6 +100,9 @@ export async function sendMessage(userText: string): Promise<void> {
           )
         } else if (ev.type === 'done') {
           toolActivity.set(null)
+        } else if (ev.type === 'warning') {
+          // Non-fatal warning (e.g. MCP unavailable) — show in error banner but keep going
+          error.set(ev.message ?? 'Warning')
         } else if (ev.type === 'error') {
           toolActivity.set(null)
           error.set(ev.message ?? 'Unknown streaming error')

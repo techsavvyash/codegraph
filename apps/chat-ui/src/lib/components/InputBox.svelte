@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-
   export let disabled = false
   export let placeholder = 'Ask about your codebase...'
   export let onsubmit: (text: string) => void = () => {}
@@ -34,12 +32,11 @@
     }
   }
 
-  // Attach keydown directly to bypass Svelte 5 event delegation
-  onMount(() => {
-    if (!textareaEl) return
-    textareaEl.addEventListener('keydown', handleKeydown)
-    return () => textareaEl.removeEventListener('keydown', handleKeydown)
-  })
+  // Svelte action: runs synchronously when the textarea is added to the DOM (works in SSR hydration)
+  function keydownAction(node: HTMLTextAreaElement) {
+    node.addEventListener('keydown', handleKeydown)
+    return { destroy() { node.removeEventListener('keydown', handleKeydown) } }
+  }
 </script>
 
 <form class="input-box" on:submit|preventDefault={submit}>
@@ -47,8 +44,8 @@
     <textarea
       bind:this={textareaEl}
       bind:value
+      use:keydownAction
       on:input={autoResize}
-      on:keydown={handleKeydown}
       {disabled}
       {placeholder}
       rows="1"

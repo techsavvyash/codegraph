@@ -20,16 +20,14 @@ export const POST: RequestHandler = async ({ request }) => {
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY })
   const { messages } = await request.json()
 
-  let tools: Awaited<ReturnType<typeof mcpClient.listTools>>
+  let tools: Awaited<ReturnType<typeof mcpClient.listTools>> = []
+  let mcpWarning: string | null = null
   try {
     tools = await mcpClient.listTools()
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    const body = JSON.stringify({ type: 'error', message: `MCP unavailable: ${msg}` }) + '\n'
-    return new Response(body, {
-      status: 200,
-      headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache' }
-    })
+    mcpWarning = `MCP unavailable (${msg}). Answering without code graph tools — start Neo4j to enable them.`
+    console.warn('[api/chat] MCP unavailable, proceeding without tools:', msg)
   }
 
   const oaiTools: OpenAI.Chat.Completions.ChatCompletionTool[] = tools.map(t => ({
@@ -51,6 +49,8 @@ export const POST: RequestHandler = async ({ request }) => {
         { role: 'system', content: SYSTEM_PROMPT },
         ...messages
       ]
+
+      if (mcpWarning) send({ type: 'warning', message: mcpWarning })
 
       try {
         while (true) {

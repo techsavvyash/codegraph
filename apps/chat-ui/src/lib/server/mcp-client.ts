@@ -1,9 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { resolve } from 'node:path'
+import { resolve, dirname } from 'node:path'
 
-// Path relative to repo root (CWD when running `pnpm dev` from apps/chat-ui/)
+// Resolve binary relative to CWD (apps/chat-ui when running `pnpm dev`)
+// dirname(MCP_BINARY) = repo/bin/ — so the spawned process sees "../.env" = repo root .env
 const MCP_BINARY = resolve(process.cwd(), '../../bin/codegraph-mcp')
+const MCP_CWD = dirname(MCP_BINARY)
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void }
 
@@ -18,6 +20,7 @@ class MCPClient {
 
     this.proc = spawn(MCP_BINARY, [], {
       stdio: ['pipe', 'pipe', 'inherit'],
+      cwd: MCP_CWD,  // bin/ dir → so godotenv.Load("../.env") finds the repo root .env
       env: { ...process.env }
     })
 

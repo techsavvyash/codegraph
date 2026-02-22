@@ -11,7 +11,7 @@ export interface Message {
 }
 
 export interface StreamEvent {
-  type: 'text' | 'tool_use' | 'tool_result' | 'done' | 'error'
+  type: 'text' | 'tool_use' | 'tool_result' | 'done' | 'error' | 'warning'
   delta?: string
   name?: string
   input?: Record<string, unknown>
