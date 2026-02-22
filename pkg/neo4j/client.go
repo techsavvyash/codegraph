@@ -345,8 +345,18 @@ func (c *Client) BatchCreateNodes(ctx context.Context, nodes []BatchNode) error 
 		RETURN count(node) as created
 	`
 
+	// Serialize BatchNode structs to map[string]any — Neo4j driver
+	// cannot serialize custom struct types directly as parameters.
+	nodeParams := make([]map[string]any, len(nodes))
+	for i, n := range nodes {
+		nodeParams[i] = map[string]any{
+			"labels":     n.Labels,
+			"properties": n.Properties,
+		}
+	}
+
 	params := map[string]any{
-		"nodes": nodes,
+		"nodes": nodeParams,
 	}
 
 	_, err := c.ExecuteQuery(ctx, cypher, params)
@@ -365,8 +375,17 @@ func (c *Client) BatchMergeNodes(ctx context.Context, nodes []BatchMergeNode) er
 		RETURN count(node) as processed
 	`
 
+	nodeParams := make([]map[string]any, len(nodes))
+	for i, n := range nodes {
+		nodeParams[i] = map[string]any{
+			"labels":     n.Labels,
+			"mergeProps": n.MergeProps,
+			"setProps":   n.SetProps,
+		}
+	}
+
 	params := map[string]any{
-		"nodes": nodes,
+		"nodes": nodeParams,
 	}
 
 	_, err := c.ExecuteQuery(ctx, cypher, params)
@@ -387,8 +406,18 @@ func (c *Client) BatchCreateRelationships(ctx context.Context, relationships []B
 		RETURN count(rel) as created
 	`
 
+	relParams := make([]map[string]any, len(relationships))
+	for i, r := range relationships {
+		relParams[i] = map[string]any{
+			"fromId":     r.FromID,
+			"toId":       r.ToID,
+			"type":       r.Type,
+			"properties": r.Properties,
+		}
+	}
+
 	params := map[string]any{
-		"rels": relationships,
+		"rels": relParams,
 	}
 
 	_, err := c.ExecuteQuery(ctx, cypher, params)

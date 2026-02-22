@@ -153,12 +153,7 @@ func GetIndexes() []Index {
 		},
 		// Note: Full-text search requires Neo4j Enterprise
 		// Using regular BTREE indexes for basic search functionality
-		{
-			Name:       "search_name_idx",
-			NodeLabel:  "Function",
-			Properties: []string{"name"},
-			Type:       "BTREE",
-		},
+		// (search_name_idx removed: duplicate of function_name_idx on Function.name)
 		{
 			Name:       "search_displayname_idx",
 			NodeLabel:  "Symbol",
