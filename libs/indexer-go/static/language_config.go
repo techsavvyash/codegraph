@@ -2,10 +2,17 @@ package static
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// LanguageRoot pairs a detected language with the directory where it was found.
+type LanguageRoot struct {
+	Language Language
+	Path     string // absolute path
+}
 
 // Language represents a supported programming language
 type Language string
@@ -124,6 +131,129 @@ func GetLanguageConfig(lang Language) (*LanguageConfig, error) {
 		return nil, fmt.Errorf("unsupported language: %s", lang)
 	}
 	return config, nil
+}
+
+// DetectAllLanguages walks the project directory tree and returns every
+// (language, directory) root found. It is monorepo-aware: once a language root
+// is found at a given path, nested sub-directories are not re-checked for that
+// language. JavaScript roots colocated with TypeScript roots are suppressed.
+//
+// Directories named node_modules, .git, vendor, .venv, __pycache__, dist,
+// build, .svelte-kit, .nx, bin, and tmp are skipped entirely. The walk is
+// limited to four levels of nesting (relative to projectPath) to keep it fast.
+func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
+	absRoot, err := filepath.Abs(projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve project path: %w", err)
+	}
+
+	// Priority order: TypeScript before JavaScript so TS wins when both
+	// detection files coexist in the same directory.
+	detectionOrder := []Language{
+		LanguageGo,
+		LanguageTypeScript,
+		LanguageJavaScript,
+		LanguagePython,
+		LanguageJava,
+		LanguageScala,
+		LanguageKotlin,
+		LanguagePHP,
+	}
+
+	skipDirs := map[string]bool{
+		"node_modules": true, ".git": true, "vendor": true,
+		".venv": true, "__pycache__": true, "dist": true,
+		"build": true, ".svelte-kit": true, ".nx": true,
+		"bin": true, "tmp": true, "coverage": true,
+	}
+
+	var roots []LanguageRoot
+	// foundLangDirs tracks directories already claimed per language so that
+	// nested sub-modules of the same language are not double-counted.
+	foundLangDirs := make(map[Language][]string)
+
+	const maxSeparators = 3 // walk up to 4 levels deep (0-indexed)
+
+	walkErr := filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return nil // skip unreadable entries
+		}
+		if !d.IsDir() {
+			return nil
+		}
+
+		// Enforce depth limit.
+		rel, _ := filepath.Rel(absRoot, path)
+		if rel != "." && strings.Count(rel, string(filepath.Separator)) >= maxSeparators {
+			return filepath.SkipDir
+		}
+
+		// Skip non-source directories.
+		if skipDirs[d.Name()] {
+			return filepath.SkipDir
+		}
+
+		for _, lang := range detectionOrder {
+			config, err := GetLanguageConfig(lang)
+			if err != nil {
+				continue
+			}
+
+			// Skip if path is inside a directory already claimed for this language.
+			nested := false
+			for _, found := range foundLangDirs[lang] {
+				if path == found || strings.HasPrefix(path, found+string(filepath.Separator)) {
+					nested = true
+					break
+				}
+			}
+			if nested {
+				continue
+			}
+
+			// Check detection files.
+			detected := false
+			for _, detectionFile := range config.DetectionFiles {
+				if _, err := os.Stat(filepath.Join(path, detectionFile)); err != nil {
+					continue
+				}
+				// TypeScript requires tsconfig.json specifically.
+				if lang == LanguageTypeScript {
+					if _, err := os.Stat(filepath.Join(path, "tsconfig.json")); err != nil {
+						continue
+					}
+				}
+				detected = true
+				break
+			}
+
+			if detected {
+				roots = append(roots, LanguageRoot{Language: lang, Path: path})
+				foundLangDirs[lang] = append(foundLangDirs[lang], path)
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("failed to walk project directory: %w", walkErr)
+	}
+
+	// Suppress JavaScript roots colocated with a TypeScript root (same directory).
+	tsRoots := make(map[string]bool)
+	for _, r := range roots {
+		if r.Language == LanguageTypeScript {
+			tsRoots[r.Path] = true
+		}
+	}
+	filtered := roots[:0]
+	for _, r := range roots {
+		if r.Language == LanguageJavaScript && tsRoots[r.Path] {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+
+	return filtered, nil
 }
 
 // DetectLanguage attempts to detect the primary language of a project

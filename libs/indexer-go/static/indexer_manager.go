@@ -66,7 +66,7 @@ func DefaultReleases() []IndexerRelease {
 		{
 			Language: LanguagePython,
 			Binary:   "scip-python",
-			Version:  "0.5.3",
+			Version:  "0.6.6",
 			Method:   InstallNPM,
 			Package:  "@sourcegraph/scip-python",
 		},

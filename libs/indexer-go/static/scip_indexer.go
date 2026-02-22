@@ -244,6 +244,85 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	return nil
 }
 
+// IndexProjectPolyglot detects all languages present under projectPath, installs
+// any missing SCIP indexers, and then indexes each language root in sequence.
+// It propagates the service name, version, repo URL, and scope from the receiver.
+//
+// Partial failures (a single language failing while others succeed) are printed
+// as warnings but do not abort the run. An error is returned only when every
+// detected language root fails to index.
+func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath string) error {
+	roots, err := DetectAllLanguages(projectPath)
+	if err != nil {
+		return fmt.Errorf("language detection failed: %w", err)
+	}
+	if len(roots) == 0 {
+		return fmt.Errorf("no supported languages detected in %s", projectPath)
+	}
+
+	fmt.Printf("Detected %d language root(s):\n", len(roots))
+	for _, r := range roots {
+		cfg, _ := GetLanguageConfig(r.Language)
+		rel, _ := filepath.Rel(projectPath, r.Path)
+		if rel == "" {
+			rel = "."
+		}
+		fmt.Printf("  %-12s %s\n", cfg.DisplayName, rel)
+	}
+
+	// Collect unique languages and auto-install missing indexers.
+	langSet := make(map[Language]bool)
+	for _, r := range roots {
+		langSet[r.Language] = true
+	}
+	langs := make([]Language, 0, len(langSet))
+	for lang := range langSet {
+		langs = append(langs, lang)
+	}
+
+	mgr := NewIndexerManager("")
+	installed, failed := mgr.InstallAll(langs)
+	if len(failed) > 0 {
+		for lang, ferr := range failed {
+			fmt.Printf("Warning: could not install indexer for %s: %v\n", lang, ferr)
+		}
+	}
+	_ = installed
+
+	// Index each root.
+	var errs []error
+	for _, r := range roots {
+		if _, didFail := failed[r.Language]; didFail {
+			fmt.Printf("Skipping %s (%s) — indexer unavailable\n", r.Language, r.Path)
+			errs = append(errs, fmt.Errorf("indexer unavailable for %s", r.Language))
+			continue
+		}
+
+		cfg, _ := GetLanguageConfig(r.Language)
+		rel, _ := filepath.Rel(projectPath, r.Path)
+		if rel == "" {
+			rel = "."
+		}
+		fmt.Printf("\n=== Indexing %s at %s ===\n", cfg.DisplayName, rel)
+
+		sub := NewSCIPIndexerWithLanguage(si.client, si.serviceName, si.version, si.repoURL, r.Language)
+		sub.SetScope(si.scopeCtx)
+		if si.timer != nil {
+			sub.SetBenchmarkTimer(si.timer)
+		}
+
+		if err := sub.IndexProject(ctx, r.Path); err != nil {
+			fmt.Printf("Warning: %s indexing at %s failed: %v\n", cfg.DisplayName, rel, err)
+			errs = append(errs, fmt.Errorf("%s@%s: %w", r.Language, rel, err))
+		}
+	}
+
+	if len(errs) == len(roots) {
+		return fmt.Errorf("all language roots failed to index: %v", errs)
+	}
+	return nil
+}
+
 // generateSCIPIndex runs the appropriate SCIP indexer to generate a SCIP index file
 func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	// Resolve the SCIP binary: check IndexerManager cache first, then system PATH.

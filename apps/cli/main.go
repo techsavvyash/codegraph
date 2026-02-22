@@ -367,28 +367,21 @@ The language will be auto-detected from the project structure, or you can specif
 		}
 		defer client.Close(context.Background())
 
-		// Determine language
-		var language static.Language
+		ctx := context.Background()
+
+		// Build the indexer and set scope (common to both paths).
+		var scipIndexer *static.SCIPIndexer
 		if languageFlag != "" {
-			// Use explicitly specified language
-			language = static.Language(strings.ToLower(languageFlag))
+			language := static.Language(strings.ToLower(languageFlag))
 			if _, err := static.GetLanguageConfig(language); err != nil {
 				return fmt.Errorf("unsupported language: %s. Supported languages: %s",
 					languageFlag, static.FormatLanguageList())
 			}
 			fmt.Printf("Using explicitly specified language: %s\n", languageFlag)
+			scipIndexer = static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
 		} else {
-			// Auto-detect language
-			detectedLang, err := static.DetectLanguage(projectPath)
-			if err != nil {
-				return fmt.Errorf("failed to detect language: %w\nPlease specify language explicitly with --language flag", err)
-			}
-			language = detectedLang
-			langConfig, _ := static.GetLanguageConfig(language)
-			fmt.Printf("Auto-detected language: %s\n", langConfig.DisplayName)
+			scipIndexer = static.NewSCIPIndexer(client, serviceName, version, repoURL)
 		}
-
-		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
 
 		// Set scope if provided
 		scopeFlag, _ := cmd.Flags().GetString("scope")
@@ -408,25 +401,31 @@ The language will be auto-detected from the project structure, or you can specif
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
 
-		// Validate environment (with optional auto-install)
-		noAutoInstall, _ := cmd.Flags().GetBool("no-auto-install")
-		if noAutoInstall {
-			if err := scipIndexer.ValidateEnvironmentNoInstall(); err != nil {
-				return fmt.Errorf("environment validation failed: %w", err)
+		if languageFlag != "" {
+			// Single-language path: validate env, then index.
+			noAutoInstall, _ := cmd.Flags().GetBool("no-auto-install")
+			if noAutoInstall {
+				if err := scipIndexer.ValidateEnvironmentNoInstall(); err != nil {
+					return fmt.Errorf("environment validation failed: %w", err)
+				}
+			} else {
+				if err := scipIndexer.ValidateEnvironment(); err != nil {
+					return fmt.Errorf("environment validation failed: %w", err)
+				}
 			}
+			fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
+			if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
+				return fmt.Errorf("failed to index project with SCIP: %w", err)
+			}
+			fmt.Println("✓ Project indexed successfully using SCIP")
 		} else {
-			if err := scipIndexer.ValidateEnvironment(); err != nil {
-				return fmt.Errorf("environment validation failed: %w", err)
+			// Polyglot path: auto-detect all languages, install missing indexers, index each.
+			fmt.Printf("No --language specified — running polyglot indexing at %s\n", projectPath)
+			if err := scipIndexer.IndexProjectPolyglot(ctx, projectPath); err != nil {
+				return fmt.Errorf("polyglot indexing failed: %w", err)
 			}
+			fmt.Println("✓ Polyglot indexing completed successfully")
 		}
-
-		fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
-		ctx := context.Background()
-		if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
-			return fmt.Errorf("failed to index project with SCIP: %w", err)
-		}
-
-		fmt.Println("✓ Project indexed successfully using SCIP")
 		return nil
 	},
 }
