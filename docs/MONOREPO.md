@@ -122,4 +122,4 @@ libs/indexer-go/
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-02-22 | Option A merged | Remove dead code, establish correct directory layout with single go.mod |
-| TBD | Option B begins | After API surfaces are stable and teams need independent versioning |
+| 2026-02-22 | Option B merged | Per-module `go.mod` for each lib/service/app; root `go.work` for workspace resolution; `neo4j-go`/`neo4j-client-go` consolidation deferred |

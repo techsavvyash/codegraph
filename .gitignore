@@ -1,5 +1,8 @@
 .env
 
+# Go workspace sum (auto-generated; individual go.sum files are committed)
+go.work.sum
+
 # SCIP index files (temporary)
 index.scip
 

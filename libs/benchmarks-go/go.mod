@@ -1,10 +1,10 @@
-module github.com/context-maximiser/code-graph
+module github.com/context-maximiser/code-graph/libs/benchmarks-go
 
 go 1.24.3
 
 require (
-	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
-	github.com/stretchr/testify v1.11.1
+	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -27,8 +27,10 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
+	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v24.0.4+incompatible // indirect
 	github.com/docker/distribution v2.8.2+incompatible // indirect
@@ -67,12 +69,12 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/mwitkow/go-proto-validators v0.0.0-20180403085117-0950a7990007 // indirect
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.3 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/profile v1.7.0 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/pseudomuto/protoc-gen-doc v1.5.1 // indirect
 	github.com/pseudomuto/protokit v0.2.0 // indirect
 	github.com/qdrant/go-client v1.17.1 // indirect
@@ -113,25 +115,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-// Sub-module requires for test/ directory
-require (
-	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/schema-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/vector-client-go v0.0.0-00010101000000-000000000000
-)
-
 replace (
-	github.com/context-maximiser/code-graph/libs/core-models-go => ./libs/core-models-go
-	github.com/context-maximiser/code-graph/libs/indexer-go => ./libs/indexer-go
-	github.com/context-maximiser/code-graph/libs/neo4j-go => ./libs/neo4j-go
-	github.com/context-maximiser/code-graph/libs/query-go => ./libs/query-go
-	github.com/context-maximiser/code-graph/libs/schema-go => ./libs/schema-go
-	github.com/context-maximiser/code-graph/libs/search-go => ./libs/search-go
-	github.com/context-maximiser/code-graph/libs/text-index-client-go => ./libs/text-index-client-go
-	github.com/context-maximiser/code-graph/libs/vector-client-go => ./libs/vector-client-go
+	github.com/context-maximiser/code-graph/libs/core-models-go => ../core-models-go
+	github.com/context-maximiser/code-graph/libs/indexer-go => ../indexer-go
+	github.com/context-maximiser/code-graph/libs/neo4j-go => ../neo4j-go
+	github.com/context-maximiser/code-graph/libs/search-go => ../search-go
+	github.com/context-maximiser/code-graph/libs/text-index-client-go => ../text-index-client-go
 )
