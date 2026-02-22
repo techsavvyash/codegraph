@@ -20,31 +20,29 @@
 <div class="shell">
   <!-- ── Header ── -->
   <header class="header">
-    <div class="header-left">
-      <!-- Logo mark -->
-      <svg class="logo-mark" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <rect x="1" y="1" width="18" height="18" rx="3" stroke="var(--amber)" stroke-width="1.5"/>
-        <path d="M5 7h4M5 10h10M5 13h7" stroke="var(--amber)" stroke-width="1.5" stroke-linecap="round"/>
-        <circle cx="15" cy="7" r="1.5" fill="var(--amber)" opacity="0.8"/>
-      </svg>
-      <span class="header-title">CodeGraph</span>
-      <span class="header-sep">/</span>
-      <span class="header-sub">intelligence</span>
+    <div class="header-brand">
+      <div class="brand-mark" aria-hidden="true">
+        <div class="mark-dot" />
+      </div>
+      <span class="brand-name">CodeGraph</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-sub">Intelligence</span>
     </div>
 
     <div class="header-right">
       {#if $loading}
-        <span class="status-dot active" title="Processing" aria-label="Processing" />
+        <span class="spinner-wrap" aria-label="Processing">
+          <svg class="spin-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 10 10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+        </span>
       {:else}
-        <span class="status-dot idle" title="Ready" aria-label="Ready" />
+        <span class="status-idle" title="Ready" aria-label="Ready" />
       {/if}
 
       {#if $messages.length > 0}
         <button class="clear-btn" on:click={clearMessages} title="Clear conversation">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span>clear</span>
+          clear
         </button>
       {/if}
     </div>
@@ -64,9 +62,9 @@
     <!-- Error banner -->
     {#if $error}
       <div class="error-banner" role="alert">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" stroke="var(--red)" stroke-width="1.8"/>
-          <path d="M12 8v4M12 16h.01" stroke="var(--red)" stroke-width="1.8" stroke-linecap="round"/>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
         </svg>
         <span>{$error}</span>
         <button class="error-dismiss" on:click={dismissError} aria-label="Dismiss error">×</button>
@@ -78,16 +76,16 @@
 </div>
 
 <style>
-  /* ── Shell layout ── */
+  /* ── Shell ── */
   .shell {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    max-width: 900px;
+    max-width: 860px;
     margin: 0 auto;
-    border-left: 1px solid var(--border-dim);
-    border-right: 1px solid var(--border-dim);
-    background: var(--bg-base);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    background: var(--bg-page);
   }
 
   /* ── Header ── */
@@ -96,94 +94,94 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--space-6);
-    height: 44px;
-    border-bottom: 1px solid var(--border-soft);
-    background: var(--bg-surface);
+    height: 52px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-page);
     flex-shrink: 0;
-    position: relative;
   }
 
-  /* Top accent line */
-  .header::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--amber-dim), var(--amber), var(--amber-dim));
-    opacity: 0.7;
-  }
-
-  .header-left {
+  .header-brand {
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  .logo-mark {
-    flex-shrink: 0;
+  .brand-mark {
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--text-primary);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .header-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--amber);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+  .mark-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
   }
 
-  .header-sep {
-    color: var(--border-bright);
+  .brand-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+
+  .brand-sep {
+    color: var(--border-strong);
     font-size: 14px;
+    font-weight: 300;
   }
 
-  .header-sub {
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.04em;
+  .brand-sub {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: 400;
   }
 
   .header-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
 
-  /* Status dot */
-  .status-dot {
-    width: 7px;
-    height: 7px;
+  .spinner-wrap {
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+  }
+
+  .spin-icon { animation: spin 0.9s linear infinite; }
+
+  .status-idle {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
+    background: var(--border-strong);
     display: inline-block;
-  }
-  .status-dot.active {
-    background: var(--cyan);
-    box-shadow: 0 0 6px var(--cyan);
-    animation: pulse-amber 1.4s ease-in-out infinite;
-  }
-  .status-dot.idle {
-    background: var(--text-muted);
   }
 
   .clear-btn {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-tertiary);
     background: none;
-    border: 1px solid var(--border-dim);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    padding: 3px 7px;
+    padding: 4px 10px;
     cursor: pointer;
     transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+    letter-spacing: 0.01em;
   }
+
   .clear-btn:hover {
-    color: var(--text-soft);
-    border-color: var(--border-soft);
-    background: var(--bg-overlay);
+    color: var(--text-secondary);
+    border-color: var(--border-strong);
+    background: var(--bg-surface);
   }
 
   /* ── Main ── */
@@ -194,11 +192,11 @@
     overflow: hidden;
   }
 
-  /* ── Tool activity strip ── */
+  /* ── Tool strip ── */
   .tool-strip {
-    padding: 6px var(--space-6);
-    border-top: 1px solid var(--border-dim);
-    background: var(--bg-surface);
+    padding: 8px var(--space-6);
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-page);
     flex-shrink: 0;
   }
 
@@ -208,12 +206,12 @@
     align-items: center;
     gap: 8px;
     margin: 0 var(--space-6) var(--space-2);
-    padding: 8px 12px;
-    background: var(--red-dim);
-    border: 1px solid var(--red);
+    padding: 9px 12px;
+    background: var(--red-subtle);
+    border: 1px solid var(--red-border);
     border-radius: var(--radius-md);
     color: var(--red);
-    font-size: 11.5px;
+    font-size: 12.5px;
     animation: slide-in-up var(--t-mid) both;
     flex-shrink: 0;
   }
@@ -228,11 +226,12 @@
     border: none;
     color: var(--red);
     cursor: pointer;
-    font-size: 16px;
+    font-size: 17px;
     line-height: 1;
     padding: 0 2px;
-    opacity: 0.7;
+    opacity: 0.6;
     transition: opacity var(--t-fast);
+    font-family: var(--font-sans);
   }
   .error-dismiss:hover { opacity: 1; }
 </style>

@@ -58,8 +58,8 @@
 <style>
   .citations {
     margin-top: 10px;
-    border-top: 1px solid var(--border-dim);
-    padding-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-light);
   }
 
   .toggle {
@@ -69,25 +69,26 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    padding: 2px 4px;
+    color: var(--text-tertiary);
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 3px 6px;
     border-radius: var(--radius-sm);
     transition: color var(--t-fast), background var(--t-fast);
+    margin-left: -6px;
   }
 
   .toggle:hover {
-    color: var(--text-soft);
-    background: var(--bg-overlay);
+    color: var(--text-secondary);
+    background: var(--bg-subtle);
   }
 
   .toggle-label { user-select: none; }
 
   .chevron {
+    color: var(--text-disabled);
     transition: transform var(--t-mid);
-    color: var(--text-muted);
   }
   .chevron.rotated { transform: rotate(180deg); }
 
@@ -95,15 +96,15 @@
     margin-top: 8px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     animation: slide-in-up var(--t-mid) both;
   }
 
   .source-item {
-    background: var(--bg-void);
-    border: 1px solid var(--border-dim);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
+    background: var(--bg-page);
   }
 
   .source-header {
@@ -112,37 +113,36 @@
     gap: 8px;
     padding: 5px 10px;
     background: var(--bg-surface);
-    border-bottom: 1px solid var(--border-dim);
+    border-bottom: 1px solid var(--border-light);
   }
 
   .source-badge {
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 600;
-    color: var(--amber);
-    letter-spacing: 0.05em;
+    color: var(--accent-dark);
+    letter-spacing: 0.03em;
     text-transform: uppercase;
+    font-family: var(--font-sans);
   }
 
   .source-tool-name {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-style: italic;
+    font-size: 10.5px;
+    color: var(--text-disabled);
+    font-family: var(--font-mono);
   }
 
   .source-result {
     margin: 0;
-    padding: 8px 10px;
+    padding: 9px 11px;
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
     line-height: 1.55;
-    color: var(--text-soft);
+    color: var(--text-secondary);
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
     border: none;
     background: transparent;
-    border-left: none;
-    border-radius: 0;
   }
 
   .source-result code {

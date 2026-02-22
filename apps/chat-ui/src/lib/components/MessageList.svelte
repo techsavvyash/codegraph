@@ -26,20 +26,22 @@
 <div class="message-list" bind:this={listEl}>
   {#if messages.length === 0}
     <div class="empty-state">
-      <div class="empty-logo" aria-hidden="true">
-        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-          <rect x="1" y="1" width="34" height="34" rx="4" stroke="var(--border-mid)" stroke-width="1.5"/>
-          <path d="M10 12h6M10 18h16M10 24h12" stroke="var(--amber)" stroke-width="1.5" stroke-linecap="round"/>
-          <circle cx="28" cy="12" r="2" fill="var(--amber)" opacity="0.7"/>
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect x="1" y="1" width="30" height="30" rx="6" stroke="var(--border-strong)" stroke-width="1.5"/>
+          <circle cx="10" cy="11" r="2" fill="var(--accent)" opacity="0.7"/>
+          <circle cx="16" cy="11" r="2" fill="var(--border-strong)"/>
+          <circle cx="22" cy="11" r="2" fill="var(--border-strong)"/>
+          <path d="M7 18h18M7 23h12" stroke="var(--border-strong)" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
       </div>
-      <p class="empty-title">CodeGraph Intelligence</p>
-      <p class="empty-sub">Ask about your indexed codebase. I'll search the graph and cite sources.</p>
-      <ul class="empty-hints">
-        <li><span class="hint-prompt">→</span> How does hybrid search work?</li>
-        <li><span class="hint-prompt">→</span> Find all callers of HybridSearchManager</li>
-        <li><span class="hint-prompt">→</span> What does the MCP server expose?</li>
-      </ul>
+      <p class="empty-title">CODEGRAPH INTELLIGENCE</p>
+      <p class="empty-sub">Ask about your indexed codebase. Search the graph, find references, explore the architecture.</p>
+      <div class="prompt-list">
+        <div class="prompt-chip">How does hybrid search work?</div>
+        <div class="prompt-chip">Find all callers of HybridSearchManager</div>
+        <div class="prompt-chip">What does the MCP server expose?</div>
+      </div>
     </div>
   {:else}
     {#each messages as msg (msg.id)}
@@ -69,54 +71,49 @@
     text-align: center;
     padding: var(--space-12);
     gap: var(--space-4);
-    animation: slide-in-up 300ms ease both;
+    animation: fade-in 240ms ease both;
   }
 
-  .empty-logo {
-    opacity: 0.5;
-    margin-bottom: var(--space-2);
+  .empty-icon {
+    opacity: 0.6;
+    margin-bottom: 4px;
   }
 
   .empty-title {
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 600;
-    color: var(--text-mid);
-    letter-spacing: 0.05em;
+    color: var(--text-disabled);
+    letter-spacing: 0.12em;
     text-transform: uppercase;
+    font-family: var(--font-mono);
   }
 
   .empty-sub {
-    font-size: 12px;
-    color: var(--text-dim);
-    max-width: 340px;
-    line-height: 1.6;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    max-width: 360px;
+    line-height: 1.65;
+    font-weight: 400;
   }
 
-  .empty-hints {
-    list-style: none;
-    margin-top: var(--space-2);
+  .prompt-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    border: 1px solid var(--border-dim);
-    border-radius: var(--radius-md);
-    padding: var(--space-4) var(--space-5);
-    background: var(--bg-surface);
+    gap: 6px;
+    margin-top: 4px;
+    width: 100%;
+    max-width: 380px;
+  }
+
+  .prompt-chip {
     text-align: left;
-    min-width: 300px;
-  }
-
-  .empty-hints li {
-    font-size: 11.5px;
-    color: var(--text-soft);
-    display: flex;
-    gap: 8px;
-    align-items: baseline;
-  }
-
-  .hint-prompt {
-    color: var(--amber);
-    font-weight: 700;
-    flex-shrink: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 9px 14px;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    line-height: 1.4;
   }
 </style>

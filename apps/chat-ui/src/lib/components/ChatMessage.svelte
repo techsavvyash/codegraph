@@ -55,9 +55,9 @@
 <div class="message" class:user={isUser} class:assistant={!isUser}>
   <div class="avatar" aria-hidden="true">
     {#if isUser}
-      <span class="avatar-icon user-icon">you</span>
+      <span class="avatar-label user-avatar">you</span>
     {:else}
-      <span class="avatar-icon bot-icon">cg</span>
+      <span class="avatar-label bot-avatar">cg</span>
     {/if}
   </div>
 
@@ -66,7 +66,7 @@
       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
       {@html html}
       {#if streaming}
-        <span class="cursor" aria-hidden="true">▌</span>
+        <span class="cursor" aria-hidden="true" />
       {/if}
     </div>
 
@@ -79,16 +79,15 @@
 <style>
   .message {
     display: flex;
-    gap: 12px;
-    padding: 14px 0;
-    animation: slide-in-up 180ms ease both;
+    gap: 11px;
+    padding: 18px 0;
+    animation: slide-in-up 160ms ease both;
   }
 
   .message + .message {
-    border-top: 1px solid var(--border-dim);
+    border-top: 1px solid var(--border-light);
   }
 
-  /* User messages align right */
   .message.user {
     flex-direction: row-reverse;
   }
@@ -96,42 +95,41 @@
   /* ── Avatar ── */
   .avatar {
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     margin-top: 2px;
   }
 
-  .avatar-icon {
+  .avatar-label {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    font-size: 9px;
-    font-weight: 700;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-full);
+    font-size: 8.5px;
+    font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+    font-family: var(--font-sans);
   }
 
-  .user-icon {
-    background: var(--bg-overlay);
-    border: 1px solid var(--border-mid);
-    color: var(--text-soft);
+  .user-avatar {
+    background: var(--accent);
+    color: #fff;
   }
 
-  .bot-icon {
-    background: var(--amber-dim);
-    border: 1px solid var(--amber-soft);
-    color: var(--amber);
-    box-shadow: var(--glow-amber);
+  .bot-avatar {
+    background: var(--bg-subtle);
+    color: var(--text-tertiary);
+    border: 1px solid var(--border);
   }
 
   /* ── Bubble ── */
   .bubble {
     flex: 1;
     min-width: 0;
-    max-width: 82%;
+    max-width: 78%;
   }
 
   .message.user .bubble {
@@ -142,82 +140,83 @@
 
   /* ── Prose ── */
   .prose {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-soft);
-    border-radius: var(--radius-md);
-    padding: 10px 14px;
-    min-width: 2rem;
-    color: var(--text-bright);
-    font-size: 12.5px;
-    line-height: 1.7;
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    line-height: 1.75;
+    color: var(--text-primary);
   }
 
-  /* User bubble slightly different tint */
-  .prose.user-prose {
-    background: var(--bg-overlay);
-    border-color: var(--border-mid);
-    color: var(--text-mid);
+  .user-prose {
+    background: var(--accent);
+    color: #fff;
+    padding: 9px 14px;
+    border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+    display: inline-block;
+    max-width: 100%;
   }
 
   /* ── Streaming cursor ── */
   .cursor {
     display: inline-block;
-    color: var(--amber);
-    animation: blink-cursor 0.9s step-end infinite;
-    font-size: 0.9em;
+    width: 1.5px;
+    height: 1em;
+    background: var(--text-secondary);
     vertical-align: text-bottom;
-    margin-left: 1px;
+    margin-left: 2px;
+    animation: blink-cursor 0.9s step-end infinite;
   }
 
-  /* Prose element overrides (these apply to {@html} output) */
-  .prose :global(p) { margin-bottom: 0.65em; }
+  /* Prose element overrides (apply to {@html} output) */
+  .prose :global(p) { margin-bottom: 0.6em; }
   .prose :global(p:last-child) { margin-bottom: 0; }
   .prose :global(h1),
   .prose :global(h2),
   .prose :global(h3) {
+    font-weight: 600;
+    margin: 1em 0 0.35em;
     color: var(--text-primary);
-    font-weight: 700;
-    margin: 0.8em 0 0.3em;
+    letter-spacing: -0.01em;
   }
-  .prose :global(h2) { color: var(--amber); }
-  .prose :global(h3) { color: var(--cyan); }
-  .prose :global(strong) { color: var(--text-primary); font-weight: 700; }
-  .prose :global(em) { font-style: italic; color: var(--text-mid); }
+  .prose :global(h1) { font-size: 1.1em; }
+  .prose :global(h2) { font-size: 1.02em; }
+  .prose :global(h3) { font-size: 0.97em; color: var(--text-secondary); }
+  .prose :global(strong) { font-weight: 600; color: var(--text-primary); }
+  .prose :global(em) { font-style: italic; color: var(--text-secondary); }
   .prose :global(code) {
-    background: var(--bg-void);
-    color: var(--amber-bright);
+    font-family: var(--font-mono);
+    font-size: 0.84em;
+    background: var(--bg-subtle);
+    color: var(--text-primary);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-dim);
-    font-size: 0.86em;
-    font-family: var(--font-mono);
+    border: 1px solid var(--border);
   }
   .prose :global(pre) {
-    background: var(--bg-void);
-    border: 1px solid var(--border-soft);
-    border-left: 3px solid var(--border-bright);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--border-strong);
     border-radius: var(--radius-md);
-    padding: 10px 14px;
+    padding: 11px 14px;
     overflow-x: auto;
-    margin: 0.65em 0;
-    font-size: 0.84em;
-    line-height: 1.5;
+    margin: 0.7em 0;
+    font-size: 0.82em;
+    line-height: 1.55;
   }
   .prose :global(pre code) {
     background: none;
     border: none;
     padding: 0;
-    color: var(--text-bright);
+    color: var(--text-primary);
     font-size: inherit;
   }
   .prose :global(ul) {
     margin: 0.4em 0 0.4em 1.2em;
-    color: var(--text-mid);
+    color: var(--text-secondary);
   }
   .prose :global(li) { margin-bottom: 0.2em; }
   .prose :global(hr) {
     border: none;
-    border-top: 1px solid var(--border-dim);
+    border-top: 1px solid var(--border);
     margin: 0.8em 0;
   }
 </style>
