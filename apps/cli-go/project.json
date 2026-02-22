@@ -15,6 +15,27 @@
         "command": "go test ./apps/cli-go/...",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go vet ./apps/cli-go/...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test ./apps/cli-go/... -tags=integration",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "smoke": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build -o bin/codegraph-new ./apps/cli-go/",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
     }
   }
 }

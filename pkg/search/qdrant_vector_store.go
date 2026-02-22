@@ -245,6 +245,8 @@ func labelToIndexPrefix(label string) string {
 		return "feature"
 	case "DocumentChunk":
 		return "docchunk"
+	case "Symbol":
+		return "symbol"
 	default:
 		return "function"
 	}
@@ -272,11 +274,16 @@ func collectionsForQuery(q VectorQuery) []string {
 		return cols
 	}
 
-	// Default: search common collections.
+	// Default: search common collections. docchunk covers prose doc queries;
+	// symbol covers CLI command vars, exported types, and other named definitions.
 	return []string{
 		fmt.Sprintf("function_embeddings_%d", dim),
+		fmt.Sprintf("method_embeddings_%d", dim),
 		fmt.Sprintf("class_embeddings_%d", dim),
 		fmt.Sprintf("document_embeddings_%d", dim),
+		fmt.Sprintf("feature_embeddings_%d", dim),
+		fmt.Sprintf("docchunk_embeddings_%d", dim),
+		fmt.Sprintf("symbol_embeddings_%d", dim),
 	}
 }
 

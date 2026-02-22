@@ -36,6 +36,9 @@ type BaseNode struct {
 	Props     map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
 	Scope     string            `json:"scope,omitempty" neo4j:"scope,omitempty"`
 	ScopeID   string            `json:"scopeId,omitempty" neo4j:"scopeId,omitempty"`
+	TenantID  string            `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
+	Repo      string            `json:"repo,omitempty" neo4j:"repo,omitempty"`
+	RepoID    string            `json:"repoId,omitempty" neo4j:"repoId,omitempty"`
 	CreatedAt time.Time         `json:"createdAt" neo4j:"createdAt"`
 	UpdatedAt time.Time         `json:"updatedAt" neo4j:"updatedAt"`
 }

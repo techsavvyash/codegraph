@@ -236,6 +236,12 @@ func nodeMatchesFilter(node *Node, filter NodeFilter) bool {
 	if filter.Scope != "" && node.Scope != filter.Scope {
 		return false
 	}
+	if filter.TenantID != "" && node.TenantID != filter.TenantID {
+		return false
+	}
+	if filter.Repo != "" && node.Repo != filter.Repo {
+		return false
+	}
 	if len(filter.NodeTypes) > 0 && !nodeHasAnyLabel(node, filter.NodeTypes) {
 		return false
 	}

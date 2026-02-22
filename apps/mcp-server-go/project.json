@@ -5,7 +5,7 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cd mcp-server && go build -o ../bin/codegraph-mcp-new ./...",
+        "command": "go build -o bin/codegraph-mcp ./apps/mcp-server-go/",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
     },
@@ -13,6 +13,27 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "go test ./apps/mcp-server-go/...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go vet ./apps/mcp-server-go/...",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test ./apps/mcp-server-go/... -tags=integration",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "smoke": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build -o bin/codegraph-mcp ./apps/mcp-server-go/",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
     }

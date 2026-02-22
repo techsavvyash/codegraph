@@ -33,7 +33,7 @@ jobs:
         run: npm install -g pnpm
 
       - name: Install Nx deps
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Set Nx base
         run: echo "NX_BASE=origin/${{ github.base_ref || 'master' }}" >> $GITHUB_ENV
@@ -90,6 +90,51 @@ jobs:
           NEO4J_USERNAME: neo4j
           NEO4J_PASSWORD: password123
         run: go test ./test/... -tags=integration -timeout 300s
+
+  # ── Chat UI: typecheck + unit tests + Playwright e2e ────────────────────
+  chat-ui:
+    name: Chat UI (check + unit + e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install workspace deps
+        run: pnpm install
+
+      - name: Typecheck
+        working-directory: apps/chat-ui
+        run: pnpm check
+
+      - name: Unit tests
+        working-directory: apps/chat-ui
+        run: pnpm test:unit
+
+      - name: Install Playwright browsers
+        working-directory: apps/chat-ui
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2e tests
+        working-directory: apps/chat-ui
+        # OPENAI_API_KEY is a dummy — e2e tests mock /api/chat at network level
+        env:
+          OPENAI_API_KEY: e2e-mock-key-not-used
+          CI: true
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/chat-ui/playwright-report/
+          retention-days: 7
 
   # ── Nightly smoke tests ──────────────────────────────────────────────────
   smoke:

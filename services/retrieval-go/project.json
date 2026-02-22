@@ -5,15 +5,36 @@
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go build ./services/retrieval-go/...",
+        "command": "go build ./services/retrieval-go/llm/... ./services/retrieval-go/query/...",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "go test ./services/retrieval-go/...",
+        "command": "go test ./services/retrieval-go/llm/... ./services/retrieval-go/query/...",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go vet ./...",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test ./... -tags=integration",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "smoke": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build ./...",
+        "cwd": "{projectRoot}"
       }
     }
   }

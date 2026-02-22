@@ -360,3 +360,60 @@ func TestMockGraphStore_UpsertRelationship_Idempotent(t *testing.T) {
 		t.Errorf("expected updated line=20, got %v", all[0].Properties["line"])
 	}
 }
+
+func TestMockGraphStore_FindNodes_RepoFilter(t *testing.T) {
+	store := models.NewMockGraphStore()
+	ctx := context.Background()
+
+	nodes := []*models.Node{
+		{
+			NodeKey:  "fn:FuncA",
+			Labels:   []string{"Function"},
+			Scope:    models.ScopeMain,
+			ScopeID:  models.ScopeMain,
+			TenantID: "tenant-1",
+			Repo:     "repo-alpha",
+		},
+		{
+			NodeKey:  "fn:FuncB",
+			Labels:   []string{"Function"},
+			Scope:    models.ScopeMain,
+			ScopeID:  models.ScopeMain,
+			TenantID: "tenant-1",
+			Repo:     "repo-beta",
+		},
+		{
+			NodeKey:  "fn:FuncC",
+			Labels:   []string{"Function"},
+			Scope:    models.ScopeMain,
+			ScopeID:  models.ScopeMain,
+			TenantID: "tenant-2",
+			Repo:     "repo-alpha",
+		},
+	}
+
+	if err := store.UpsertNodes(ctx, nodes); err != nil {
+		t.Fatalf("UpsertNodes: %v", err)
+	}
+
+	// Filter by repo only.
+	found, err := store.FindNodes(ctx, models.NodeFilter{Repo: "repo-alpha"})
+	if err != nil {
+		t.Fatalf("FindNodes: %v", err)
+	}
+	if len(found) != 2 {
+		t.Errorf("expected 2 nodes in repo-alpha, got %d", len(found))
+	}
+
+	// Filter by tenantID + repo.
+	found, err = store.FindNodes(ctx, models.NodeFilter{TenantID: "tenant-1", Repo: "repo-alpha"})
+	if err != nil {
+		t.Fatalf("FindNodes: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected 1 node for tenant-1+repo-alpha, got %d", len(found))
+	}
+	if found[0].NodeKey != "fn:FuncA" {
+		t.Errorf("expected fn:FuncA, got %q", found[0].NodeKey)
+	}
+}

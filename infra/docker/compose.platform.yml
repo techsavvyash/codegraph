@@ -42,3 +42,19 @@ services:
       interval: 10s
       timeout: 10s
       retries: 20
+
+  docs-intel:
+    build:
+      context: ../../apps/docs-intel-py
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    environment:
+      - PORT=8765
+    depends_on:
+      - neo4j
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

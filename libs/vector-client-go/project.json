@@ -15,6 +15,27 @@
         "command": "go test ./libs/vector-client-go/...",
         "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
       }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go vet ./...",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go test ./... -tags=integration",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "smoke": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "go build ./...",
+        "cwd": "{projectRoot}"
+      }
     }
   }
 }

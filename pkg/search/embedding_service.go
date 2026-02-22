@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -98,91 +97,6 @@ func (es *SimpleEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, t
 	return embeddings, nil
 }
 
-// generateMockEmbeddings creates mock embeddings for testing purposes
-func (es *SimpleEmbeddingService) generateMockEmbeddings(texts []string) [][]float64 {
-	var embeddings [][]float64
-
-	for _, text := range texts {
-		// Generate a mock embedding based on text content and semantic meaning
-		embedding := make([]float64, 384) // sentence-transformers/all-MiniLM-L6-v2 dimensions
-
-		// Create hash of the content for consistency
-		hash := es.simpleHash(text)
-
-		// Analyze text characteristics for more meaningful embeddings
-		wordCount := float64(len(strings.Fields(text)))
-		charCount := float64(len(text))
-
-		// Create base pattern based on text content
-		for j := 0; j < 384; j++ {
-			// Create deterministic values based on text content and position
-			baseValue := float64((hash+int64(j*13))%2000)/1000.0 - 1.0 // Range: -1.0 to 1.0
-
-			// Add semantic variations based on text characteristics
-			if strings.Contains(strings.ToLower(text), "function") {
-				baseValue += 0.1 * float64(j%10) / 10.0
-			}
-			if strings.Contains(strings.ToLower(text), "class") {
-				baseValue += 0.15 * float64(j%7) / 7.0
-			}
-			if strings.Contains(strings.ToLower(text), "index") {
-				baseValue += 0.12 * float64(j%5) / 5.0
-			}
-
-			// Incorporate word and character count for diversity
-			baseValue += (wordCount / 100.0) * 0.05 * float64(j%3) / 3.0
-			baseValue += (charCount / 1000.0) * 0.03 * float64(j%4) / 4.0
-
-			// Keep in valid range
-			if baseValue > 1.0 {
-				baseValue = 1.0
-			} else if baseValue < -1.0 {
-				baseValue = -1.0
-			}
-
-			embedding[j] = baseValue
-		}
-
-		// Normalize the vector for proper cosine similarity
-		embedding = es.normalizeVector(embedding)
-		embeddings = append(embeddings, embedding)
-	}
-
-	return embeddings
-}
-
-// simpleHash creates a simple hash of a string for mock embedding generation
-func (es *SimpleEmbeddingService) simpleHash(s string) int64 {
-	var hash int64 = 5381
-	for _, c := range s {
-		hash = ((hash << 5) + hash) + int64(c)
-	}
-	return hash
-}
-
-// normalizeVector normalizes a vector to unit length for cosine similarity
-func (es *SimpleEmbeddingService) normalizeVector(vec []float64) []float64 {
-	var sum float64
-	for _, v := range vec {
-		sum += v * v
-	}
-
-	if sum == 0 {
-		return vec
-	}
-
-	magnitude := math.Sqrt(sum) // Proper L2 norm: sqrt(sum of squares)
-	if magnitude == 0 {
-		return vec
-	}
-
-	normalized := make([]float64, len(vec))
-	for i, v := range vec {
-		normalized[i] = v / magnitude
-	}
-
-	return normalized
-}
 
 // CallEmbeddingAPI makes an actual API call to an embedding service
 func (es *SimpleEmbeddingService) callEmbeddingAPI(ctx context.Context, texts []string) (*EmbeddingResponse, error) {
@@ -376,10 +290,3 @@ func (ges *GeminiEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, 
 	return allEmbeddings, nil
 }
 
-// Helper function for min
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

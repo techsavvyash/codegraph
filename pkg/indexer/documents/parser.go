@@ -50,7 +50,7 @@ func (dp *DocumentParser) ParseDocument(filePath string) (*models.Document, []*m
 		Content:   string(content),
 	}
 
-	// Extract features using simulated LLM processing
+	// Extract features (section headers) from the document
 	features, err := dp.extractFeatures(string(content), filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract features: %w", err)
@@ -201,76 +201,36 @@ func textHash(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// extractFeatures simulates LLM-based feature extraction
-// In a real implementation, this would call an LLM API
+// extractFeatures extracts features from a document by identifying section headers.
+// Each non-generic markdown heading (h1–h3) becomes a Feature node that can be
+// queried and linked to code symbols.
 func (dp *DocumentParser) extractFeatures(content, filePath string) ([]*models.Feature, error) {
 	chunks := dp.ChunkDocument(content)
 	var allFeatures []*models.Feature
 
-	for i, chunk := range chunks {
-		features := dp.simulateLLMExtraction(chunk, filePath, i)
-		allFeatures = append(allFeatures, features...)
-	}
-
-	// Deduplicate and merge similar features
-	return dp.deduplicateFeatures(allFeatures), nil
-}
-
-// simulateLLMExtraction simulates what an LLM would extract from a text chunk
-// This is a simplified rule-based approach for demonstration
-func (dp *DocumentParser) simulateLLMExtraction(chunk, filePath string, chunkIndex int) []*models.Feature {
-	var features []*models.Feature
-
-	// Patterns to identify features
-	patterns := map[string]*regexp.Regexp{
-		"implementation": regexp.MustCompile(`(?i)implement(?:s|ing|ation)?\s+([A-Z][A-Za-z\s]+)`),
-		"feature":        regexp.MustCompile(`(?i)(?:feature|capability|functionality):\s*([A-Z][A-Za-z\s]+)`),
-		"requirement":    regexp.MustCompile(`(?i)(?:require(?:s|ment)?|must|should)\s+([A-Z][A-Za-z\s]+)`),
-		"api":           regexp.MustCompile(`(?i)(?:API|endpoint|route):\s*([A-Z][A-Za-z\s\/]+)`),
-		"service":       regexp.MustCompile(`(?i)(?:service|microservice):\s*([A-Z][A-Za-z\s\-]+)`),
-	}
-
-	// Extract features using patterns
-	for category, pattern := range patterns {
-		matches := pattern.FindAllStringSubmatch(chunk, -1)
-		for _, match := range matches {
-			if len(match) > 1 {
-				featureName := strings.TrimSpace(match[1])
-				if len(featureName) > 3 { // Filter out very short matches
-					feature := &models.Feature{
-						Name:        featureName,
-						Description: extractFeatureDescription(chunk, featureName),
-						Status:      inferFeatureStatus(chunk, featureName),
-						Priority:    "medium", // Default priority
-						Tags:        []string{category, strings.ToLower(inferDocumentType(filePath))},
-					}
-					features = append(features, feature)
-				}
-			}
-		}
-	}
-
-	// Extract section headers as features (for structured documents)
 	headerPattern := regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
-	headerMatches := headerPattern.FindAllStringSubmatch(chunk, -1)
-	for _, match := range headerMatches {
-		if len(match) > 1 {
-			headerText := strings.TrimSpace(match[1])
-			// Skip very generic headers
-			if !isGenericHeader(headerText) {
-				feature := &models.Feature{
-					Name:        headerText,
-					Description: fmt.Sprintf("Section: %s", headerText),
-					Status:      "documented",
-					Priority:    "medium",
-					Tags:        []string{"section", "documentation"},
-				}
-				features = append(features, feature)
+	docType := strings.ToLower(inferDocumentType(filePath))
+
+	for _, chunk := range chunks {
+		for _, match := range headerPattern.FindAllStringSubmatch(chunk, -1) {
+			if len(match) < 2 {
+				continue
 			}
+			headerText := strings.TrimSpace(match[1])
+			if isGenericHeader(headerText) {
+				continue
+			}
+			allFeatures = append(allFeatures, &models.Feature{
+				Name:        headerText,
+				Description: fmt.Sprintf("Section: %s", headerText),
+				Status:      "documented",
+				Priority:    "medium",
+				Tags:        []string{"section", docType},
+			})
 		}
 	}
 
-	return features
+	return dp.deduplicateFeatures(allFeatures), nil
 }
 
 // deduplicateFeatures removes similar features and merges them
@@ -352,49 +312,6 @@ func inferDocumentType(filePath string) string {
 	}
 }
 
-func extractFeatureDescription(chunk, featureName string) string {
-	// Try to find the sentence containing the feature name
-	sentences := strings.Split(chunk, ".")
-	for _, sentence := range sentences {
-		if strings.Contains(strings.ToLower(sentence), strings.ToLower(featureName)) {
-			return strings.TrimSpace(sentence) + "."
-		}
-	}
-	
-	// Fallback: return first 100 characters of chunk
-	if len(chunk) > 100 {
-		return chunk[:100] + "..."
-	}
-	return chunk
-}
-
-func inferFeatureStatus(chunk, featureName string) string {
-	lowerChunk := strings.ToLower(chunk)
-	
-	statusKeywords := map[string]string{
-		"completed":     "completed",
-		"done":          "completed",
-		"implemented":   "completed",
-		"finished":      "completed",
-		"in progress":   "in_progress",
-		"developing":    "in_progress",
-		"working":       "in_progress",
-		"todo":          "planned",
-		"planned":       "planned",
-		"future":        "planned",
-		"proposed":      "proposed",
-		"deprecated":    "deprecated",
-		"obsolete":      "deprecated",
-	}
-
-	for keyword, status := range statusKeywords {
-		if strings.Contains(lowerChunk, keyword) {
-			return status
-		}
-	}
-
-	return "documented"
-}
 
 func isGenericHeader(header string) bool {
 	genericHeaders := []string{

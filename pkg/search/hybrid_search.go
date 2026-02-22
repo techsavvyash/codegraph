@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -16,6 +17,7 @@ import (
 type HybridSearchManager struct {
 	client              *neo4j.Client
 	vectorStore         VectorStore              // Vector store backend (e.g. Qdrant)
+	textStore           textindex.TextIndexStore // Optional pluggable text index (e.g. Neo4j, OpenSearch)
 	fullTextSearch      *FullTextSearchManager
 	queryBuilder        *neo4j.QueryBuilder
 	embeddingService    EmbeddingService // Interface for generating embeddings
@@ -33,6 +35,14 @@ func NewHybridSearchManager(client *neo4j.Client, embeddingService EmbeddingServ
 		embeddingService: embeddingService,
 		commentSearch:    NewCommentEmbeddingService(client, embeddingService),
 	}
+}
+
+// WithTextStore sets an optional TextIndexStore for pluggable fulltext search.
+// When non-nil, Search() uses textStore for BM25 results instead of the built-in
+// FullTextSearchManager. This enables swapping Neo4j fulltext for OpenSearch or mocks.
+func (hsm *HybridSearchManager) WithTextStore(ts textindex.TextIndexStore) *HybridSearchManager {
+	hsm.textStore = ts
+	return hsm
 }
 
 // EmbeddingService interface for generating text embeddings
@@ -201,22 +211,55 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 	}
 
 	// 2. Full-Text Search (BM25)
+	// When a pluggable TextIndexStore is wired in, prefer it over the built-in
+	// FullTextSearchManager. This lets callers swap Neo4j fulltext for OpenSearch
+	// or a mock without changing search logic.
 	var fullTextResults []FullTextSearchResult
-	fullTextResponse, err := hsm.fullTextSearch.HybridFullTextSearch(ctx, query, limit)
-	if err != nil {
-		log.Printf("Warning: full-text search failed: %v", err)
-	} else {
-		fullTextResults = fullTextResponse.Results
-		for i, result := range fullTextResults {
-			hr := HybridSearchResult{
-				Node:          result.Node,
-				Labels:        result.Labels,
-				FullTextScore: result.Score,
-				Source:        "fulltext",
-				Relevance:     hsm.calculateRelevance(result.Score, "fulltext"),
+	if hsm.textStore != nil {
+		tsResults, tsErr := hsm.textStore.Search(ctx, query, textindex.SearchOpts{Limit: limit})
+		if tsErr != nil {
+			log.Printf("Warning: text store search failed: %v", tsErr)
+		} else {
+			fullTextResults = make([]FullTextSearchResult, 0, len(tsResults))
+			for i, r := range tsResults {
+				node := map[string]interface{}{
+					"nodeKey": r.NodeKey,
+					"snippet": r.Snippet,
+				}
+				for k, v := range r.Metadata {
+					node[k] = v
+				}
+				hr := HybridSearchResult{
+					Node:          node,
+					FullTextScore: r.Score,
+					Source:        "fulltext",
+					Relevance:     hsm.calculateRelevance(r.Score, "fulltext"),
+				}
+				key := hsm.getResultKey(node)
+				addEntry(key, hr, i+1)
+				fullTextResults = append(fullTextResults, FullTextSearchResult{
+					Node:  node,
+					Score: r.Score,
+				})
 			}
-			key := hsm.getResultKey(result.Node)
-			addEntry(key, hr, i+1)
+		}
+	} else {
+		fullTextResponse, ftErr := hsm.fullTextSearch.HybridFullTextSearch(ctx, query, limit)
+		if ftErr != nil {
+			log.Printf("Warning: full-text search failed: %v", ftErr)
+		} else {
+			fullTextResults = fullTextResponse.Results
+			for i, result := range fullTextResults {
+				hr := HybridSearchResult{
+					Node:          result.Node,
+					Labels:        result.Labels,
+					FullTextScore: result.Score,
+					Source:        "fulltext",
+					Relevance:     hsm.calculateRelevance(result.Score, "fulltext"),
+				}
+				key := hsm.getResultKey(result.Node)
+				addEntry(key, hr, i+1)
+			}
 		}
 	}
 
@@ -259,12 +302,15 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 		}
 	}
 
-	// 4. Comment-Based Search
+	// 4. Comment-Based Search (optional — skipped if Neo4j vector index not present)
 	var commentResults []CommentSearchResult
 	if hsm.commentSearch != nil {
 		commentResponse, err := hsm.commentSearch.SearchFunctionsByComment(ctx, query, limit)
 		if err != nil {
-			log.Printf("Warning: comment search failed: %v", err)
+			// Suppress "no such vector schema index" noise — comment index is optional.
+			if !strings.Contains(err.Error(), "no such vector schema index") {
+				log.Printf("Warning: comment search failed: %v", err)
+			}
 		} else {
 			commentResults = commentResponse.Results
 			for i, result := range commentResults {
@@ -313,7 +359,7 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 		Results:      mergedResults,
 		Query:        query,
 		QueryVector:  queryVector,
-		SearchTypes:  []string{"vector", "fulltext", "semantic", "comment"},
+		SearchTypes:  buildSearchTypes(vectorResultCount > 0, len(fullTextResults) > 0, len(semanticResults) > 0, len(commentResults) > 0),
 		TotalResults: len(mergedResults),
 		Metadata: SearchMetadata{
 			VectorResults:   vectorResultCount,
@@ -636,4 +682,22 @@ func getStringFromMap(data map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+// buildSearchTypes returns the list of active search type labels based on which
+// paths returned results, so the response accurately reflects what ran.
+func buildSearchTypes(vector, fulltext, semantic, comment bool) []string {
+	types := []string{}
+	if vector {
+		types = append(types, "vector")
+	}
+	if fulltext {
+		types = append(types, "fulltext")
+	}
+	if semantic {
+		types = append(types, "semantic")
+	}
+	if comment {
+		types = append(types, "comment")
+	}
+	return types
 }

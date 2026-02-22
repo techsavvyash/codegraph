@@ -3,10 +3,12 @@ package documents
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 	"github.com/context-maximiser/code-graph/pkg/search"
@@ -21,6 +23,7 @@ type DocumentIndexer struct {
 	chunkLinker           *search.ChunkLinker
 	useIntelligentLinking bool
 	scopeCtx              models.ScopeContext
+	textStore             textindex.TextIndexStore
 }
 
 // NewDocumentIndexer creates a new document indexer
@@ -37,6 +40,12 @@ func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 // SetScope sets the scope context for the document indexer.
 func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
 	di.scopeCtx = scope
+}
+
+// WithTextStore sets an optional TextIndexStore for pushing chunks to OpenSearch (or any BM25 backend).
+func (di *DocumentIndexer) WithTextStore(ts textindex.TextIndexStore) *DocumentIndexer {
+	di.textStore = ts
+	return di
 }
 
 // EnableIntelligentLinking enables semantic analysis and intelligent linking
@@ -123,6 +132,7 @@ func (di *DocumentIndexer) createDocumentChunks(ctx context.Context, docID, docN
 	chunks := di.parser.ChunkDocumentWithMeta(content)
 	var stats chunkStats
 	stats.Total = len(chunks)
+	var indexDocs []textindex.IndexDoc
 
 	// Load existing chunk hashes for this document to detect changes.
 	existingHashes, err := di.loadExistingChunkHashes(ctx, docNodeKey)
@@ -175,11 +185,30 @@ func (di *DocumentIndexer) createDocumentChunks(ctx context.Context, docID, docN
 		if err != nil {
 			return stats, fmt.Errorf("failed to create HAS_CHUNK for chunk %d: %w", chunk.ChunkIndex, err)
 		}
+
+		// Accumulate for text store bulk push.
+		if di.textStore != nil {
+			indexDocs = append(indexDocs, textindex.IndexDoc{
+				NodeKey: chunkNodeKey,
+				Content: chunk.Content,
+				Metadata: map[string]string{
+					"nodeType":    "DocumentChunk",
+					"documentKey": docNodeKey,
+				},
+			})
+		}
 	}
 
 	// Remove stale chunks that no longer exist in the document.
 	for staleKey := range existingHashes {
 		di.deleteStaleChunk(ctx, staleKey)
+	}
+
+	// Push new/updated chunks to the text store (e.g. OpenSearch) for BM25 indexing.
+	if di.textStore != nil && len(indexDocs) > 0 {
+		if err := di.textStore.IndexDocuments(ctx, indexDocs); err != nil {
+			log.Printf("Warning: OpenSearch chunk indexing failed: %v", err)
+		}
 	}
 
 	return stats, nil
