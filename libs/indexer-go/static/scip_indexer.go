@@ -252,22 +252,34 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 // as warnings but do not abort the run. An error is returned only when every
 // detected language root fails to index.
 func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath string) error {
-	roots, err := DetectAllLanguages(projectPath)
+	// Resolve to absolute path so filepath.Rel works regardless of whether
+	// the caller passed "." or a full absolute path.
+	absProjectRoot, err := filepath.Abs(projectPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve project path: %w", err)
+	}
+
+	roots, err := DetectAllLanguages(absProjectRoot)
 	if err != nil {
 		return fmt.Errorf("language detection failed: %w", err)
 	}
 	if len(roots) == 0 {
-		return fmt.Errorf("no supported languages detected in %s", projectPath)
+		return fmt.Errorf("no supported languages detected in %s", absProjectRoot)
+	}
+
+	// relLabel returns a human-readable relative path label for a root.
+	relLabel := func(absPath string) string {
+		rel, err := filepath.Rel(absProjectRoot, absPath)
+		if err != nil || rel == "" {
+			return "."
+		}
+		return rel
 	}
 
 	fmt.Printf("Detected %d language root(s):\n", len(roots))
 	for _, r := range roots {
 		cfg, _ := GetLanguageConfig(r.Language)
-		rel, _ := filepath.Rel(projectPath, r.Path)
-		if rel == "" {
-			rel = "."
-		}
-		fmt.Printf("  %-12s %s\n", cfg.DisplayName, rel)
+		fmt.Printf("  %-12s %s\n", cfg.DisplayName, relLabel(r.Path))
 	}
 
 	// Collect unique languages and auto-install missing indexers.
@@ -293,19 +305,23 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	var errs []error
 	for _, r := range roots {
 		if _, didFail := failed[r.Language]; didFail {
-			fmt.Printf("Skipping %s (%s) — indexer unavailable\n", r.Language, r.Path)
+			fmt.Printf("Skipping %s (%s) — indexer unavailable\n", r.Language, relLabel(r.Path))
 			errs = append(errs, fmt.Errorf("indexer unavailable for %s", r.Language))
 			continue
 		}
 
 		cfg, _ := GetLanguageConfig(r.Language)
-		rel, _ := filepath.Rel(projectPath, r.Path)
-		if rel == "" {
-			rel = "."
-		}
+		rel := relLabel(r.Path)
 		fmt.Printf("\n=== Indexing %s at %s ===\n", cfg.DisplayName, rel)
 
-		sub := NewSCIPIndexerWithLanguage(si.client, si.serviceName, si.version, si.repoURL, r.Language)
+		// Derive a unique service name: serviceName for the project root,
+		// serviceName/rel-path for every sub-module.
+		subServiceName := si.serviceName
+		if rel != "." {
+			subServiceName = si.serviceName + "/" + filepath.ToSlash(rel)
+		}
+
+		sub := NewSCIPIndexerWithLanguage(si.client, subServiceName, si.version, si.repoURL, r.Language)
 		sub.SetScope(si.scopeCtx)
 		if si.timer != nil {
 			sub.SetBenchmarkTimer(si.timer)
@@ -385,6 +401,12 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 			"--project-name", si.serviceName,
 			"--output", outputFile,
 		)
+		// If a virtual environment exists, point scip-python at it so it can
+		// enumerate installed packages for type resolution.
+		if venvPath := detectPythonVenv(absPath); venvPath != "" {
+			args = append(args, "--environment-path", venvPath)
+			fmt.Printf("Detected Python venv at %s\n", venvPath)
+		}
 		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
 	case LanguagePHP:
 		// scip-php generates index.scip in current directory
@@ -418,6 +440,27 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	}
 
 	return outputFile, nil
+}
+
+// detectPythonVenv returns the path to a Python virtual environment inside
+// projectPath if one exists and contains a usable pip or python binary.
+// It checks the common venv directory names: .venv, venv, .env, env.
+func detectPythonVenv(projectPath string) string {
+	candidates := []string{".venv", "venv", ".env", "env"}
+	for _, dir := range candidates {
+		venvPath := filepath.Join(projectPath, dir)
+		info, err := os.Stat(venvPath)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		// Require at least a pip or python binary to confirm it's a real venv.
+		for _, bin := range []string{"bin/pip", "bin/pip3", "bin/python", "bin/python3"} {
+			if _, err := os.Stat(filepath.Join(venvPath, bin)); err == nil {
+				return venvPath
+			}
+		}
+	}
+	return ""
 }
 
 // detectWorkspaceType detects if the project uses a workspace manager (pnpm, yarn, npm)
