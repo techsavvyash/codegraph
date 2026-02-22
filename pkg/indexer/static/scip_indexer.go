@@ -8,20 +8,37 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/context-maximiser/code-graph/pkg/indexer/generated"
 	"github.com/context-maximiser/code-graph/pkg/models"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
 )
 
+// PipelineTimer is an optional interface for timing pipeline phases.
+// Implementations include benchmarks.PhaseTimer.
+type PipelineTimer interface {
+	Start(name string)
+	Stop(items int, detail string)
+}
+
+// SubPhaseRecorder is an optional extension of PipelineTimer for recording
+// sub-phase breakdowns within a parent phase.
+type SubPhaseRecorder interface {
+	AddResult(name string, duration time.Duration, items int, detail string)
+}
+
 // SCIPIndexer indexes projects using the SCIP protocol
 type SCIPIndexer struct {
-	client       *neo4j.Client
-	serviceName  string
-	version      string
-	repoURL      string
-	language     Language
-	langConfig   *LanguageConfig
-	scopeCtx     models.ScopeContext
+	client           *neo4j.Client
+	serviceName      string
+	version          string
+	repoURL          string
+	language         Language
+	langConfig       *LanguageConfig
+	scopeCtx         models.ScopeContext
+	timer            PipelineTimer
+	fileContentCache map[string][]byte // cache for calculateByteOffsets
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -55,9 +72,15 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
 
 	// Step 1: Generate SCIP index file
+	if si.timer != nil {
+		si.timer.Start("SCIP generation")
+	}
 	scipFile, err := si.generateSCIPIndex(projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to generate SCIP index: %w", err)
+	}
+	if si.timer != nil {
+		si.timer.Stop(0, "")
 	}
 	// Only clean up for languages that auto-generate (not Java/Scala/Kotlin)
 	if si.language != LanguageJava && si.language != LanguageScala && si.language != LanguageKotlin {
@@ -67,9 +90,15 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	fmt.Printf("Using SCIP index file: %s\n", scipFile)
 
 	// Step 2: Parse the SCIP file
+	if si.timer != nil {
+		si.timer.Start("Parse SCIP file")
+	}
 	parser := NewSCIPParser()
 	if err := parser.ParseFile(scipFile); err != nil {
 		return fmt.Errorf("failed to parse SCIP file: %w", err)
+	}
+	if si.timer != nil {
+		si.timer.Stop(0, "")
 	}
 
 	// Debug: Print SCIP file contents
@@ -78,12 +107,21 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	// Step 3: Create service node
+	if si.timer != nil {
+		si.timer.Start("Create service node")
+	}
 	serviceID, err := si.createServiceNode(ctx, projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to create service node: %w", err)
 	}
+	if si.timer != nil {
+		si.timer.Stop(1, "")
+	}
 
 	// Step 4: Index files
+	if si.timer != nil {
+		si.timer.Start("Index files")
+	}
 	files, err := parser.ExtractDocuments()
 	if err != nil {
 		return fmt.Errorf("failed to extract documents: %w", err)
@@ -98,22 +136,35 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		fileNodes[file.Path] = fileID
 	}
+	if si.timer != nil {
+		si.timer.Stop(len(fileNodes), fmt.Sprintf("%d files", len(fileNodes)))
+	}
 
 	fmt.Printf("Created %d file nodes\n", len(fileNodes))
 
-	// Step 5: Index symbols and their relationships
+	// Step 5: Extract symbols
+	if si.timer != nil {
+		si.timer.Start("Extract symbols")
+	}
 	symbolDefs, err := parser.ExtractSymbols()
 	if err != nil {
 		return fmt.Errorf("failed to extract symbols: %w", err)
 	}
+	if si.timer != nil {
+		si.timer.Stop(len(symbolDefs), fmt.Sprintf("%d symbols", len(symbolDefs)))
+	}
 
+	// Step 6 & 7: Index symbols (defs then refs) — instrumented inside indexSymbols
 	if err := si.indexSymbols(ctx, symbolDefs, fileNodes); err != nil {
 		return fmt.Errorf("failed to index symbols: %w", err)
 	}
 
 	fmt.Printf("Successfully indexed %d symbols from SCIP data\n", len(symbolDefs))
 
-	// Step 6: Extract and index imports for cross-package dependencies
+	// Step 8: Package dependencies
+	if si.timer != nil {
+		si.timer.Start("Package dependencies")
+	}
 	imports, err := parser.ExtractImports(projectPath)
 	if err != nil {
 		fmt.Printf("Warning: failed to extract imports: %v\n", err)
@@ -123,13 +174,70 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			fmt.Printf("Warning: failed to index package dependencies: %v\n", err)
 		}
 	}
+	if si.timer != nil {
+		importCount := 0
+		if imports != nil {
+			importCount = len(imports)
+		}
+		si.timer.Stop(importCount, "")
+	}
 
-	// Step 7: Analyze API patterns and create cross-service relationships
-	fmt.Println("Analyzing API patterns and cross-service calls...")
-	analyzer := NewAPIAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
-	if err := analyzer.AnalyzeAPIPatterns(ctx, fileNodes); err != nil {
-		fmt.Printf("Warning: API pattern analysis failed: %v\n", err)
-		// Don't fail the entire indexing, just log warning
+	// Step 9: Symbol-based API analysis
+	if si.timer != nil {
+		si.timer.Start("API analysis")
+	}
+	fmt.Println("Analyzing API patterns via SCIP symbol matching...")
+	symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
+	symAnalyzer.SetScope(si.scopeCtx)
+	if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
+		fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+	}
+	if si.timer != nil {
+		si.timer.Stop(0, "")
+	}
+
+	// Step 10: Build call graph (Go only, requires AST for function body ranges)
+	if si.timer != nil {
+		si.timer.Start("Call graph")
+	}
+	if si.language == LanguageGo {
+		fmt.Println("Building call graph from SCIP references + Go AST...")
+		cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
+		cgBuilder.SetScope(si.scopeCtx)
+		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
+			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+		}
+	}
+	if si.timer != nil {
+		si.timer.Stop(0, "")
+	}
+
+	// Step 11: Generate context for PR overlays (creates PullRequest node + PR summary)
+	if si.scopeCtx.Scope == models.ScopePR && si.client != nil {
+		ctxGen := generated.NewContextGenerator(si.client)
+		ctxGen.SetScope(si.scopeCtx)
+
+		// Extract PR ID from scopeId (format: "pr-{id}")
+		prID := strings.TrimPrefix(si.scopeCtx.ScopeID, "pr-")
+
+		if _, err := ctxGen.CreatePullRequestNode(ctx, prID,
+			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName),
+			"", "", "", ""); err != nil {
+			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
+		} else {
+			// Store a basic PR summary with indexed file list
+			fileKeys := make([]string, 0)
+			for _, f := range fileNodes {
+				fileKeys = append(fileKeys, f)
+			}
+			summary := fmt.Sprintf("Indexed %d files and %d symbols for service %s",
+				len(fileNodes), len(symbolDefs), si.serviceName)
+			if _, err := ctxGen.StorePRSummary(ctx, prID,
+				fmt.Sprintf("Indexing summary for %s", si.serviceName),
+				summary, "scip-indexer", fileKeys); err != nil {
+				fmt.Printf("Warning: failed to store PR summary: %v\n", err)
+			}
+		}
 	}
 
 	fmt.Println("SCIP indexing completed successfully")
@@ -138,10 +246,15 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 // generateSCIPIndex runs the appropriate SCIP indexer to generate a SCIP index file
 func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
-	// Check if the language-specific SCIP binary is available
-	if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
-		return "", fmt.Errorf("%s not found in PATH.\nInstall with: %s\nSee: %s",
+	// Resolve the SCIP binary: check IndexerManager cache first, then system PATH.
+	mgr := NewIndexerManager("")
+	resolvedBinary := mgr.ResolveBinary(si.language)
+	if resolvedBinary != "" {
+		si.langConfig.SCIPBinary = resolvedBinary
+	} else if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
+		return "", fmt.Errorf("%s not found in PATH or cache.\nInstall with: codegraph indexers install --language %s\nOr manually: %s\nSee: %s",
 			si.langConfig.SCIPBinary,
+			si.language,
 			si.langConfig.InstallCommand,
 			si.langConfig.InstallDocs)
 	}
@@ -321,82 +434,405 @@ func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, se
 	}
 
 	// Link file to service
-	_, err = si.client.CreateRelationship(ctx, serviceID, fileID, "CONTAINS", nil)
+	_, err = si.client.CreateRelationship(ctx, serviceID, fileID, "CONTAINS",
+		map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID})
 	return fileID, err
 }
 
-// indexSymbols indexes all symbols and their relationships
+// computeDefinitionProps computes the label, nodeKey, and properties for a definition node
+// without touching Neo4j. This is the pure-computation half of createDefinitionNode.
+func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (label string, nodeKey string, props map[string]any) {
+	switch symbolInfo.Kind {
+	case models.FunctionSymbol:
+		label = "Function"
+	case models.MethodSymbol:
+		label = "Method"
+	case models.TypeSymbol:
+		label = "Class"
+	case models.InterfaceSymbol:
+		label = "Interface"
+	case models.VariableSymbol:
+		label = "Variable"
+	case models.ConstantSymbol:
+		label = "Variable"
+	case models.ParameterSymbol:
+		label = "Parameter"
+	case models.FieldSymbol:
+		label = "Variable"
+	case models.PackageSymbol:
+		label = "Module"
+	default:
+		label = "Variable"
+	}
+
+	switch label {
+	case "Function":
+		nodeKey = models.FunctionNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+	case "Method":
+		nodeKey = models.MethodNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+	case "Class":
+		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+	case "Interface":
+		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+	case "Variable":
+		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+	case "Parameter":
+		nodeKey = models.ParameterNodeKey(symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
+	case "Module":
+		nodeKey = models.ModuleNodeKey(symbolInfo.Symbol.String())
+	default:
+		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+	}
+
+	props = map[string]any{
+		"name":        symbolInfo.DisplayName,
+		"nodeKey":     nodeKey,
+		"signature":   symbolInfo.Signature,
+		"filePath":    symbolInfo.FilePath,
+		"startLine":   symbolInfo.StartLine,
+		"endLine":     symbolInfo.EndLine,
+		"startColumn": symbolInfo.StartColumn,
+		"endColumn":   symbolInfo.EndColumn,
+		"scope":       si.scopeCtx.Scope,
+		"scopeId":     si.scopeCtx.ScopeID,
+	}
+
+	if label == "Function" || label == "Method" {
+		if symbolInfo.EndLine > symbolInfo.StartLine {
+			props["linesOfCode"] = symbolInfo.EndLine - symbolInfo.StartLine + 1
+		} else {
+			props["linesOfCode"] = 1
+		}
+		if symbolInfo.FilePath != "" {
+			startByte, endByte := si.calculateByteOffsets(symbolInfo.FilePath,
+				symbolInfo.StartLine, symbolInfo.StartColumn,
+				symbolInfo.EndLine, symbolInfo.EndColumn)
+			if startByte >= 0 && endByte >= 0 {
+				props["startByte"] = startByte
+				props["endByte"] = endByte
+			}
+		}
+	}
+
+	switch label {
+	case "Function", "Method":
+		props["returnType"] = ""
+		props["isExported"] = true
+		props["complexity"] = 1
+		props["docstring"] = symbolInfo.Documentation
+	case "Class":
+		props["fqn"] = symbolInfo.Symbol.String()
+		props["accessModifier"] = "public"
+		props["isAbstract"] = false
+		props["docstring"] = symbolInfo.Documentation
+	case "Variable":
+		props["type"] = ""
+		props["isConstant"] = symbolInfo.Kind == models.ConstantSymbol
+	}
+
+	return label, nodeKey, props
+}
+
+const batchSize = 500
+
+// dedupeByNodeKey keeps only the last item for each nodeKey, preventing
+// UNWIND MERGE race conditions when duplicate keys appear in the same batch.
+func dedupeByNodeKey(items []map[string]any) []map[string]any {
+	seen := make(map[string]int, len(items))
+	for i, item := range items {
+		nk, _ := item["nodeKey"].(string)
+		seen[nk] = i // last-write wins
+	}
+	if len(seen) == len(items) {
+		return items // no duplicates
+	}
+	deduped := make([]map[string]any, 0, len(seen))
+	for _, idx := range seen {
+		deduped = append(deduped, items[idx])
+	}
+	return deduped
+}
+
+// indexSymbols indexes all symbols and their relationships using UNWIND batches.
 func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.SymbolDefinition, fileNodes map[string]string) error {
 	fmt.Printf("Indexing %d symbols...\n", len(symbolDefs))
 
-	symbolNodes := make(map[string]string) // symbol -> nodeID mapping
+	// Initialize file content cache for byte offset calculations
+	si.fileContentCache = make(map[string][]byte)
+	defer func() { si.fileContentCache = nil }()
 
-	// First pass: Create all symbol nodes
-	for i, symbolDef := range symbolDefs {
-		if i%100 == 0 {
-			fmt.Printf("Processing symbol %d/%d\n", i, len(symbolDefs))
+	// ── Phase 6: definitions ──────────────────────────────────────────
+	if si.timer != nil {
+		si.timer.Start("Index symbols (defs)")
+	}
+
+	// Pre-compute all items
+	type defItem struct {
+		symbolNodeKey string
+		symbolProps   map[string]any
+		defLabel      string
+		defNodeKey    string
+		defProps      map[string]any
+		filePath      string
+	}
+	items := make([]defItem, 0, len(symbolDefs))
+
+	for _, sd := range symbolDefs {
+		info := sd.Info
+		symNodeKey := models.SymbolNodeKey(info.Symbol.String())
+		symProps := map[string]any{
+			"symbol":        info.Symbol.String(),
+			"nodeKey":       symNodeKey,
+			"kind":          string(info.Kind),
+			"displayName":   info.DisplayName,
+			"documentation": info.Documentation,
+			"scope":         si.scopeCtx.Scope,
+			"scopeId":       si.scopeCtx.ScopeID,
 		}
 
-		symbolID, err := si.createSymbolNode(ctx, symbolDef.Info)
-		if err != nil {
-			fmt.Printf("Warning: failed to create symbol node for %s: %v\n", 
-				symbolDef.Symbol.String(), err)
+		di := defItem{
+			symbolNodeKey: symNodeKey,
+			symbolProps:   symProps,
+		}
+
+		if info.FilePath != "" {
+			lbl, nk, props := si.computeDefinitionProps(info)
+			di.defLabel = lbl
+			di.defNodeKey = nk
+			di.defProps = props
+			di.filePath = info.FilePath
+		}
+
+		items = append(items, di)
+	}
+
+	// 1. Batch merge all Symbol nodes (deduplicated)
+	symbolBatch := make([]map[string]any, len(items))
+	for i, it := range items {
+		symbolBatch[i] = map[string]any{
+			"nodeKey": it.symbolNodeKey,
+			"scopeId": si.scopeCtx.ScopeID,
+			"props":   it.symbolProps,
+		}
+	}
+	symbolBatch = dedupeByNodeKey(symbolBatch)
+
+	t := time.Now()
+	symbolIDs, err := si.client.MergeNodesBatch(ctx, "Symbol", symbolBatch, batchSize)
+	tMergeSymbol := time.Since(t)
+	if err != nil {
+		fmt.Printf("Warning: batch merge Symbol nodes failed: %v\n", err)
+		symbolIDs = make(map[string]string)
+	}
+	fmt.Printf("Merged %d Symbol nodes\n", len(symbolIDs))
+
+	// 2. Group definitions by label, deduplicate, batch merge each group
+	labelGroups := make(map[string][]map[string]any)
+	for _, it := range items {
+		if it.defLabel == "" {
 			continue
 		}
+		labelGroups[it.defLabel] = append(labelGroups[it.defLabel], map[string]any{
+			"nodeKey": it.defNodeKey,
+			"scopeId": si.scopeCtx.ScopeID,
+			"props":   it.defProps,
+		})
+	}
 
-		symbolNodes[symbolDef.Symbol.String()] = symbolID
+	defIDs := make(map[string]string) // defNodeKey → elementId
+	t = time.Now()
+	for lbl, batch := range labelGroups {
+		batch = dedupeByNodeKey(batch)
+		ids, err := si.client.MergeNodesBatch(ctx, lbl, batch, batchSize)
+		if err != nil {
+			fmt.Printf("Warning: batch merge %s nodes failed: %v\n", lbl, err)
+			continue
+		}
+		for nk, id := range ids {
+			defIDs[nk] = id
+		}
+	}
+	tMergeDefinition := time.Since(t)
+	fmt.Printf("Merged %d definition nodes across %d labels\n", len(defIDs), len(labelGroups))
 
-		// Create definition node if we have location info
-		if symbolDef.Info.FilePath != "" {
-			definitionID, err := si.createDefinitionNode(ctx, symbolDef.Info)
-			if err != nil {
-				fmt.Printf("Warning: failed to create definition node: %v\n", err)
+	// 3. Batch create DEFINES rels (defID → symbolID)
+	var definesRels []map[string]any
+	for _, it := range items {
+		if it.defLabel == "" {
+			continue
+		}
+		fromID, ok1 := defIDs[it.defNodeKey]
+		toID, ok2 := symbolIDs[it.symbolNodeKey]
+		if ok1 && ok2 {
+			definesRels = append(definesRels, map[string]any{
+				"fromId": fromID,
+				"toId":   toID,
+				"props":  map[string]any{"isExported": true, "scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
+			})
+		}
+	}
+
+	t = time.Now()
+	if err := si.client.CreateRelsBatch(ctx, "DEFINES", definesRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch create DEFINES rels failed: %v\n", err)
+	}
+	tRelDefines := time.Since(t)
+
+	// 4. Batch create CONTAINS rels (fileID → defID)
+	var containsRels []map[string]any
+	for _, it := range items {
+		if it.defLabel == "" {
+			continue
+		}
+		defID, ok1 := defIDs[it.defNodeKey]
+		fileID, ok2 := fileNodes[it.filePath]
+		if ok1 && ok2 {
+			containsRels = append(containsRels, map[string]any{
+				"fromId": fileID,
+				"toId":   defID,
+				"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
+			})
+		}
+	}
+
+	t = time.Now()
+	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", containsRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch create def CONTAINS rels failed: %v\n", err)
+	}
+	tRelContains := time.Since(t)
+
+	if si.timer != nil {
+		si.timer.Stop(len(symbolDefs), fmt.Sprintf("%d symbols", len(symbolDefs)))
+		if recorder, ok := si.timer.(SubPhaseRecorder); ok {
+			recorder.AddResult("  MergeNodesBatch(Symbol)", tMergeSymbol, len(symbolIDs), "")
+			recorder.AddResult("  MergeNodesBatch(Definition)", tMergeDefinition, len(defIDs), "")
+			recorder.AddResult("  CreateRelsBatch(DEFINES)", tRelDefines, len(definesRels), "")
+			recorder.AddResult("  CreateRelsBatch(CONTAINS)", tRelContains, len(containsRels), "")
+		}
+	}
+
+	// ── Phase 7: references ──────────────────────────────────────────
+	if si.timer != nil {
+		si.timer.Start("Index symbols (refs)")
+	}
+	fmt.Printf("\nCreating reference relationships...\n")
+
+	// Pre-compute all reference items
+	type refItem struct {
+		nodeKey       string
+		props         map[string]any
+		symbolNodeKey string
+		filePath      string
+		refRelProps   map[string]any
+	}
+	var refItems []refItem
+
+	for _, sd := range symbolDefs {
+		symNK := models.SymbolNodeKey(sd.Info.Symbol.String())
+		if _, exists := symbolIDs[symNK]; !exists {
+			continue
+		}
+		for _, ref := range sd.Refs {
+			if ref.IsDefinition {
 				continue
 			}
-
-			// Link definition to symbol
-			_, err = si.client.CreateRelationship(ctx, definitionID, symbolID, "DEFINES", 
-				map[string]any{"isExported": true}) // Assume exported for now
-			if err != nil {
-				fmt.Printf("Warning: failed to link definition to symbol: %v\n", err)
-			}
-
-			// Link definition to file if file exists
-			if fileID, exists := fileNodes[symbolDef.Info.FilePath]; exists {
-				_, err = si.client.CreateRelationship(ctx, fileID, definitionID, "CONTAINS", nil)
-				if err != nil {
-					fmt.Printf("Warning: failed to link definition to file: %v\n", err)
-				}
-			}
+			nk := models.ReferenceNodeKey(ref.FilePath, ref.StartLine, ref.StartColumn)
+			refItems = append(refItems, refItem{
+				nodeKey: nk,
+				props: map[string]any{
+					"filePath":    ref.FilePath,
+					"nodeKey":     nk,
+					"startLine":   ref.StartLine,
+					"endLine":     ref.EndLine,
+					"startColumn": ref.StartColumn,
+					"endColumn":   ref.EndColumn,
+					"context":     ref.Context,
+					"scope":       si.scopeCtx.Scope,
+					"scopeId":     si.scopeCtx.ScopeID,
+				},
+				symbolNodeKey: symNK,
+				filePath:      ref.FilePath,
+				refRelProps: map[string]any{
+					"isDefinition": ref.IsDefinition,
+					"line":         ref.StartLine,
+					"column":       ref.StartColumn,
+					"scope":        si.scopeCtx.Scope,
+					"scopeId":      si.scopeCtx.ScopeID,
+				},
+			})
 		}
 	}
 
-	// Second pass: Create reference relationships
-	fmt.Printf("\nCreating reference relationships...\n")
-	processedRefs := 0
-	for i, symbolDef := range symbolDefs {
-		if i%1000 == 0 {
-			fmt.Printf("Processing references for symbol %d/%d (created %d references)\n", i, len(symbolDefs), processedRefs)
+	// 1. Batch merge all Reference nodes (deduplicated)
+	refBatch := make([]map[string]any, len(refItems))
+	for i, ri := range refItems {
+		refBatch[i] = map[string]any{
+			"nodeKey": ri.nodeKey,
+			"scopeId": si.scopeCtx.ScopeID,
+			"props":   ri.props,
 		}
+	}
+	refBatch = dedupeByNodeKey(refBatch)
 
-		symbolID, exists := symbolNodes[symbolDef.Symbol.String()]
-		if !exists {
-			continue
-		}
+	t = time.Now()
+	refIDs, err := si.client.MergeNodesBatch(ctx, "Reference", refBatch, batchSize)
+	tMergeRef := time.Since(t)
+	if err != nil {
+		fmt.Printf("Warning: batch merge Reference nodes failed: %v\n", err)
+		refIDs = make(map[string]string)
+	}
+	fmt.Printf("Merged %d Reference nodes\n", len(refIDs))
 
-		for _, ref := range symbolDef.Refs {
-			if !ref.IsDefinition { // Skip definitions, we already handled those
-				err := si.createReferenceRelationship(ctx, ref, symbolID, fileNodes)
-				if err != nil {
-					fmt.Printf("Warning: failed to create reference relationship: %v\n", err)
-				} else {
-					processedRefs++
-				}
-			}
+	// 2. Batch create REFERENCES rels (refID → symbolID)
+	var referencesRels []map[string]any
+	for _, ri := range refItems {
+		fromID, ok1 := refIDs[ri.nodeKey]
+		toID, ok2 := symbolIDs[ri.symbolNodeKey]
+		if ok1 && ok2 {
+			referencesRels = append(referencesRels, map[string]any{
+				"fromId": fromID,
+				"toId":   toID,
+				"props":  ri.refRelProps,
+			})
 		}
 	}
 
-	fmt.Printf("Completed indexing symbols (created %d reference relationships)\n", processedRefs)
+	t = time.Now()
+	if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
+	}
+	tRelReferences := time.Since(t)
+
+	// 3. Batch create CONTAINS rels (fileID → refID)
+	var refContainsRels []map[string]any
+	for _, ri := range refItems {
+		refID, ok1 := refIDs[ri.nodeKey]
+		fileID, ok2 := fileNodes[ri.filePath]
+		if ok1 && ok2 {
+			refContainsRels = append(refContainsRels, map[string]any{
+				"fromId": fileID,
+				"toId":   refID,
+				"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
+			})
+		}
+	}
+
+	t = time.Now()
+	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch create ref CONTAINS rels failed: %v\n", err)
+	}
+	tRelRefContains := time.Since(t)
+
+	if si.timer != nil {
+		si.timer.Stop(len(refItems), fmt.Sprintf("%d refs", len(refItems)))
+		if recorder, ok := si.timer.(SubPhaseRecorder); ok {
+			recorder.AddResult("  MergeNodesBatch(Reference)", tMergeRef, len(refIDs), "")
+			recorder.AddResult("  CreateRelsBatch(REFERENCES)", tRelReferences, len(referencesRels), "")
+			recorder.AddResult("  CreateRelsBatch(CONTAINS)", tRelRefContains, len(refContainsRels), "")
+		}
+	}
+
+	fmt.Printf("Completed indexing symbols (created %d reference relationships)\n", len(refItems))
 	return nil
 }
 
@@ -464,6 +900,8 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			"isDirect":     true,
 			"importCount":  count,
 			"detectedFrom": "import-analysis",
+			"scope":        si.scopeCtx.Scope,
+			"scopeId":      si.scopeCtx.ScopeID,
 		}
 
 		_, err = si.client.CreateRelationship(ctx, serviceID, targetServiceID,
@@ -481,185 +919,60 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	return nil
 }
 
-// createSymbolNode creates a Symbol node in Neo4j
-func (si *SCIPIndexer) createSymbolNode(ctx context.Context, symbolInfo *models.SymbolInfo) (string, error) {
-	nodeKey := models.SymbolNodeKey(symbolInfo.Symbol.String())
-	symbolProps := map[string]any{
-		"symbol":        symbolInfo.Symbol.String(),
-		"nodeKey":       nodeKey,
-		"kind":          string(symbolInfo.Kind),
-		"displayName":   symbolInfo.DisplayName,
-		"documentation": symbolInfo.Documentation,
-		"scope":         si.scopeCtx.Scope,
-		"scopeId":       si.scopeCtx.ScopeID,
-	}
-
-	return si.client.MergeNode(ctx, []string{"Symbol"},
-		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, symbolProps)
-}
-
-// createDefinitionNode creates a definition node (Function, Class, etc.) in Neo4j
-func (si *SCIPIndexer) createDefinitionNode(ctx context.Context, symbolInfo *models.SymbolInfo) (string, error) {
-	var nodeLabel string
-	switch symbolInfo.Kind {
-	case models.FunctionSymbol:
-		nodeLabel = "Function"
-	case models.MethodSymbol:
-		nodeLabel = "Method"
-	case models.TypeSymbol:
-		nodeLabel = "Class"
-	case models.InterfaceSymbol:
-		nodeLabel = "Interface"
-	case models.VariableSymbol:
-		nodeLabel = "Variable"
-	case models.ConstantSymbol:
-		nodeLabel = "Variable"
-	case models.ParameterSymbol:
-		nodeLabel = "Parameter"
-	case models.FieldSymbol:
-		nodeLabel = "Variable"
-	case models.PackageSymbol:
-		nodeLabel = "Module"
-	default:
-		nodeLabel = "Variable"
-	}
-
-	// Derive nodeKey based on node type
-	var nodeKey string
-	switch nodeLabel {
-	case "Function":
-		nodeKey = models.FunctionNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
-	case "Method":
-		nodeKey = models.MethodNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
-	case "Class":
-		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
-	case "Interface":
-		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
-	case "Variable":
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
-	case "Parameter":
-		nodeKey = models.ParameterNodeKey(symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
-	case "Module":
-		nodeKey = models.ModuleNodeKey(symbolInfo.Symbol.String())
-	default:
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
-	}
-
-	props := map[string]any{
-		"name":        symbolInfo.DisplayName,
-		"nodeKey":     nodeKey,
-		"signature":   symbolInfo.Signature,
-		"filePath":    symbolInfo.FilePath,
-		"startLine":   symbolInfo.StartLine,
-		"endLine":     symbolInfo.EndLine,
-		"startColumn": symbolInfo.StartColumn,
-		"endColumn":   symbolInfo.EndColumn,
-		"scope":       si.scopeCtx.Scope,
-		"scopeId":     si.scopeCtx.ScopeID,
-	}
-
-	// Calculate additional metadata for Functions and Methods
-	if nodeLabel == "Function" || nodeLabel == "Method" {
-		if symbolInfo.EndLine > symbolInfo.StartLine {
-			props["linesOfCode"] = symbolInfo.EndLine - symbolInfo.StartLine + 1
-		} else {
-			props["linesOfCode"] = 1
-		}
-
-		if symbolInfo.FilePath != "" {
-			startByte, endByte := si.calculateByteOffsets(symbolInfo.FilePath,
-				symbolInfo.StartLine, symbolInfo.StartColumn,
-				symbolInfo.EndLine, symbolInfo.EndColumn)
-			if startByte >= 0 && endByte >= 0 {
-				props["startByte"] = startByte
-				props["endByte"] = endByte
-			}
-		}
-	}
-
-	// Add type-specific properties
-	switch nodeLabel {
-	case "Function", "Method":
-		props["returnType"] = ""
-		props["isExported"] = true
-		props["complexity"] = 1
-		props["docstring"] = symbolInfo.Documentation
-	case "Class":
-		props["fqn"] = symbolInfo.Symbol.String()
-		props["accessModifier"] = "public"
-		props["isAbstract"] = false
-		props["docstring"] = symbolInfo.Documentation
-	case "Variable":
-		props["type"] = ""
-		props["isConstant"] = symbolInfo.Kind == models.ConstantSymbol
-	}
-
-	return si.client.MergeNode(ctx, []string{nodeLabel},
-		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, props)
-}
-
-// createReferenceRelationship creates reference relationships
-func (si *SCIPIndexer) createReferenceRelationship(ctx context.Context, ref *models.SymbolReference, symbolID string, fileNodes map[string]string) error {
-	nodeKey := models.ReferenceNodeKey(ref.FilePath, ref.StartLine, ref.StartColumn)
-	refProps := map[string]any{
-		"filePath":    ref.FilePath,
-		"nodeKey":     nodeKey,
-		"startLine":   ref.StartLine,
-		"endLine":     ref.EndLine,
-		"startColumn": ref.StartColumn,
-		"endColumn":   ref.EndColumn,
-		"context":     ref.Context,
-		"scope":       si.scopeCtx.Scope,
-		"scopeId":     si.scopeCtx.ScopeID,
-	}
-
-	refID, err := si.client.MergeNode(ctx, []string{"Reference"},
-		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, refProps)
-	if err != nil {
-		return err
-	}
-
-	// Link reference to symbol
-	_, err = si.client.CreateRelationship(ctx, refID, symbolID, "REFERENCES",
-		map[string]any{
-			"isDefinition": ref.IsDefinition,
-			"line":         ref.StartLine,
-			"column":       ref.StartColumn,
-		})
-	if err != nil {
-		return err
-	}
-
-	// Link reference to file if file exists
-	if fileID, exists := fileNodes[ref.FilePath]; exists {
-		_, err = si.client.CreateRelationship(ctx, fileID, refID, "CONTAINS", nil)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 // SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
 func (si *SCIPIndexer) SetSCIPBinary(binary string) {
 	si.langConfig.SCIPBinary = binary
 }
 
-// ValidateEnvironment checks if the required tools are available
+// ValidateEnvironment checks if the required tools are available.
+// It first tries to resolve the binary from cache or PATH, then attempts
+// auto-install if not found. Set noAutoInstall to skip the install attempt.
 func (si *SCIPIndexer) ValidateEnvironment() error {
-	if _, err := exec.LookPath(si.langConfig.SCIPBinary); err != nil {
-		return fmt.Errorf("%s not found in PATH.\nInstall with: %s\nSee: %s",
+	return si.validateEnvironment(false)
+}
+
+// ValidateEnvironmentNoInstall checks if the required tools are available
+// without attempting auto-install.
+func (si *SCIPIndexer) ValidateEnvironmentNoInstall() error {
+	return si.validateEnvironment(true)
+}
+
+func (si *SCIPIndexer) validateEnvironment(noAutoInstall bool) error {
+	mgr := NewIndexerManager("")
+	if resolved := mgr.ResolveBinary(si.language); resolved != "" {
+		si.langConfig.SCIPBinary = resolved
+		return nil
+	}
+
+	if noAutoInstall {
+		return fmt.Errorf("%s not found in PATH or cache.\nInstall with: %s\nSee: %s",
 			si.langConfig.SCIPBinary,
 			si.langConfig.InstallCommand,
 			si.langConfig.InstallDocs)
 	}
-	return nil
+
+	// Auto-install attempt
+	fmt.Printf("SCIP indexer %q not found, attempting auto-install...\n", si.langConfig.SCIPBinary)
+	if err := mgr.Install(si.language); err != nil {
+		return fmt.Errorf("auto-install failed: %w\nManual install: %s", err, si.langConfig.InstallCommand)
+	}
+	if resolved := mgr.ResolveBinary(si.language); resolved != "" {
+		si.langConfig.SCIPBinary = resolved
+		return nil
+	}
+	return fmt.Errorf("%s not available after install attempt", si.langConfig.SCIPBinary)
 }
 
 // SetScope sets the scope context for the indexer.
 func (si *SCIPIndexer) SetScope(scope models.ScopeContext) {
 	si.scopeCtx = scope
+}
+
+// SetBenchmarkTimer sets an optional phase timer for benchmarking.
+// When set, each phase of IndexProject() will be timed.
+func (si *SCIPIndexer) SetBenchmarkTimer(timer PipelineTimer) {
+	si.timer = timer
 }
 
 // GetLanguage returns the language this indexer is configured for
@@ -669,10 +982,18 @@ func (si *SCIPIndexer) GetLanguage() Language {
 
 // calculateByteOffsets calculates the start and end byte positions for a code location
 func (si *SCIPIndexer) calculateByteOffsets(filePath string, startLine, startColumn, endLine, endColumn int) (int, int) {
-	// Read the file content
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return -1, -1
+	// Use cache to avoid re-reading the same file for every symbol
+	content, ok := si.fileContentCache[filePath]
+	if !ok {
+		var err error
+		content, err = os.ReadFile(filePath)
+		if err != nil {
+			return -1, -1
+		}
+		if si.fileContentCache == nil {
+			si.fileContentCache = make(map[string][]byte)
+		}
+		si.fileContentCache[filePath] = content
 	}
 
 	lines := strings.Split(string(content), "\n")

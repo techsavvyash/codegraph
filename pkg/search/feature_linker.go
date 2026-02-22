@@ -17,20 +17,20 @@ type FeatureLinker struct {
 	llmService          LLMService
 	codeSummarizer      *CodeSubgraphSummarizer
 	llmValidator        *LLMValidator
-	vectorSearch        *VectorSearchManager
+	vectorStore         VectorStore
 	minConfidence       float64
 	maxCandidates       int
 }
 
 // NewFeatureLinker creates a new feature linker according to RFC-002
-func NewFeatureLinker(client *neo4j.Client, embeddingService EmbeddingService) *FeatureLinker {
+func NewFeatureLinker(client *neo4j.Client, embeddingService EmbeddingService, vectorStore VectorStore) *FeatureLinker {
 	return &FeatureLinker{
 		client:              client,
 		embeddingService:    embeddingService,
 		llmService:          nil, // Optional LLM service
 		codeSummarizer:      NewCodeSubgraphSummarizer(client, embeddingService),
 		llmValidator:        NewLLMValidator(embeddingService),
-		vectorSearch:        NewVectorSearchManager(client),
+		vectorStore:         vectorStore,
 		minConfidence:       0.6,  // Minimum confidence to create IMPLEMENTS relationship
 		maxCandidates:       10,   // Maximum candidates to validate per feature
 	}
@@ -210,21 +210,29 @@ type CandidateEntryPoint struct {
 func (fl *FeatureLinker) findCandidateEntryPoints(ctx context.Context, featureEmbedding []float64) ([]*CandidateEntryPoint, error) {
 	var candidates []*CandidateEntryPoint
 
-	// Strategy 1: Vector search using function embeddings
-	vectorResults, err := fl.vectorSearch.HybridVectorSearch(ctx, featureEmbedding, fl.maxCandidates)
-	if err == nil {
-		for _, result := range vectorResults.Results {
-			// Only consider functions as entry points
-			nodeType := getStringValue(result.Node, "nodeType")
-			if nodeType == "Function" || nodeType == "Method" {
-				candidates = append(candidates, &CandidateEntryPoint{
-					FunctionID:   getStringValue(result.Node, "id"),
-					FunctionName: getStringValue(result.Node, "name"),
-					Signature:    getStringValue(result.Node, "signature"),
-					FilePath:     getStringValue(result.Node, "filePath"),
-					Confidence:   result.Score,
-					Source:       "vector",
-				})
+	// Strategy 1: Vector search using vector store
+	if fl.vectorStore != nil {
+		vectorResults, err := fl.vectorStore.Query(ctx, VectorQuery{
+			Vector:     featureEmbedding,
+			Limit:      fl.maxCandidates,
+			NodeLabels: []string{"Function", "Method"},
+		})
+		if err == nil {
+			for _, result := range vectorResults {
+				nodeType, _ := result.Metadata["nodeLabel"].(string)
+				if nodeType == "Function" || nodeType == "Method" {
+					name, _ := result.Metadata["name"].(string)
+					sig, _ := result.Metadata["signature"].(string)
+					fp, _ := result.Metadata["filePath"].(string)
+					candidates = append(candidates, &CandidateEntryPoint{
+						FunctionID:   result.ID,
+						FunctionName: name,
+						Signature:    sig,
+						FilePath:     fp,
+						Confidence:   result.Score,
+						Source:       "vector",
+					})
+				}
 			}
 		}
 	}

@@ -197,6 +197,7 @@ graph LR
 
 - **[LLM Provider Migration](LLM_PROVIDER_MIGRATION.md)** - Multi-provider LLM setup
 - **[LLM Implementation](LLM_IMPLEMENTATION.md)** - LLM integration details
+- **[Polyglot Monorepo Design](15-polyglot-monorepo.md)** - Monorepo structure, tool choice, and phased refactor plan preserving graph+vector+text storage
 
 ### API Documentation
 

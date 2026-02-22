@@ -67,6 +67,11 @@ func DocumentNodeKey(sourceURL string) string {
 	return "doc:" + sourceURL
 }
 
+// DocumentChunkNodeKey returns "chunk:{documentKey}#{chunkIndex}".
+func DocumentChunkNodeKey(documentKey string, chunkIndex int) string {
+	return fmt.Sprintf("chunk:%s#%d", documentKey, chunkIndex)
+}
+
 // FeatureNodeKey returns "feat:{name}".
 func FeatureNodeKey(name string) string {
 	return "feat:" + name
@@ -80,6 +85,26 @@ func APIRouteNodeKey(method, path string) string {
 // CommentNodeKey returns "comment:{filePath}:{startLine}".
 func CommentNodeKey(filePath string, startLine int) string {
 	return fmt.Sprintf("comment:%s:%d", filePath, startLine)
+}
+
+// FlowNodeKey returns "flow:{flowType}:{entrypointKey}".
+func FlowNodeKey(flowType, entrypointKey string) string {
+	return "flow:" + flowType + ":" + entrypointKey
+}
+
+// PullRequestNodeKey returns "pr:{prID}".
+func PullRequestNodeKey(prID string) string {
+	return "pr:" + prID
+}
+
+// GeneratedDocNodeKey returns "gendoc:{type}:{sourceKey}".
+func GeneratedDocNodeKey(docType, sourceKey string) string {
+	return "gendoc:" + docType + ":" + sourceKey
+}
+
+// SDKCallNodeKey returns "sdkcall:{target}".
+func SDKCallNodeKey(target string) string {
+	return "sdkcall:" + target
 }
 
 // ReferenceNodeKey returns "ref:{filePath}:{startLine}:{startColumn}".

@@ -2,3 +2,36 @@
 
 # SCIP index files (temporary)
 index.scip
+
+# Node / Nx
+node_modules/
+.nx/cache
+.nx/workspace-data
+
+# Python
+.venv/
+.pytest_cache/
+__pycache__/
+*.egg-info/
+*.pyc
+
+# Local build artifacts
+bin/codegraph-new
+bin/codegraph-mcp-new
+codegraph
+cli-go
+mcp-server/mcp-server
+
+# SvelteKit build output
+apps/chat-ui/.svelte-kit/
+apps/chat-ui/build/
+
+# Playwright test artifacts
+.playwright-mcp/
+playwright-report/
+test-results/
+*.png
+
+# Debug / scratch
+coverage.out
+integration.test

@@ -23,7 +23,8 @@ const (
 	CallsAPIRel   RelationshipType = "CALLS_API"
 
 	// Service Relationships
-	DependsOnRel RelationshipType = "DEPENDS_ON"
+	DependsOnRel     RelationshipType = "DEPENDS_ON"
+	CallsServiceRel  RelationshipType = "CALLS_SERVICE"
 
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"
@@ -37,6 +38,8 @@ type BaseRelationship struct {
 	Properties map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
 	StartID    string            `json:"startId" neo4j:"startId"`
 	EndID      string            `json:"endId" neo4j:"endId"`
+	TenantID   string            `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
+	Repo       string            `json:"repo,omitempty" neo4j:"repo,omitempty"`
 }
 
 // ContainsRelationship represents hierarchical containment

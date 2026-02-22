@@ -120,6 +120,7 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 						Symbol:      scipSymbol,
 						Kind:        inferSymbolKind(occurrence.Symbol),
 						DisplayName: extractDisplayName(occurrence.Symbol),
+						Signature:   occurrence.Symbol, // Use SCIP symbol string as signature for unique nodeKey derivation
 						FilePath:    filePath,
 						StartLine:   startLine,
 						EndLine:     endLine,
@@ -129,6 +130,15 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 					Refs: []*models.SymbolReference{},
 				}
 				symbolMap[symbolKey] = targetSymbolDef
+			} else if ref.IsDefinition {
+				// Update location to the actual definition site.
+				// Without this, the symbol inherits the location of its
+				// first reference (which may be in a different file).
+				targetSymbolDef.Info.FilePath = filePath
+				targetSymbolDef.Info.StartLine = startLine
+				targetSymbolDef.Info.EndLine = endLine
+				targetSymbolDef.Info.StartColumn = startColumn
+				targetSymbolDef.Info.EndColumn = endColumn
 			}
 
 			// Add reference to symbol definition
@@ -312,15 +322,23 @@ func extractSignature(symbolInfo *scip.SymbolInformation) string {
 }
 
 func convertRange(scipRange []int32, isStart bool) (int, int) {
-	if len(scipRange) < 4 {
+	// SCIP ranges come in two forms:
+	// 3-element: [startLine, startCol, endCol] (single-line span)
+	// 4-element: [startLine, startCol, endLine, endCol] (multi-line span)
+	if len(scipRange) < 3 {
 		return 0, 0
 	}
-	
+
 	if isStart {
 		return int(scipRange[0]), int(scipRange[1])
-	} else {
-		return int(scipRange[2]), int(scipRange[3])
 	}
+
+	// End position
+	if len(scipRange) == 3 {
+		// Single-line: endLine == startLine, endCol is scipRange[2]
+		return int(scipRange[0]), int(scipRange[2])
+	}
+	return int(scipRange[2]), int(scipRange[3])
 }
 
 func inferLanguage(filePath string) string {

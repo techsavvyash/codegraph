@@ -1,0 +1,34 @@
+{
+  "name": "docs-intel-py",
+  "root": "apps/docs-intel-py",
+  "targets": {
+    "install": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "pip install -e '.[dev]'",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph/apps/docs-intel-py"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "python -m uvicorn docs_intel.main:app --host 0.0.0.0 --port 8765 --reload",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph/apps/docs-intel-py"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "python -m pytest src/docs_intel/tests/ -v",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph/apps/docs-intel-py"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "python -m ruff check src/ && python -m ruff format --check src/",
+        "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph/apps/docs-intel-py"
+      }
+    }
+  }
+}

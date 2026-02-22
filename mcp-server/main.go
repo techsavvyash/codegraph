@@ -64,7 +64,7 @@ type CodeGraphMCPServer struct {
 	client           *neo4j.Client
 	queryBuilder     *neo4j.QueryBuilder
 	hybridSearch     *search.HybridSearchManager
-	vectorSearch     *search.VectorSearchManager
+	vectorStore      search.VectorStore
 	embeddingService search.EmbeddingService
 	docIndexer       *documents.DocumentIndexer
 	commentSearch    *search.CommentEmbeddingService
@@ -105,9 +105,18 @@ func main() {
 		log.Printf("Warning: GEMINI_API_KEY not set - embedding-based tools will not be available")
 	}
 
+	// Initialize Qdrant vector store
+	qdrantURL := os.Getenv("QDRANT_URL")
+	if qdrantURL == "" {
+		qdrantURL = "localhost:6334"
+	}
+	vectorStore, err := search.NewQdrantVectorStore(qdrantURL)
+	if err != nil {
+		log.Printf("Warning: failed to connect to Qdrant at %s: %v", qdrantURL, err)
+	}
+
 	// Initialize search managers
-	vectorSearch := search.NewVectorSearchManager(client)
-	hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+	hybridSearch := search.NewHybridSearchManager(client, embeddingService, vectorStore)
 
 	// Initialize document indexer and comment search
 	docIndexer := documents.NewDocumentIndexer(client)
@@ -117,7 +126,7 @@ func main() {
 		client:           client,
 		queryBuilder:     neo4j.NewQueryBuilder(client),
 		hybridSearch:     hybridSearch,
-		vectorSearch:     vectorSearch,
+		vectorStore:      vectorStore,
 		embeddingService: embeddingService,
 		docIndexer:       docIndexer,
 		commentSearch:    commentSearch,
@@ -966,8 +975,18 @@ func (s *CodeGraphMCPServer) handleVectorSearchTool(ctx context.Context, args ma
 		}
 	}
 
-	// Perform vector search
-	results, err := s.vectorSearch.HybridVectorSearch(ctx, embedding, limit)
+	// Perform vector search via Qdrant
+	if s.vectorStore == nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: Vector store not available"}},
+			IsError: true,
+		}
+	}
+
+	results, err := s.vectorStore.Query(ctx, search.VectorQuery{
+		Vector: embedding,
+		Limit:  limit,
+	})
 	if err != nil {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Vector search error: %v", err)}},
@@ -975,7 +994,7 @@ func (s *CodeGraphMCPServer) handleVectorSearchTool(ctx context.Context, args ma
 		}
 	}
 
-	if len(results.Results) == 0 {
+	if len(results) == 0 {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No vector results found for query: %s", query)}},
 		}
@@ -983,47 +1002,28 @@ func (s *CodeGraphMCPServer) handleVectorSearchTool(ctx context.Context, args ma
 
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Vector Search Results for '%s'\n\n", query))
-	output.WriteString(fmt.Sprintf("**Found %d result(s) using %s index**\n", results.Count, results.IndexUsed))
-	output.WriteString(fmt.Sprintf("**Embedding Dimensions**: %d\n\n", len(results.QueryVector)))
+	output.WriteString(fmt.Sprintf("**Found %d result(s)**\n", len(results)))
+	output.WriteString(fmt.Sprintf("**Embedding Dimensions**: %d\n\n", len(embedding)))
 
-	for i, result := range results.Results {
-		if i >= 20 { // Limit output
-			output.WriteString(fmt.Sprintf("... and %d more results\n", len(results.Results)-i))
+	for i, result := range results {
+		if i >= 20 {
+			output.WriteString(fmt.Sprintf("... and %d more results\n", len(results)-i))
 			break
 		}
 
 		output.WriteString(fmt.Sprintf("### Result %d (Similarity: %.4f)\n", i+1, result.Score))
 
-		name := getStringFromInterface(result.Node, "name")
-		filePath := getStringFromInterface(result.Node, "filePath")
-		signature := getStringFromInterface(result.Node, "signature")
-		nodeType := "Unknown"
+		name, _ := result.Metadata["name"].(string)
+		signature, _ := result.Metadata["signature"].(string)
+		nodeLabel, _ := result.Metadata["nodeLabel"].(string)
 
-		// Try to determine node type from properties
-		if labels, ok := result.Node["labels"].([]interface{}); ok && len(labels) > 0 {
-			if label, ok := labels[0].(string); ok {
-				nodeType = label
-			}
-		}
+		output.WriteString(fmt.Sprintf("**%s** (%s)\n", name, nodeLabel))
 
-		output.WriteString(fmt.Sprintf("**%s** (%s)\n", name, nodeType))
-
-		if filePath != "" {
-			output.WriteString(fmt.Sprintf("- **File**: %s\n", filePath))
-		}
 		if signature != "" {
 			output.WriteString(fmt.Sprintf("- **Signature**: %s\n", signature))
 		}
-		if startLine := getIntFromInterface(result.Node, "startLine"); startLine > 0 {
-			endLine := getIntFromInterface(result.Node, "endLine")
-			if endLine > startLine {
-				output.WriteString(fmt.Sprintf("- **Lines**: %d-%d\n", startLine, endLine))
-			} else {
-				output.WriteString(fmt.Sprintf("- **Line**: %d\n", startLine))
-			}
-		}
-		if docstring := getStringFromInterface(result.Node, "docstring"); docstring != "" {
-			output.WriteString(fmt.Sprintf("- **Description**: %s\n", docstring))
+		if description, _ := result.Metadata["description"].(string); description != "" {
+			output.WriteString(fmt.Sprintf("- **Description**: %s\n", description))
 		}
 
 		output.WriteString("\n")
@@ -1276,11 +1276,15 @@ func (s *CodeGraphMCPServer) handleIndexDocumentsTool(ctx context.Context, args 
 	if generateEmbeddings && s.embeddingService != nil {
 		output.WriteString("\n### Embedding Generation\n")
 
-		// Create/update vector indexes
-		if err := s.vectorSearch.CreateVectorIndexes(ctx); err != nil {
-			output.WriteString(fmt.Sprintf("Warning: failed to create vector indexes: %v\n", err))
-		} else {
-			output.WriteString("✓ Vector indexes updated\n")
+		// Create/update vector collections in Qdrant
+		if s.vectorStore != nil {
+			collections := []string{"function_embeddings_768", "document_embeddings_768", "class_embeddings_768"}
+			for _, col := range collections {
+				if err := s.vectorStore.CreateIndex(ctx, col, 768, "cosine"); err != nil {
+					output.WriteString(fmt.Sprintf("Warning: failed to create collection %s: %v\n", col, err))
+				}
+			}
+			output.WriteString("✓ Qdrant vector collections updated\n")
 		}
 
 		output.WriteString("✓ Document embeddings generated and indexed\n")
@@ -1712,7 +1716,7 @@ func (s *CodeGraphMCPServer) handleIntelligentLinkTool(ctx context.Context, args
 		}
 	}
 
-	intelligentLinker := search.NewIntelligentDocumentLinker(s.client, s.embeddingService)
+	intelligentLinker := search.NewIntelligentDocumentLinker(s.client, s.embeddingService, s.vectorStore)
 
 	// First, create or find the document node
 	docIndexer := documents.NewDocumentIndexer(s.client)

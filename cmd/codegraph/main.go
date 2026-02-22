@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
 
+	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/pkg/benchmarks"
 	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
 	"github.com/context-maximiser/code-graph/pkg/indexer/static"
@@ -18,6 +20,8 @@ import (
 	_ "github.com/context-maximiser/code-graph/pkg/llm/litellm"
 	_ "github.com/context-maximiser/code-graph/pkg/llm/openai"
 	"github.com/context-maximiser/code-graph/pkg/neo4j"
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/context-maximiser/code-graph/pkg/query"
 	"github.com/context-maximiser/code-graph/pkg/schema"
 	"github.com/context-maximiser/code-graph/pkg/search"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -26,12 +30,16 @@ import (
 )
 
 var (
-	cfgFile   string
-	verbose   bool
-	neo4jURI  string
-	neo4jUser string
-	neo4jPass string
-	neo4jDB   string
+	cfgFile          string
+	verbose          bool
+	neo4jURI         string
+	neo4jUser        string
+	neo4jPass        string
+	neo4jDB          string
+	qdrantURL        string
+	qdrantAPIKey     string
+	opensearchURL    string
+	opensearchIndex  string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -62,6 +70,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&neo4jUser, "neo4j-user", "neo4j", "Neo4j username")
 	rootCmd.PersistentFlags().StringVar(&neo4jPass, "neo4j-password", "password123", "Neo4j password")
 	rootCmd.PersistentFlags().StringVar(&neo4jDB, "neo4j-database", "neo4j", "Neo4j database name")
+	rootCmd.PersistentFlags().StringVar(&qdrantURL, "qdrant-url", "localhost:6334", "Qdrant gRPC endpoint")
+	rootCmd.PersistentFlags().StringVar(&qdrantAPIKey, "qdrant-api-key", "", "Qdrant API key (optional)")
+	rootCmd.PersistentFlags().StringVar(&opensearchURL, "opensearch-url", "http://localhost:9200", "OpenSearch endpoint")
+	rootCmd.PersistentFlags().StringVar(&opensearchIndex, "opensearch-index", "codegraph", "OpenSearch index name")
 
 	// Bind flags to viper
 	viper.BindPFlag("neo4j.uri", rootCmd.PersistentFlags().Lookup("neo4j-uri"))
@@ -69,6 +81,8 @@ func init() {
 	viper.BindPFlag("neo4j.password", rootCmd.PersistentFlags().Lookup("neo4j-password"))
 	viper.BindPFlag("neo4j.database", rootCmd.PersistentFlags().Lookup("neo4j-database"))
 	viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	viper.BindPFlag("qdrant.url", rootCmd.PersistentFlags().Lookup("qdrant-url"))
+	viper.BindPFlag("qdrant.api_key", rootCmd.PersistentFlags().Lookup("qdrant-api-key"))
 
 	// Add subcommands
 	rootCmd.AddCommand(statusCmd)
@@ -79,6 +93,11 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
 	rootCmd.AddCommand(serverCmd)
+	rootCmd.AddCommand(indexersCmd)
+	indexersCmd.AddCommand(indexersInstallCmd)
+	indexersCmd.AddCommand(indexersStatusCmd)
+	indexersInstallCmd.Flags().String("language", "", "Comma-separated languages to install (e.g., go,typescript,python)")
+	indexersInstallCmd.Flags().String("cache-dir", "", "Custom cache directory for indexer binaries")
 }
 
 func initConfig() {
@@ -97,6 +116,10 @@ func initConfig() {
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match
+
+	// Bind specific environment variables for Qdrant configuration.
+	viper.BindEnv("qdrant.url", "QDRANT_URL")
+	viper.BindEnv("qdrant.api_key", "QDRANT_API_KEY")
 
 	// If a config file is found, read it in
 	if err := viper.ReadInConfig(); err == nil && verbose {
@@ -385,9 +408,16 @@ The language will be auto-detected from the project structure, or you can specif
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
 
-		// Validate environment
-		if err := scipIndexer.ValidateEnvironment(); err != nil {
-			return fmt.Errorf("environment validation failed: %w", err)
+		// Validate environment (with optional auto-install)
+		noAutoInstall, _ := cmd.Flags().GetBool("no-auto-install")
+		if noAutoInstall {
+			if err := scipIndexer.ValidateEnvironmentNoInstall(); err != nil {
+				return fmt.Errorf("environment validation failed: %w", err)
+			}
+		} else {
+			if err := scipIndexer.ValidateEnvironment(); err != nil {
+				return fmt.Errorf("environment validation failed: %w", err)
+			}
 		}
 
 		fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
@@ -459,6 +489,13 @@ var indexDocsCmd = &cobra.Command{
 
 		indexer := documents.NewDocumentIndexer(client)
 
+		// Attach OpenSearch text store if available.
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			indexer.WithTextStore(osStore)
+			fmt.Println("📤 OpenSearch enabled — chunks will be indexed for BM25")
+		}
+
 		// Set scope if provided
 		docScopeFlag, _ := cmd.Flags().GetString("scope")
 		docScopeIDFlag, _ := cmd.Flags().GetString("scope-id")
@@ -513,6 +550,95 @@ var indexDocsCmd = &cobra.Command{
 
 		fmt.Println("✓ Documents indexed successfully")
 		return nil
+	},
+}
+
+// docsSyncCmd syncs documents from an external source (Confluence, etc.)
+var docsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync documents from an external source",
+	Long:  "Fetch documents from Confluence or other external sources and index them into the graph",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		source, _ := cmd.Flags().GetString("source")
+		space, _ := cmd.Flags().GetString("space")
+		docURL, _ := cmd.Flags().GetString("url")
+		docID, _ := cmd.Flags().GetString("doc-id")
+		baseURL, _ := cmd.Flags().GetString("base-url")
+		username, _ := cmd.Flags().GetString("username")
+		apiToken, _ := cmd.Flags().GetString("api-token")
+
+		if source == "" {
+			return fmt.Errorf("--source is required (e.g., 'confluence')")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		indexer := documents.NewDocumentIndexer(client)
+
+		// Set scope if provided.
+		syncScopeFlag, _ := cmd.Flags().GetString("scope")
+		syncScopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		if syncScopeFlag == "pr" {
+			prID := syncScopeIDFlag
+			if prID == "" {
+				return fmt.Errorf("--scope-id is required when --scope=pr")
+			}
+			if strings.HasPrefix(prID, "pr-") {
+				prID = prID[3:]
+			}
+			indexer.SetScope(models.NewPRScope(prID))
+		}
+
+		ctx := context.Background()
+
+		var connector documents.DocConnector
+		switch strings.ToLower(source) {
+		case "confluence":
+			if baseURL == "" {
+				return fmt.Errorf("--base-url is required for Confluence (e.g., 'https://your-domain.atlassian.net/wiki')")
+			}
+			if username == "" || apiToken == "" {
+				return fmt.Errorf("--username and --api-token are required for Confluence")
+			}
+			connector = documents.NewConfluenceConnector(documents.ConfluenceConfig{
+				BaseURL:  baseURL,
+				Username: username,
+				APIToken: apiToken,
+			})
+		default:
+			return fmt.Errorf("unsupported source: %s (supported: confluence)", source)
+		}
+
+		// Single document sync (by URL or doc ID).
+		if docURL != "" || docID != "" {
+			id := docID
+			if id == "" {
+				id = docURL
+			}
+			fmt.Printf("Syncing single document: %s\n", id)
+			if err := indexer.SyncExternalDocument(ctx, connector, id); err != nil {
+				return fmt.Errorf("failed to sync document: %w", err)
+			}
+			fmt.Println("✓ Document synced successfully")
+			return nil
+		}
+
+		// Space sync.
+		if space != "" {
+			fmt.Printf("Syncing space: %s from %s\n", space, source)
+			synced, err := indexer.SyncExternalSpace(ctx, connector, space)
+			if err != nil {
+				return fmt.Errorf("failed to sync space: %w", err)
+			}
+			fmt.Printf("✓ Synced %d documents from space %s\n", synced, space)
+			return nil
+		}
+
+		return fmt.Errorf("provide either --space (to sync all docs) or --url/--doc-id (to sync one doc)")
 	},
 }
 
@@ -585,10 +711,18 @@ var querySearchCmd = &cobra.Command{
 
 		// Get limit from flags, 0 means no limit
 		limit, _ := cmd.Flags().GetInt("limit")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
 
 		ctx := context.Background()
-		results, err := queryBuilder.SearchNodes(ctx, searchTerm,
-			[]string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}, limit)
+		nodeTypes := []string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}
+
+		// Use overlay-aware search when scope-id is provided
+		var results []*neo4jdriver.Record
+		if scopeID != "" {
+			results, err = queryBuilder.SearchNodesScoped(ctx, searchTerm, nodeTypes, limit, scopeID)
+		} else {
+			results, err = queryBuilder.SearchNodes(ctx, searchTerm, nodeTypes, limit)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to search: %w", err)
 		}
@@ -696,6 +830,185 @@ var querySourceCmd = &cobra.Command{
 		fmt.Println(sourceCode)
 		fmt.Println("=" + strings.Repeat("=", len(functionName)+25))
 
+		return nil
+	},
+}
+
+// queryDepsCmd queries service-level dependencies
+var queryDepsCmd = &cobra.Command{
+	Use:   "deps",
+	Short: "Query service dependencies",
+	Long:  "Show inter-service dependencies (CALLS_SERVICE relationships)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		serviceName, _ := cmd.Flags().GetString("service")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+
+		if serviceName == "" {
+			return fmt.Errorf("--service is required")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		depsQuery := query.NewServiceDepsQuery(client)
+		ctx := context.Background()
+
+		deps, err := depsQuery.GetDependencies(ctx, serviceName, scopeID)
+		if err != nil {
+			return fmt.Errorf("failed to query dependencies: %w", err)
+		}
+
+		if len(deps) == 0 {
+			fmt.Printf("No dependencies found for service '%s'\n", serviceName)
+			return nil
+		}
+
+		fmt.Printf("Dependencies for service '%s':\n", serviceName)
+		for _, dep := range deps {
+			direction := "→"
+			peer := dep.ToService
+			if dep.ToService == serviceName {
+				direction = "←"
+				peer = dep.FromService
+			}
+			fmt.Printf("  %s %s %s (confidence: %.2f, source: %s)\n",
+				serviceName, direction, peer, dep.Confidence, dep.Source)
+			for _, ev := range dep.Evidence {
+				fmt.Printf("    evidence: %s\n", ev)
+			}
+		}
+
+		return nil
+	},
+}
+
+// queryFlowsCmd lists or generates flow spines
+var queryFlowsCmd = &cobra.Command{
+	Use:   "flows",
+	Short: "List or generate flow spines",
+	Long:  "List existing flow spines or generate new ones from API endpoints",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		generate, _ := cmd.Flags().GetBool("generate")
+		maxDepth, _ := cmd.Flags().GetInt("max-depth")
+		flowType, _ := cmd.Flags().GetString("type")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		gen := query.NewFlowSpineGenerator(client)
+		if scopeID != "" {
+			gen.SetScope(models.NewPRScope(scopeID))
+		}
+		ctx := context.Background()
+
+		if generate {
+			results, err := gen.GenerateFromAPIEndpoints(ctx, maxDepth)
+			if err != nil {
+				return fmt.Errorf("failed to generate flows: %w", err)
+			}
+			fmt.Printf("Generated %d flow spines\n", len(results))
+			for _, r := range results {
+				fmt.Printf("  %s (%s) — %d steps\n", r.FlowName, r.FlowType, len(r.Steps))
+				for _, s := range r.Steps {
+					fmt.Printf("    [%d] %s (%s)\n", s.Order, s.Name, s.Label)
+				}
+			}
+			return nil
+		}
+
+		// List existing flows.
+		flows, err := gen.ListFlows(ctx, flowType)
+		if err != nil {
+			return fmt.Errorf("failed to list flows: %w", err)
+		}
+
+		if len(flows) == 0 {
+			fmt.Println("No flow spines found. Use --generate to create them from API endpoints.")
+			return nil
+		}
+
+		fmt.Printf("Found %d flow spines:\n", len(flows))
+		for _, f := range flows {
+			fmt.Printf("  %s [%s] (%s)\n", f.FlowName, f.FlowType, f.FlowNodeKey)
+		}
+		return nil
+	},
+}
+
+// indexersCmd is the parent command for indexer management.
+var indexersCmd = &cobra.Command{
+	Use:   "indexers",
+	Short: "Manage SCIP indexer binaries",
+	Long:  "Download, cache, and manage SCIP indexer binaries for supported languages",
+}
+
+// indexersInstallCmd installs SCIP indexer binaries.
+var indexersInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Install SCIP indexer binaries",
+	Long:  "Download and cache SCIP indexer binaries for specified languages",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		langStr, _ := cmd.Flags().GetString("language")
+		cacheDir, _ := cmd.Flags().GetString("cache-dir")
+
+		mgr := static.NewIndexerManager(cacheDir)
+
+		var languages []static.Language
+		if langStr != "" {
+			for _, l := range strings.Split(langStr, ",") {
+				languages = append(languages, static.Language(strings.TrimSpace(l)))
+			}
+		} else {
+			// Install all known languages
+			languages = []static.Language{
+				static.LanguageGo,
+				static.LanguageTypeScript,
+				static.LanguagePython,
+				static.LanguageJava,
+			}
+		}
+
+		installed, failed := mgr.InstallAll(languages)
+		if len(installed) > 0 {
+			fmt.Printf("Installed/verified: %d indexers\n", len(installed))
+			for _, lang := range installed {
+				fmt.Printf("  %s: %s\n", lang, mgr.ResolveBinary(lang))
+			}
+		}
+		if len(failed) > 0 {
+			fmt.Printf("Failed: %d indexers\n", len(failed))
+			for lang, err := range failed {
+				fmt.Printf("  %s: %v\n", lang, err)
+			}
+		}
+		return nil
+	},
+}
+
+// indexersStatusCmd shows the status of installed SCIP indexer binaries.
+var indexersStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show indexer installation status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mgr := static.NewIndexerManager("")
+		statuses := mgr.Status()
+
+		fmt.Println("SCIP Indexer Status:")
+		fmt.Println("====================")
+		for _, s := range statuses {
+			status := "NOT INSTALLED"
+			if s.Installed {
+				status = fmt.Sprintf("installed (%s)", s.Path)
+			}
+			fmt.Printf("  %-12s %-20s %s %s\n", s.Language, s.Binary, s.Version, status)
+		}
 		return nil
 	},
 }
@@ -910,6 +1223,111 @@ var benchmarkIncrementalCmd = &cobra.Command{
 	},
 }
 
+var benchmarkPipelineCmd = &cobra.Command{
+	Use:   "pipeline [path]",
+	Short: "Benchmark SCIP indexing pipeline phases",
+	Long:  "Profile each phase of the SCIP indexing pipeline and identify bottlenecks",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		languageFlag, _ := cmd.Flags().GetString("language")
+		pprofFlag, _ := cmd.Flags().GetBool("pprof")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+
+		if serviceName == "" {
+			serviceName = "benchmark-pipeline"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		// Start CPU profiling if requested
+		if pprofFlag {
+			f, err := os.Create("cpu.prof")
+			if err != nil {
+				return fmt.Errorf("failed to create CPU profile: %w", err)
+			}
+			defer f.Close()
+			if err := pprof.StartCPUProfile(f); err != nil {
+				return fmt.Errorf("failed to start CPU profile: %w", err)
+			}
+			defer pprof.StopCPUProfile()
+			fmt.Println("CPU profiling enabled, will write to cpu.prof")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		ctx := context.Background()
+
+		// Wipe database
+		fmt.Println("Wiping database...")
+		_, err = client.ExecuteQuery(ctx, "MATCH (n) DETACH DELETE n", nil)
+		if err != nil {
+			return fmt.Errorf("failed to wipe database: %w", err)
+		}
+
+		// Create schema
+		fmt.Println("Creating schema...")
+		schemaManager := schema.NewSchemaManager(client)
+		if err := schemaManager.CreateSchema(ctx); err != nil {
+			return fmt.Errorf("failed to create schema: %w", err)
+		}
+
+		// Determine language
+		var language static.Language
+		if languageFlag != "" {
+			language = static.Language(strings.ToLower(languageFlag))
+			if _, err := static.GetLanguageConfig(language); err != nil {
+				return fmt.Errorf("unsupported language: %s", languageFlag)
+			}
+		} else {
+			detectedLang, err := static.DetectLanguage(projectPath)
+			if err != nil {
+				return fmt.Errorf("failed to detect language: %w", err)
+			}
+			language = detectedLang
+		}
+
+		// Create indexer with timer
+		timer := benchmarks.NewPhaseTimer()
+		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
+		scipIndexer.SetBenchmarkTimer(timer)
+
+		fmt.Printf("Benchmarking SCIP pipeline for %s project at %s...\n\n", language, projectPath)
+
+		if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
+			return fmt.Errorf("indexing failed: %w", err)
+		}
+
+		// Output results
+		if jsonFlag {
+			if err := timer.PrintJSON(os.Stdout); err != nil {
+				return fmt.Errorf("failed to write JSON: %w", err)
+			}
+		} else {
+			timer.PrintTable(os.Stdout)
+		}
+
+		if pprofFlag {
+			fmt.Println("CPU profile written to cpu.prof")
+			fmt.Println("Analyze with: go tool pprof cpu.prof")
+		}
+
+		return nil
+	},
+}
+
 // searchCmd manages advanced search capabilities
 var searchCmd = &cobra.Command{
 	Use:   "search",
@@ -928,15 +1346,192 @@ var searchInitCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		// For initialization, we don't need real embeddings, just need to create schema
-		// Vector search manager for creating indexes
-		vectorSearch := search.NewVectorSearchManager(client)
-
-		fmt.Println("🚀 Initializing advanced search indexes...")
 		ctx := context.Background()
 
-		if err := vectorSearch.CreateVectorIndexes(ctx); err != nil {
-			return fmt.Errorf("failed to initialize search indexes: %w", err)
+		// Always create full-text indexes in Neo4j.
+		fullTextSearch := search.NewFullTextSearchManager(client)
+		fmt.Println("🚀 Initializing full-text search indexes...")
+		if err := fullTextSearch.CreateFullTextIndexes(ctx); err != nil {
+			fmt.Printf("Warning: failed to create full-text indexes: %v\n", err)
+		}
+
+		// Create vector collections in Qdrant.
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+
+		fmt.Println("🚀 Initializing Qdrant vector collections...")
+		type colSpec struct {
+			name string
+			dim  int
+		}
+		collections := []colSpec{
+			{"function_embeddings_768", 768},
+			{"method_embeddings_768", 768},
+			{"class_embeddings_768", 768},
+			{"document_embeddings_768", 768},
+			{"feature_embeddings_768", 768},
+			{"docchunk_embeddings_768", 768},
+			{"symbol_embeddings_768", 768},
+			// 1536-dim collections for OpenAI text-embedding-3-small
+			{"function_embeddings_1536", 1536},
+			{"method_embeddings_1536", 1536},
+			{"class_embeddings_1536", 1536},
+			{"document_embeddings_1536", 1536},
+			{"feature_embeddings_1536", 1536},
+			{"docchunk_embeddings_1536", 1536},
+			{"symbol_embeddings_1536", 1536},
+		}
+		for _, c := range collections {
+			if err := vectorStore.CreateIndex(ctx, c.name, c.dim, "cosine"); err != nil {
+				fmt.Printf("Warning: failed to create collection %s: %v\n", c.name, err)
+			} else {
+				fmt.Printf("   ✓ Collection %s ready\n", c.name)
+			}
+		}
+
+		// OpenSearch: create index and bulk-sync existing nodes.
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			fmt.Println("🚀 Initializing OpenSearch index...")
+			if err := osStore.EnsureIndex(ctx); err != nil {
+				fmt.Printf("Warning: failed to ensure OpenSearch index: %v\n", err)
+			} else {
+				totalSynced := 0
+				batchSize := 500
+
+				// Bulk-sync Function/Method nodes.
+				fnQuery := `MATCH (n) WHERE n:Function OR n:Method
+RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.signature,'') + ' ' + coalesce(n.docstring,'') AS content, labels(n)[0] AS nodeType`
+				if rows, err := client.ExecuteQuery(ctx, fnQuery, nil); err == nil {
+					var batch []textindex.IndexDoc
+					for _, r := range rows {
+						m := r.AsMap()
+						nk, _ := m["nodeKey"].(string)
+						ct, _ := m["content"].(string)
+						nt, _ := m["nodeType"].(string)
+						if nk != "" {
+							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": nt}})
+							if len(batch) >= batchSize {
+								if e := osStore.IndexDocuments(ctx, batch); e == nil {
+									totalSynced += len(batch)
+								}
+								batch = batch[:0]
+							}
+						}
+					}
+					if len(batch) > 0 {
+						if e := osStore.IndexDocuments(ctx, batch); e == nil {
+							totalSynced += len(batch)
+						}
+					}
+				}
+
+				// Bulk-sync Symbol nodes.
+				symQuery := `MATCH (n:Symbol) RETURN n.nodeKey AS nodeKey, coalesce(n.displayName,'') + ' ' + coalesce(n.documentation,'') AS content`
+				if rows, err := client.ExecuteQuery(ctx, symQuery, nil); err == nil {
+					var batch []textindex.IndexDoc
+					for _, r := range rows {
+						m := r.AsMap()
+						nk, _ := m["nodeKey"].(string)
+						ct, _ := m["content"].(string)
+						if nk != "" {
+							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Symbol"}})
+							if len(batch) >= batchSize {
+								if e := osStore.IndexDocuments(ctx, batch); e == nil {
+									totalSynced += len(batch)
+								}
+								batch = batch[:0]
+							}
+						}
+					}
+					if len(batch) > 0 {
+						if e := osStore.IndexDocuments(ctx, batch); e == nil {
+							totalSynced += len(batch)
+						}
+					}
+				}
+
+				// Bulk-sync DocumentChunk nodes.
+				chunkQuery := `MATCH (n:DocumentChunk) RETURN n.nodeKey AS nodeKey, coalesce(n.content,'') AS content, coalesce(n.documentKey,'') AS documentKey`
+				if rows, err := client.ExecuteQuery(ctx, chunkQuery, nil); err == nil {
+					var batch []textindex.IndexDoc
+					for _, r := range rows {
+						m := r.AsMap()
+						nk, _ := m["nodeKey"].(string)
+						ct, _ := m["content"].(string)
+						dk, _ := m["documentKey"].(string)
+						if nk != "" {
+							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "DocumentChunk", "documentKey": dk}})
+							if len(batch) >= batchSize {
+								if e := osStore.IndexDocuments(ctx, batch); e == nil {
+									totalSynced += len(batch)
+								}
+								batch = batch[:0]
+							}
+						}
+					}
+					if len(batch) > 0 {
+						if e := osStore.IndexDocuments(ctx, batch); e == nil {
+							totalSynced += len(batch)
+						}
+					}
+				}
+
+				// Bulk-sync Document nodes.
+				docQuery := `MATCH (n:Document) RETURN n.nodeKey AS nodeKey, coalesce(n.title,'') AS content`
+				if rows, err := client.ExecuteQuery(ctx, docQuery, nil); err == nil {
+					var batch []textindex.IndexDoc
+					for _, r := range rows {
+						m := r.AsMap()
+						nk, _ := m["nodeKey"].(string)
+						ct, _ := m["content"].(string)
+						if nk != "" {
+							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Document"}})
+							if len(batch) >= batchSize {
+								if e := osStore.IndexDocuments(ctx, batch); e == nil {
+									totalSynced += len(batch)
+								}
+								batch = batch[:0]
+							}
+						}
+					}
+					if len(batch) > 0 {
+						if e := osStore.IndexDocuments(ctx, batch); e == nil {
+							totalSynced += len(batch)
+						}
+					}
+				}
+
+				// Bulk-sync Feature nodes.
+				featQuery := `MATCH (n:Feature) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.description,'') AS content`
+				if rows, err := client.ExecuteQuery(ctx, featQuery, nil); err == nil {
+					var batch []textindex.IndexDoc
+					for _, r := range rows {
+						m := r.AsMap()
+						nk, _ := m["nodeKey"].(string)
+						ct, _ := m["content"].(string)
+						if nk != "" {
+							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Feature"}})
+							if len(batch) >= batchSize {
+								if e := osStore.IndexDocuments(ctx, batch); e == nil {
+									totalSynced += len(batch)
+								}
+								batch = batch[:0]
+							}
+						}
+					}
+					if len(batch) > 0 {
+						if e := osStore.IndexDocuments(ctx, batch); e == nil {
+							totalSynced += len(batch)
+						}
+					}
+				}
+
+				fmt.Printf("✓ OpenSearch index '%s' ready (%d docs synced)\n", opensearchIndex, totalSynced)
+			}
 		}
 
 		fmt.Println("✅ Advanced search indexes initialized successfully")
@@ -947,11 +1542,12 @@ var searchInitCmd = &cobra.Command{
 var searchTestCmd = &cobra.Command{
 	Use:   "test [query]",
 	Short: "Test hybrid search capabilities",
-	Long:  "Test vector search, full-text search, and hybrid search with a query",
+	Long:  "Test vector search, full-text search, and hybrid search with a query.\nUse --fulltext-only to skip vector search (no API key required).",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := args[0]
 		limit, _ := cmd.Flags().GetInt("limit")
+		fulltextOnly, _ := cmd.Flags().GetBool("fulltext-only")
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -962,18 +1558,38 @@ var searchTestCmd = &cobra.Command{
 		// Create embedding service based on flags
 		apiKey, _ := cmd.Flags().GetString("api-key")
 		model, _ := cmd.Flags().GetString("model")
+		baseURL, _ := cmd.Flags().GetString("base-url")
 		useGemini, _ := cmd.Flags().GetBool("gemini")
 
 		var embeddingService search.EmbeddingService
-		if useGemini && apiKey != "" {
+		if fulltextOnly {
+			fmt.Println("📝 Running in fulltext-only mode (BM25 + semantic graph search, no vector search)")
+		} else if useGemini && apiKey != "" {
 			embeddingService = search.NewGeminiEmbeddingService(apiKey, model)
 			fmt.Printf("🔗 Using Google Gemini embedding service (model: %s) for search\n", model)
+		} else if apiKey != "" && baseURL != "" {
+			embeddingService = search.NewSimpleEmbeddingService(baseURL, apiKey, model)
+			fmt.Printf("🔗 Using embedding service: %s (model: %s)\n", baseURL, model)
 		} else {
-			return fmt.Errorf("search testing requires --gemini flag with valid API key")
+			return fmt.Errorf("search testing requires --gemini --api-key=<key>, or --api-key + --base-url, or --fulltext-only")
 		}
 
-		// Create hybrid search manager
-		hybridSearch := search.NewHybridSearchManager(client, embeddingService)
+		// Create hybrid search manager with Qdrant vector store.
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+		fmt.Println("📦 Using Qdrant vector backend")
+
+		hybridSearch := search.NewHybridSearchManager(client, embeddingService, vectorStore)
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			hybridSearch.WithTextStore(osStore)
+			fmt.Println("📋 BM25 backend: OpenSearch")
+		} else {
+			fmt.Println("📋 BM25 backend: Neo4j fulltext (OpenSearch not reachable)")
+		}
 
 		fmt.Printf("🔍 Testing hybrid search for: '%s'\n", query)
 		fmt.Println("=" + strings.Repeat("=", len(query)+35))
@@ -1000,41 +1616,75 @@ var searchTestCmd = &cobra.Command{
 		for i, result := range response.Results {
 			fmt.Printf("\n%d. ", i+1)
 
-			if name, ok := result.Node["name"].(string); ok {
-				fmt.Printf("**%s**", name)
-			} else if title, ok := result.Node["title"].(string); ok {
-				fmt.Printf("**%s**", title)
-			} else {
-				fmt.Printf("**Unknown**")
+			name := ""
+			for _, field := range []string{"name", "title", "displayName", "signature", "symbol", "path"} {
+				if v, ok := result.Node[field].(string); ok && v != "" {
+					name = v
+					break
+				}
 			}
-
-			if len(result.Labels) > 0 {
-				fmt.Printf(" (%s)", strings.Join(result.Labels, ", "))
+			// For BM25 hits (DocumentChunk, Feature) the node map carries a
+			// "snippet" key from OpenSearch _source. Use it as a readable preview.
+			if name == "" {
+				if v, ok := result.Node["snippet"].(string); ok && v != "" {
+					name = v
+				} else if v, ok := result.Node["nodeKey"].(string); ok && v != "" {
+					name = v
+				} else {
+					name = "Unknown"
+				}
 			}
+			if len(name) > 80 {
+				name = name[:77] + "..."
+			}
+			fmt.Printf("**%s**", name)
 
-			fmt.Printf("\n   Combined Score: %.3f | Source: %s | Relevance: %s\n",
+			// Resolve label: prefer result.Labels, fall back to nodeType metadata.
+			labels := result.Labels
+			if len(labels) == 0 {
+				if nt, ok := result.Node["nodeType"].(string); ok && nt != "" {
+					labels = []string{nt}
+				}
+			}
+			if len(labels) > 0 {
+				fmt.Printf(" (%s)", strings.Join(labels, ", "))
+			}
+			fmt.Printf("\n   RRF Score: %.5f | Source: %s | Relevance: %s\n",
 				result.CombinedScore, result.Source, result.Relevance)
 
+			// Raw scores
+			var scores []string
 			if result.VectorScore > 0 {
-				fmt.Printf("   Vector: %.3f", result.VectorScore)
+				scores = append(scores, fmt.Sprintf("Vector: %.4f", result.VectorScore))
 			}
 			if result.FullTextScore > 0 {
-				fmt.Printf(" | Full-Text: %.3f", result.FullTextScore)
+				scores = append(scores, fmt.Sprintf("BM25: %.2f", result.FullTextScore))
 			}
 			if result.SemanticScore > 0 {
-				fmt.Printf(" | Semantic: %.3f", result.SemanticScore)
+				scores = append(scores, fmt.Sprintf("Semantic: %.4f", result.SemanticScore))
 			}
-			fmt.Println()
+			if len(scores) > 0 {
+				fmt.Printf("   Raw scores: %s\n", strings.Join(scores, " | "))
+			}
 
-			// Show description or content snippet
+			// Location info
+			if fp, ok := result.Node["filePath"].(string); ok && fp != "" {
+				loc := fp
+				if sl, ok := result.Node["startLine"]; ok {
+					loc = fmt.Sprintf("%s:%v", fp, sl)
+				}
+				fmt.Printf("   Location: %s\n", loc)
+			}
+
+			// Description or content snippet
 			if description, ok := result.Node["description"].(string); ok && description != "" {
-				if len(description) > 100 {
-					description = description[:97] + "..."
+				if len(description) > 120 {
+					description = description[:117] + "..."
 				}
 				fmt.Printf("   Description: %s\n", description)
 			} else if content, ok := result.Node["content"].(string); ok && content != "" {
-				if len(content) > 100 {
-					content = content[:97] + "..."
+				if len(content) > 120 {
+					content = content[:117] + "..."
 				}
 				fmt.Printf("   Content: %s\n", content)
 			}
@@ -1056,7 +1706,19 @@ var searchInfoCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		// For info command, we don't need embedding service, just to check capabilities
-		hybridSearch := search.NewHybridSearchManager(client, nil)
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+		hybridSearch := search.NewHybridSearchManager(client, nil, vectorStore)
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			hybridSearch.WithTextStore(osStore)
+			fmt.Println("📋 BM25 backend: OpenSearch")
+		} else {
+			fmt.Println("📋 BM25 backend: Neo4j fulltext (OpenSearch not reachable)")
+		}
 
 		fmt.Println("🔍 CodeGraph Search Capabilities")
 		fmt.Println("=================================")
@@ -1127,6 +1789,120 @@ var searchInfoCmd = &cobra.Command{
 	},
 }
 
+// searchEnrichCmd enriches Qdrant point payloads with filePath/startLine/endLine
+// from Neo4j without re-generating embeddings.
+var searchEnrichCmd = &cobra.Command{
+	Use:   "enrich",
+	Short: "Enrich Qdrant payloads with file location metadata from Neo4j",
+	Long: `Reads all points from Qdrant, looks up their nodeKeys in Neo4j,
+and updates each point's payload with filePath, startLine, and endLine.
+No re-embedding is required — only metadata is updated.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		qdrantStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		qs := qdrantStore.(*search.QdrantVectorStore)
+		defer qs.Close()
+
+		ctx := context.Background()
+		collections := []string{
+			"function_embeddings_768",
+			"method_embeddings_768",
+			"class_embeddings_768",
+			"document_embeddings_768",
+			"feature_embeddings_768",
+		}
+
+		totalUpdated := 0
+		for _, col := range collections {
+			fmt.Printf("🔍 Scrolling collection %s...\n", col)
+			points, err := qs.ScrollPoints(ctx, col)
+			if err != nil {
+				fmt.Printf("   ⚠️  Failed to scroll %s: %v\n", col, err)
+				continue
+			}
+			if len(points) == 0 {
+				fmt.Printf("   (empty)\n")
+				continue
+			}
+
+			// Collect nodeKeys that lack filePath in their payload.
+			var needsEnrich []search.ScrolledPoint
+			for _, pt := range points {
+				if pt.Payload["filePath"] == "" {
+					needsEnrich = append(needsEnrich, pt)
+				}
+			}
+			fmt.Printf("   Found %d points, %d need filePath enrichment\n", len(points), len(needsEnrich))
+			if len(needsEnrich) == 0 {
+				continue
+			}
+
+			// Batch-resolve nodeKeys from Neo4j.
+			nodeKeys := make([]string, len(needsEnrich))
+			for i, pt := range needsEnrich {
+				nodeKeys[i] = pt.Payload["nodeKey"]
+			}
+
+			records, err := client.ExecuteQuery(ctx,
+				`UNWIND $keys AS key
+				 MATCH (n) WHERE n.nodeKey = key
+				 RETURN n.nodeKey AS nodeKey,
+				        coalesce(n.filePath, '') AS filePath,
+				        coalesce(toString(n.startLine), '') AS startLine,
+				        coalesce(toString(n.endLine), '') AS endLine`,
+				map[string]any{"keys": nodeKeys})
+			if err != nil {
+				fmt.Printf("   ⚠️  Neo4j lookup failed: %v\n", err)
+				continue
+			}
+
+			// Build nodeKey → location map.
+			locMap := make(map[string]map[string]string, len(records))
+			for _, rec := range records {
+				rm := rec.AsMap()
+				nk, _ := rm["nodeKey"].(string)
+				locMap[nk] = map[string]string{
+					"filePath":  fmt.Sprintf("%v", rm["filePath"]),
+					"startLine": fmt.Sprintf("%v", rm["startLine"]),
+					"endLine":   fmt.Sprintf("%v", rm["endLine"]),
+				}
+			}
+
+			// Apply updates.
+			var uuids []string
+			var payloads []map[string]string
+			for _, pt := range needsEnrich {
+				loc, ok := locMap[pt.Payload["nodeKey"]]
+				if !ok || loc["filePath"] == "" {
+					continue // No data in Neo4j for this point.
+				}
+				uuids = append(uuids, pt.UUID)
+				payloads = append(payloads, loc)
+			}
+
+			if len(uuids) > 0 {
+				if err := qs.SetPayloadFields(ctx, col, uuids, payloads); err != nil {
+					fmt.Printf("   ⚠️  SetPayload failed: %v\n", err)
+				} else {
+					fmt.Printf("   ✓ Enriched %d points in %s\n", len(uuids), col)
+					totalUpdated += len(uuids)
+				}
+			}
+		}
+
+		fmt.Printf("\n🎉 Enrichment complete. Updated %d points total.\n", totalUpdated)
+		return nil
+	},
+}
+
 var searchEmbedCmd = &cobra.Command{
 	Use:   "embed",
 	Short: "Generate and populate embeddings for existing nodes",
@@ -1164,19 +1940,25 @@ var searchEmbedCmd = &cobra.Command{
 
 		ctx := context.Background()
 
-		// Get vector search manager
-		vectorSearch := search.NewVectorSearchManager(client)
+		// Create Qdrant vector store.
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+		fmt.Println("📦 Using Qdrant vector backend for embedding storage")
 
 		fmt.Printf("🚀 Starting embedding population (batch size: %d, dry-run: %t)...\n", batchSize, dryRun)
 
-		// Process each node type
-		nodeTypes := []string{"Function", "Method", "Class", "Document", "Feature"}
+		// Process each node type. DocumentChunk embeds full prose for doc retrieval.
+		// Symbol embeds CLI command vars, exported types, and other named definitions.
+		nodeTypes := []string{"Function", "Method", "Class", "Document", "Feature", "DocumentChunk", "Symbol"}
 		totalProcessed := 0
 
 		for _, nodeType := range nodeTypes {
 			fmt.Printf("\n📊 Processing %s nodes...\n", nodeType)
 
-			processed, err := populateEmbeddingsForNodeType(ctx, client, embeddingService, vectorSearch, nodeType, batchSize, dryRun)
+			processed, err := populateEmbeddingsForNodeType(ctx, client, embeddingService, vectorStore, nodeType, batchSize, dryRun)
 			if err != nil {
 				fmt.Printf("⚠️  Error processing %s nodes: %v\n", nodeType, err)
 				continue
@@ -1347,7 +2129,12 @@ to the specific code functions that implement them.`,
 		}
 
 		// Create feature linker with provider adapters
-		featureLinker := search.NewFeatureLinker(client, providerWrapper.EmbeddingService)
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return err
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+		featureLinker := search.NewFeatureLinker(client, providerWrapper.EmbeddingService, vectorStore)
 
 		// Enable LLM service if available
 		if providerWrapper.Provider.SupportsTextGeneration() {
@@ -1377,7 +2164,7 @@ to the specific code functions that implement them.`,
 
 		// Display results
 		fmt.Printf("\n📊 FEATURE LINKING RESULTS\n")
-		fmt.Printf("=" + strings.Repeat("=", 50) + "\n\n")
+		fmt.Println("=" + strings.Repeat("=", 50) + "\n")
 
 		totalFeatures := len(results)
 		totalLinks := 0
@@ -1411,7 +2198,7 @@ to the specific code functions that implement them.`,
 
 		// Summary statistics
 		fmt.Printf("🎉 SUMMARY\n")
-		fmt.Printf("=" + strings.Repeat("=", 30) + "\n")
+		fmt.Println("=" + strings.Repeat("=", 30))
 		fmt.Printf("Features Processed: %d\n", totalFeatures)
 		fmt.Printf("Total Candidates Evaluated: %d\n", totalCandidates)
 		fmt.Printf("Total IMPLEMENTS Links Created: %d\n", totalLinks)
@@ -1431,12 +2218,13 @@ to the specific code functions that implement them.`,
 	},
 }
 
-func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, embeddingService search.EmbeddingService, vectorSearch *search.VectorSearchManager, nodeType string, batchSize int, dryRun bool) (int, error) {
-	// Query nodes that don't have embeddings
+func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, embeddingService search.EmbeddingService, vectorStore search.VectorStore, nodeType string, batchSize int, dryRun bool) (int, error) {
+	// Query nodes that haven't been embedded into Qdrant yet.
+	// We use the embeddedAt timestamp to track which nodes are already in the vector store.
 	query := fmt.Sprintf(`
 		MATCH (n:%s)
-		WHERE n.embedding IS NULL
-		RETURN elementId(n) as nodeId, n.name as name, n.signature as signature, n.description as description, n.content as content, n.title as title
+		WHERE n.embeddedAt IS NULL
+		RETURN elementId(n) as nodeId, n.name as name, n.nodeKey as nodeKey, n.signature as signature, n.description as description, n.content as content, n.title as title, n.filePath as filePath, n.startLine as startLine, n.endLine as endLine
 		LIMIT 1000
 	`, nodeType)
 
@@ -1465,30 +2253,44 @@ func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, em
 		}
 
 		batch := results[i:end]
-		var updates []search.NodeEmbeddingUpdate
 		var texts []string
+
+		type nodeInfo struct {
+			nodeId      string
+			nodeKey     string
+			name        string
+			signature   string
+			description string
+			filePath    string
+			startLine   int64
+			endLine     int64
+		}
+		var nodeInfos []nodeInfo
 
 		// Prepare texts for embedding
 		for _, record := range batch {
 			recordMap := record.AsMap()
 			nodeId, _ := recordMap["nodeId"].(string)
+			nodeKey, _ := recordMap["nodeKey"].(string)
 
 			// Build text for embedding based on available fields
 			var textParts []string
-			if name, ok := recordMap["name"].(string); ok && name != "" {
+			name, _ := recordMap["name"].(string)
+			if name != "" {
 				textParts = append(textParts, name)
 			}
 			if title, ok := recordMap["title"].(string); ok && title != "" {
 				textParts = append(textParts, title)
 			}
-			if signature, ok := recordMap["signature"].(string); ok && signature != "" {
+			signature, _ := recordMap["signature"].(string)
+			if signature != "" {
 				textParts = append(textParts, signature)
 			}
-			if description, ok := recordMap["description"].(string); ok && description != "" {
+			description, _ := recordMap["description"].(string)
+			if description != "" {
 				textParts = append(textParts, description)
 			}
 			if content, ok := recordMap["content"].(string); ok && content != "" {
-				// Truncate very long content
 				if len(content) > 500 {
 					content = content[:500] + "..."
 				}
@@ -1497,13 +2299,23 @@ func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, em
 
 			text := strings.Join(textParts, " | ")
 			if text == "" {
-				text = fmt.Sprintf("%s node", nodeType) // Fallback
+				text = fmt.Sprintf("%s node", nodeType)
 			}
 
+			filePath, _ := recordMap["filePath"].(string)
+			startLine, _ := recordMap["startLine"].(int64)
+			endLine, _ := recordMap["endLine"].(int64)
+
 			texts = append(texts, text)
-			updates = append(updates, search.NodeEmbeddingUpdate{
-				NodeId:    nodeId,
-				Embedding: nil, // Will be filled after generation
+			nodeInfos = append(nodeInfos, nodeInfo{
+				nodeId:      nodeId,
+				nodeKey:     nodeKey,
+				name:        name,
+				signature:   signature,
+				description: description,
+				filePath:    filePath,
+				startLine:   startLine,
+				endLine:     endLine,
 			})
 		}
 
@@ -1514,15 +2326,43 @@ func populateEmbeddingsForNodeType(ctx context.Context, client *neo4j.Client, em
 			return processed, fmt.Errorf("failed to generate embeddings: %w", err)
 		}
 
-		// Fill in embeddings
+		// Upsert to Qdrant vector store.
+		var upserts []search.VectorUpsert
+		var embeddedNodeIds []string
 		for j, embedding := range embeddings {
-			updates[j].Embedding = embedding
+			info := nodeInfos[j]
+			id := info.nodeKey
+			if id == "" {
+				id = info.nodeId
+			}
+			upserts = append(upserts, search.VectorUpsert{
+				ID:        id,
+				Vector:    embedding,
+				NodeLabel: nodeType,
+				Metadata: map[string]any{
+					"name":        info.name,
+					"signature":   info.signature,
+					"description": info.description,
+					"filePath":    info.filePath,
+					"startLine":   fmt.Sprintf("%d", info.startLine),
+					"endLine":     fmt.Sprintf("%d", info.endLine),
+				},
+			})
+			embeddedNodeIds = append(embeddedNodeIds, info.nodeId)
+		}
+		fmt.Printf("   Upserting %d vectors to Qdrant...\n", len(upserts))
+		if err := vectorStore.UpsertVectors(ctx, upserts); err != nil {
+			return processed, fmt.Errorf("failed to upsert vectors: %w", err)
 		}
 
-		// Update Neo4j
-		fmt.Printf("   Updating Neo4j with embeddings...\n")
-		if err := vectorSearch.BatchUpdateEmbeddings(ctx, updates); err != nil {
-			return processed, fmt.Errorf("failed to update embeddings: %w", err)
+		// Mark nodes as embedded in Neo4j so they're skipped on re-runs.
+		stampQuery := `
+			UNWIND $ids AS id
+			MATCH (n) WHERE elementId(n) = id
+			SET n.embeddedAt = datetime()
+		`
+		if _, err := client.ExecuteQuery(ctx, stampQuery, map[string]any{"ids": embeddedNodeIds}); err != nil {
+			fmt.Printf("   Warning: failed to stamp embeddedAt: %v\n", err)
 		}
 
 		processed += len(batch)
@@ -1542,6 +2382,7 @@ func init() {
 	indexCmd.AddCommand(indexSCIPCmd)
 	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
+	indexDocsCmd.AddCommand(docsSyncCmd)
 	indexCmd.AddCommand(indexTombstoneCmd)
 
 	// Flags for project command
@@ -1562,10 +2403,22 @@ func init() {
 	indexSCIPCmd.Flags().StringP("language", "l", "", fmt.Sprintf("Language to index (supported: %s). If not specified, language will be auto-detected", static.FormatLanguageList()))
 	indexSCIPCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexSCIPCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+	indexSCIPCmd.Flags().Bool("no-auto-install", false, "Skip automatic SCIP indexer installation (fail if not found)")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexDocsCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+
+	// Flags for docs sync command
+	docsSyncCmd.Flags().String("source", "", "Document source (e.g., 'confluence')")
+	docsSyncCmd.Flags().String("space", "", "Space/collection to sync (e.g., Confluence space key)")
+	docsSyncCmd.Flags().String("url", "", "Single document URL to sync")
+	docsSyncCmd.Flags().String("doc-id", "", "Single document ID to sync")
+	docsSyncCmd.Flags().String("base-url", "", "Base URL of the document source API")
+	docsSyncCmd.Flags().String("username", "", "Username for authentication")
+	docsSyncCmd.Flags().String("api-token", "", "API token for authentication")
+	docsSyncCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
+	docsSyncCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
 
 	// Flags for tombstone command
 	indexTombstoneCmd.Flags().String("scope", "pr", "Scope for tombstone creation (must be 'pr')")
@@ -1579,14 +2432,34 @@ func init() {
 	// Query subcommands
 	queryCmd.AddCommand(querySearchCmd)
 	queryCmd.AddCommand(querySourceCmd)
+	queryCmd.AddCommand(queryDepsCmd)
+	queryCmd.AddCommand(queryFlowsCmd)
 
 	// Query flags
 	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
+	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
+	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
+	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
+
+	// Flow flags
+	queryFlowsCmd.Flags().Bool("generate", false, "Generate flow spines from API endpoints")
+	queryFlowsCmd.Flags().Int("max-depth", 2, "Maximum call graph traversal depth")
+	queryFlowsCmd.Flags().String("type", "", "Filter by flow type (api, consumer, cron)")
+	queryFlowsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware flows")
 
 	// Benchmark subcommands
 	benchmarkCmd.AddCommand(benchmarkMemoryCmd)
 	benchmarkCmd.AddCommand(benchmarkFullCmd)
 	benchmarkCmd.AddCommand(benchmarkIncrementalCmd)
+	benchmarkCmd.AddCommand(benchmarkPipelineCmd)
+
+	// Benchmark pipeline flags
+	benchmarkPipelineCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkPipelineCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	benchmarkPipelineCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkPipelineCmd.Flags().StringP("language", "l", "", "Language to index (auto-detected if not specified)")
+	benchmarkPipelineCmd.Flags().Bool("pprof", false, "Write CPU profile to cpu.prof")
+	benchmarkPipelineCmd.Flags().Bool("json", false, "Output results as JSON instead of table")
 
 	// Benchmark flags
 	benchmarkMemoryCmd.Flags().StringP("service", "s", "", "Service name")
@@ -1610,12 +2483,15 @@ func init() {
 	searchCmd.AddCommand(searchInfoCmd)
 	searchCmd.AddCommand(searchEmbedCmd)
 	searchCmd.AddCommand(searchCommentCmd)
+	searchCmd.AddCommand(searchEnrichCmd)
 
 	// Search flags
 	searchTestCmd.Flags().IntP("limit", "l", 10, "Limit search results")
 	searchTestCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
+	searchTestCmd.Flags().String("base-url", "", "Base URL for embedding API (e.g., https://api.openai.com/v1)")
 	searchTestCmd.Flags().String("model", "gemini-embedding-001", "Embedding model to use")
 	searchTestCmd.Flags().Bool("gemini", false, "Use Google Gemini API (requires --api-key)")
+	searchTestCmd.Flags().Bool("fulltext-only", false, "Skip vector search (no API key required)")
 	searchEmbedCmd.Flags().IntP("batch-size", "b", 50, "Batch size for processing embeddings")
 	searchEmbedCmd.Flags().Bool("dry-run", false, "Show what would be processed without making changes")
 	searchEmbedCmd.Flags().String("api-key", "", "Embedding API key (for real embedding service)")
@@ -1679,6 +2555,43 @@ func createNeo4jClient() (*neo4j.Client, error) {
 	}
 
 	return neo4j.NewClient(config)
+}
+
+// createOpenSearchStore attempts to connect to OpenSearch and returns the store if reachable.
+// Returns nil, false if the endpoint is unreachable (callers fall back to Neo4j fulltext).
+func createOpenSearchStore() (*textindex.OpenSearchStore, bool) {
+	url := opensearchURL
+	if url == "" {
+		url = "http://localhost:9200"
+	}
+	index := opensearchIndex
+	if index == "" {
+		index = "codegraph"
+	}
+	store := textindex.NewOpenSearchStore(textindex.OpenSearchConfig{
+		BaseURL:   url,
+		IndexName: index,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := store.Ping(ctx); err != nil {
+		fmt.Printf("Warning: OpenSearch not reachable at %s (%v) — falling back to Neo4j fulltext\n", url, err)
+		return nil, false
+	}
+	return store, true
+}
+
+// createVectorStore creates a Qdrant-backed VectorStore.
+func createVectorStore() (search.VectorStore, error) {
+	url := viper.GetString("qdrant.url")
+	if url == "" {
+		url = "localhost:6334"
+	}
+	store, err := search.NewQdrantVectorStore(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Qdrant vector store at %s: %w", url, err)
+	}
+	return store, nil
 }
 
 // createLLMProvider creates an LLM provider from CLI flags and environment variables

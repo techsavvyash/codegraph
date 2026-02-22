@@ -1,6 +1,8 @@
 package documents
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +12,16 @@ import (
 
 	"github.com/context-maximiser/code-graph/pkg/models"
 )
+
+// ChunkMeta holds metadata for a document chunk produced by the parser.
+type ChunkMeta struct {
+	Content     string // The chunk text
+	HeadingPath string // Heading hierarchy, e.g. "Architecture > Components"
+	StartOffset int    // Byte offset in original document
+	EndOffset   int    // Byte offset end
+	ChunkIndex  int    // 0-based index within document
+	TextHash    string // SHA-256 hex of Content
+}
 
 // DocumentParser handles parsing and feature extraction from documents
 type DocumentParser struct {
@@ -38,7 +50,7 @@ func (dp *DocumentParser) ParseDocument(filePath string) (*models.Document, []*m
 		Content:   string(content),
 	}
 
-	// Extract features using simulated LLM processing
+	// Extract features (section headers) from the document
 	features, err := dp.extractFeatures(string(content), filePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to extract features: %w", err)
@@ -89,76 +101,136 @@ func (dp *DocumentParser) ChunkDocument(content string) []string {
 	return chunks
 }
 
-// extractFeatures simulates LLM-based feature extraction
-// In a real implementation, this would call an LLM API
+// ChunkDocumentWithMeta breaks a document into chunks with heading paths, offsets, and text hashes.
+func (dp *DocumentParser) ChunkDocumentWithMeta(content string) []ChunkMeta {
+	headingRe := regexp.MustCompile(`(?m)^(#{1,6})\s+(.+)$`)
+
+	// Split into paragraphs (double newline separated).
+	paragraphs := strings.Split(content, "\n\n")
+
+	var chunks []ChunkMeta
+	var currentText strings.Builder
+	wordCount := 0
+	chunkStart := 0 // byte offset of the start of the current chunk
+	bytePos := 0    // running byte offset
+	chunkIndex := 0
+
+	// Track heading stack: headings[0] = h1, headings[1] = h2, etc.
+	headings := make([]string, 6)
+
+	flushChunk := func() {
+		text := currentText.String()
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		h := sha256.Sum256([]byte(text))
+		chunks = append(chunks, ChunkMeta{
+			Content:     text,
+			HeadingPath: buildHeadingPath(headings),
+			StartOffset: chunkStart,
+			EndOffset:   chunkStart + len(text),
+			ChunkIndex:  chunkIndex,
+			TextHash:    hex.EncodeToString(h[:]),
+		})
+		chunkIndex++
+		currentText.Reset()
+		wordCount = 0
+	}
+
+	for i, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			// Account for the double-newline separator.
+			if i < len(paragraphs)-1 {
+				bytePos += 2
+			}
+			continue
+		}
+
+		// Check if this paragraph is/contains a heading and update the stack.
+		for _, line := range strings.Split(paragraph, "\n") {
+			if m := headingRe.FindStringSubmatch(line); m != nil {
+				level := len(m[1]) - 1 // 0-indexed
+				headings[level] = strings.TrimSpace(m[2])
+				// Clear deeper headings.
+				for j := level + 1; j < 6; j++ {
+					headings[j] = ""
+				}
+			}
+		}
+
+		paragraphWords := len(strings.Fields(paragraph))
+
+		// If adding this paragraph would exceed chunk size, flush.
+		if wordCount+paragraphWords > dp.chunkSize && currentText.Len() > 0 {
+			flushChunk()
+			chunkStart = bytePos
+		}
+
+		if currentText.Len() > 0 {
+			currentText.WriteString("\n\n")
+		}
+		currentText.WriteString(paragraph)
+		wordCount += paragraphWords
+
+		// Advance byte position past the paragraph + separator.
+		bytePos += len(paragraph)
+		if i < len(paragraphs)-1 {
+			bytePos += 2 // the \n\n separator
+		}
+	}
+
+	flushChunk()
+	return chunks
+}
+
+// buildHeadingPath joins non-empty heading levels with " > ".
+func buildHeadingPath(headings []string) string {
+	var parts []string
+	for _, h := range headings {
+		if h != "" {
+			parts = append(parts, h)
+		}
+	}
+	return strings.Join(parts, " > ")
+}
+
+// textHash returns the SHA-256 hex string of s.
+func textHash(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// extractFeatures extracts features from a document by identifying section headers.
+// Each non-generic markdown heading (h1–h3) becomes a Feature node that can be
+// queried and linked to code symbols.
 func (dp *DocumentParser) extractFeatures(content, filePath string) ([]*models.Feature, error) {
 	chunks := dp.ChunkDocument(content)
 	var allFeatures []*models.Feature
 
-	for i, chunk := range chunks {
-		features := dp.simulateLLMExtraction(chunk, filePath, i)
-		allFeatures = append(allFeatures, features...)
-	}
-
-	// Deduplicate and merge similar features
-	return dp.deduplicateFeatures(allFeatures), nil
-}
-
-// simulateLLMExtraction simulates what an LLM would extract from a text chunk
-// This is a simplified rule-based approach for demonstration
-func (dp *DocumentParser) simulateLLMExtraction(chunk, filePath string, chunkIndex int) []*models.Feature {
-	var features []*models.Feature
-
-	// Patterns to identify features
-	patterns := map[string]*regexp.Regexp{
-		"implementation": regexp.MustCompile(`(?i)implement(?:s|ing|ation)?\s+([A-Z][A-Za-z\s]+)`),
-		"feature":        regexp.MustCompile(`(?i)(?:feature|capability|functionality):\s*([A-Z][A-Za-z\s]+)`),
-		"requirement":    regexp.MustCompile(`(?i)(?:require(?:s|ment)?|must|should)\s+([A-Z][A-Za-z\s]+)`),
-		"api":           regexp.MustCompile(`(?i)(?:API|endpoint|route):\s*([A-Z][A-Za-z\s\/]+)`),
-		"service":       regexp.MustCompile(`(?i)(?:service|microservice):\s*([A-Z][A-Za-z\s\-]+)`),
-	}
-
-	// Extract features using patterns
-	for category, pattern := range patterns {
-		matches := pattern.FindAllStringSubmatch(chunk, -1)
-		for _, match := range matches {
-			if len(match) > 1 {
-				featureName := strings.TrimSpace(match[1])
-				if len(featureName) > 3 { // Filter out very short matches
-					feature := &models.Feature{
-						Name:        featureName,
-						Description: extractFeatureDescription(chunk, featureName),
-						Status:      inferFeatureStatus(chunk, featureName),
-						Priority:    "medium", // Default priority
-						Tags:        []string{category, strings.ToLower(inferDocumentType(filePath))},
-					}
-					features = append(features, feature)
-				}
-			}
-		}
-	}
-
-	// Extract section headers as features (for structured documents)
 	headerPattern := regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
-	headerMatches := headerPattern.FindAllStringSubmatch(chunk, -1)
-	for _, match := range headerMatches {
-		if len(match) > 1 {
-			headerText := strings.TrimSpace(match[1])
-			// Skip very generic headers
-			if !isGenericHeader(headerText) {
-				feature := &models.Feature{
-					Name:        headerText,
-					Description: fmt.Sprintf("Section: %s", headerText),
-					Status:      "documented",
-					Priority:    "medium",
-					Tags:        []string{"section", "documentation"},
-				}
-				features = append(features, feature)
+	docType := strings.ToLower(inferDocumentType(filePath))
+
+	for _, chunk := range chunks {
+		for _, match := range headerPattern.FindAllStringSubmatch(chunk, -1) {
+			if len(match) < 2 {
+				continue
 			}
+			headerText := strings.TrimSpace(match[1])
+			if isGenericHeader(headerText) {
+				continue
+			}
+			allFeatures = append(allFeatures, &models.Feature{
+				Name:        headerText,
+				Description: fmt.Sprintf("Section: %s", headerText),
+				Status:      "documented",
+				Priority:    "medium",
+				Tags:        []string{"section", docType},
+			})
 		}
 	}
 
-	return features
+	return dp.deduplicateFeatures(allFeatures), nil
 }
 
 // deduplicateFeatures removes similar features and merges them
@@ -240,49 +312,6 @@ func inferDocumentType(filePath string) string {
 	}
 }
 
-func extractFeatureDescription(chunk, featureName string) string {
-	// Try to find the sentence containing the feature name
-	sentences := strings.Split(chunk, ".")
-	for _, sentence := range sentences {
-		if strings.Contains(strings.ToLower(sentence), strings.ToLower(featureName)) {
-			return strings.TrimSpace(sentence) + "."
-		}
-	}
-	
-	// Fallback: return first 100 characters of chunk
-	if len(chunk) > 100 {
-		return chunk[:100] + "..."
-	}
-	return chunk
-}
-
-func inferFeatureStatus(chunk, featureName string) string {
-	lowerChunk := strings.ToLower(chunk)
-	
-	statusKeywords := map[string]string{
-		"completed":     "completed",
-		"done":          "completed",
-		"implemented":   "completed",
-		"finished":      "completed",
-		"in progress":   "in_progress",
-		"developing":    "in_progress",
-		"working":       "in_progress",
-		"todo":          "planned",
-		"planned":       "planned",
-		"future":        "planned",
-		"proposed":      "proposed",
-		"deprecated":    "deprecated",
-		"obsolete":      "deprecated",
-	}
-
-	for keyword, status := range statusKeywords {
-		if strings.Contains(lowerChunk, keyword) {
-			return status
-		}
-	}
-
-	return "documented"
-}
 
 func isGenericHeader(header string) bool {
 	genericHeaders := []string{

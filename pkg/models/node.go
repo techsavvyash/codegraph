@@ -20,8 +20,12 @@ const (
 	SymbolNode    NodeType = "Symbol"
 	APIRouteNode  NodeType = "APIRoute"
 	CommentNode   NodeType = "Comment"
-	DocumentNode  NodeType = "Document"
-	FeatureNode   NodeType = "Feature"
+	DocumentNode      NodeType = "Document"
+	DocumentChunkNode NodeType = "DocumentChunk"
+	FlowNode          NodeType = "Flow"
+	FeatureNode       NodeType = "Feature"
+	PullRequestNode   NodeType = "PullRequest"
+	GeneratedDocNode  NodeType = "GeneratedDoc"
 )
 
 // BaseNode represents common properties for all nodes
@@ -32,6 +36,9 @@ type BaseNode struct {
 	Props     map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
 	Scope     string            `json:"scope,omitempty" neo4j:"scope,omitempty"`
 	ScopeID   string            `json:"scopeId,omitempty" neo4j:"scopeId,omitempty"`
+	TenantID  string            `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
+	Repo      string            `json:"repo,omitempty" neo4j:"repo,omitempty"`
+	RepoID    string            `json:"repoId,omitempty" neo4j:"repoId,omitempty"`
 	CreatedAt time.Time         `json:"createdAt" neo4j:"createdAt"`
 	UpdatedAt time.Time         `json:"updatedAt" neo4j:"updatedAt"`
 }
@@ -185,6 +192,27 @@ type Document struct {
 	Content   string `json:"content" neo4j:"content"`
 }
 
+// DocumentChunk represents a chunk of a document for granular linking and incremental updates
+type DocumentChunk struct {
+	BaseNode
+	DocumentKey string `json:"documentKey" neo4j:"documentKey"`
+	ChunkIndex  int    `json:"chunkIndex" neo4j:"chunkIndex"`
+	HeadingPath string `json:"headingPath" neo4j:"headingPath"`
+	Content     string `json:"content" neo4j:"content"`
+	TextHash    string `json:"textHash" neo4j:"textHash"`
+	StartOffset int    `json:"startOffset" neo4j:"startOffset"`
+	EndOffset   int    `json:"endOffset" neo4j:"endOffset"`
+}
+
+// Flow represents a first-class execution flow (e.g., an API request path, consumer pipeline).
+type Flow struct {
+	BaseNode
+	Name           string `json:"name" neo4j:"name"`
+	EntrypointKey  string `json:"entrypointKey" neo4j:"entrypointKey"`
+	FlowType       string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
+	MaxDepth       int    `json:"maxDepth" neo4j:"maxDepth"`
+}
+
 // Feature represents a specific feature or capability
 type Feature struct {
 	BaseNode
@@ -193,6 +221,29 @@ type Feature struct {
 	Status      string   `json:"status" neo4j:"status"`
 	Priority    string   `json:"priority" neo4j:"priority"`
 	Tags        []string `json:"tags" neo4j:"tags"`
+}
+
+// PullRequest represents a pull request overlay in the graph.
+type PullRequest struct {
+	BaseNode
+	PRID        string `json:"prId" neo4j:"prId"`
+	Title       string `json:"title" neo4j:"title"`
+	Author      string `json:"author" neo4j:"author"`
+	BaseBranch  string `json:"baseBranch" neo4j:"baseBranch"`
+	HeadBranch  string `json:"headBranch" neo4j:"headBranch"`
+	Status      string `json:"status" neo4j:"status"` // open, merged, closed
+	Description string `json:"description" neo4j:"description"`
+}
+
+// GeneratedDoc represents auto-generated documentation stored as a knowledge unit.
+type GeneratedDoc struct {
+	BaseNode
+	Type       string `json:"type" neo4j:"type"`       // pr_summary, flow_summary, docstring_suggestion
+	Title      string `json:"title" neo4j:"title"`
+	Content    string `json:"content" neo4j:"content"`
+	Model      string `json:"model" neo4j:"model"`           // LLM model used
+	SourceType string `json:"sourceType" neo4j:"sourceType"` // What triggered generation
+	SourceKey  string `json:"sourceKey" neo4j:"sourceKey"`   // nodeKey of the source
 }
 
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
@@ -252,8 +303,24 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		return &Document{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
+	case DocumentChunkNode:
+		return &DocumentChunk{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case FlowNode:
+		return &Flow{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
 	case FeatureNode:
 		return &Feature{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case PullRequestNode:
+		return &PullRequest{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case GeneratedDocNode:
+		return &GeneratedDoc{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	default:

@@ -25,6 +25,50 @@ The platform consists of three main pipelines:
 2. **Incremental Indexing Pipeline**: Real-time updates using tree-sitter (planned)
 3. **Document Indexing Pipeline**: Integration with business documents and specifications (planned)
 
+## Quick Start (Monorepo)
+
+### Prerequisites
+
+- Go 1.24+
+- Docker
+- Node.js 20+ (for Nx task runner)
+
+### 1. Bootstrap the full platform
+
+```bash
+./tools/scripts/bootstrap.sh
+```
+
+This starts Neo4j + Qdrant + OpenSearch and builds the CLI.
+
+### 2. Run unit tests (no infra needed)
+
+```bash
+go test ./pkg/... ./libs/... ./test/...
+```
+
+### 3. Run with Nx task orchestration
+
+```bash
+# Build and test only what changed
+npx nx affected -t build,test
+
+# Build a specific app
+npx nx run cli-go:build
+
+# Run all integration tests
+npx nx run-many -t integration
+```
+
+### 4. Start the platform locally
+
+```bash
+docker compose -f infra/docker/compose.platform.yml up -d
+./bin/codegraph status
+```
+
+---
+
 ## 🚀 Quick Start
 
 ### One-Command Installation
