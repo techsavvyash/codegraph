@@ -295,7 +295,7 @@ func (s *IndexingTestSuite) verifyDocumentIndexing() {
 	}
 }
 
-func (s *IndexingTestSuite) TestCrossContextIntegration() {
+func (s *IndexingTestSuite) TestECrossContextIntegration() {
 	s.T().Log("Testing cross-context integration between code and documents")
 	
 	// Test cross-context queries

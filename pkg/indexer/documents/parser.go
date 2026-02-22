@@ -201,16 +201,15 @@ func textHash(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// extractFeatures extracts features from a document by identifying section headers.
-// Each non-generic markdown heading (h1–h3) becomes a Feature node that can be
-// queried and linked to code symbols.
+// extractFeatures extracts features from a document by identifying section headers
+// and named "Feature: X" / "Requirement: X" patterns with optional "- Status: Y" lines.
 func (dp *DocumentParser) extractFeatures(content, filePath string) ([]*models.Feature, error) {
-	chunks := dp.ChunkDocument(content)
 	var allFeatures []*models.Feature
-
-	headerPattern := regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
 	docType := strings.ToLower(inferDocumentType(filePath))
 
+	// 1. Heading-based features from markdown headers (h1-h3).
+	chunks := dp.ChunkDocument(content)
+	headerPattern := regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
 	for _, chunk := range chunks {
 		for _, match := range headerPattern.FindAllStringSubmatch(chunk, -1) {
 			if len(match) < 2 {
@@ -228,6 +227,39 @@ func (dp *DocumentParser) extractFeatures(content, filePath string) ([]*models.F
 				Tags:        []string{"section", docType},
 			})
 		}
+	}
+
+	// 2. Named features: lines like "Feature: X" or "Requirement: X" with optional
+	// "- Status: Y" in the following lines.
+	namedFeaturePattern := regexp.MustCompile(`(?i)^(?:Feature|Requirement|Capability|User Story):\s+(.+)$`)
+	statusPattern := regexp.MustCompile(`(?i)-\s+Status:\s+(.+)$`)
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		match := namedFeaturePattern.FindStringSubmatch(strings.TrimSpace(line))
+		if match == nil {
+			continue
+		}
+		name := strings.TrimSpace(match[1])
+		status := "documented"
+		// Scan the next lines (up to 10) for a "- Status:" entry.
+		for j := i + 1; j < len(lines) && j < i+10; j++ {
+			nextLine := strings.TrimSpace(lines[j])
+			if statusMatch := statusPattern.FindStringSubmatch(nextLine); statusMatch != nil {
+				status = strings.ToLower(strings.TrimSpace(statusMatch[1]))
+				break
+			}
+			// Stop scanning if we hit the next named feature block.
+			if namedFeaturePattern.MatchString(nextLine) {
+				break
+			}
+		}
+		allFeatures = append(allFeatures, &models.Feature{
+			Name:        name,
+			Description: fmt.Sprintf("Feature: %s", name),
+			Status:      status,
+			Priority:    "medium",
+			Tags:        []string{"feature", docType},
+		})
 	}
 
 	return dp.deduplicateFeatures(allFeatures), nil
