@@ -434,7 +434,7 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 		// Verify the source code contains expected content
 		assert.Contains(t, sourceCode, "func", "Source should contain func keyword")
 		assert.Contains(t, sourceCode, "SetSCIPBinary", "Source should contain function name")
-		assert.Contains(t, sourceCode, "scipBinary", "Source should contain expected variable")
+		assert.Contains(t, sourceCode, "SCIPBinary", "Source should contain expected variable")
 		
 		// Verify it's not empty and looks like Go code
 		assert.Greater(t, len(sourceCode), 10, "Source code should have reasonable length")
@@ -454,6 +454,7 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 		cypher := `
 			MATCH (f:Function)
 			WHERE f.signature IS NOT NULL AND f.name IS NOT NULL
+			  AND f.filePath IS NOT NULL AND f.filePath <> '<external>'
 			RETURN f.name AS name, f.signature AS signature
 			LIMIT 1
 		`

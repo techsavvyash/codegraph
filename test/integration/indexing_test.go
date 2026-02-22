@@ -44,20 +44,16 @@ func (s *IndexingTestSuite) SetupSuite() {
 	s.client = client
 	s.ctx = context.Background()
 
-	// Create test directory using os.MkdirTemp so the directory is guaranteed
-	// to exist regardless of the working directory during test execution.
-	var mkErr error
-	s.testDir, mkErr = os.MkdirTemp("", "codegraph-integration-*")
-	require.NoError(s.T(), mkErr, "Failed to create temp test directory")
+	// Use testing.T.TempDir() so the directory is auto-cleaned when the suite
+	// finishes and is guaranteed to exist for all test methods.
+	s.testDir = s.T().TempDir()
 	
 	// Setup test schema (clean slate)
 	s.setupTestSchema()
 }
 
 func (s *IndexingTestSuite) TearDownSuite() {
-	if s.testDir != "" {
-		os.RemoveAll(s.testDir)
-	}
+	// Note: s.testDir is managed by s.T().TempDir() — no manual cleanup needed.
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}
