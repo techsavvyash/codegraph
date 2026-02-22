@@ -139,8 +139,8 @@ func TestBasicNodeOperations(t *testing.T) {
 		"language":      "Go",
 		"version":       "v1.0.0",
 		"repositoryUrl": "https://github.com/test/test-service",
-		"createdAt":     time.Now(),
-		"updatedAt":     time.Now(),
+		"createdAt":     time.Now().UTC(),
+		"updatedAt":     time.Now().UTC(),
 	}
 
 	serviceID, err := client.CreateNode(ctx, []string{"Service"}, serviceProps)
@@ -155,8 +155,8 @@ func TestBasicNodeOperations(t *testing.T) {
 		"language":     "Go",
 		"hash":         "abc123",
 		"lineCount":    100,
-		"createdAt":    time.Now(),
-		"updatedAt":    time.Now(),
+		"createdAt":    time.Now().UTC(),
+		"updatedAt":    time.Now().UTC(),
 	}
 
 	fileID, err := client.CreateNode(ctx, []string{"File"}, fileProps)
