@@ -11,13 +11,13 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 
-	"github.com/context-maximiser/code-graph/pkg/indexer/generated"
-	"github.com/context-maximiser/code-graph/pkg/indexer/static"
-	"github.com/context-maximiser/code-graph/pkg/models"
-	"github.com/context-maximiser/code-graph/pkg/neo4j"
-	queryPkg "github.com/context-maximiser/code-graph/pkg/query"
-	"github.com/context-maximiser/code-graph/pkg/schema"
-	"github.com/context-maximiser/code-graph/pkg/search"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
+	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	queryPkg "github.com/context-maximiser/code-graph/libs/query-go"
+	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/libs/search-go"
 )
 
 // ---------------------------------------------------------------------------

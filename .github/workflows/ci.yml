@@ -48,7 +48,7 @@ jobs:
 
       - name: Unit tests
         # Exclude test/integration — those need Neo4j and run in the integration job
-        run: go test ./pkg/... ./libs/... ./test -count=1 -timeout 120s
+        run: go test ./libs/... ./test -count=1 -timeout 120s
 
       - name: Build
         run: make build

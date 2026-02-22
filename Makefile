@@ -15,10 +15,10 @@ install-deps: ## Install Go dependencies
 	go mod tidy
 
 build: ## Build the CLI application
-	go build -o bin/codegraph ./cmd/codegraph
+	go build -o bin/codegraph ./apps/cli
 
-build-server: ## Build the server application
-	go build -o bin/server ./cmd/server
+build-mcp: ## Build the MCP server
+	go build -o bin/codegraph-mcp ./apps/mcp-server-go
 
 test: ## Run tests
 	go test -v ./...
@@ -56,34 +56,34 @@ docker-clean: ## Clean up Docker containers and volumes
 
 # Neo4j operations
 neo4j-status: ## Check Neo4j connection status
-	go run ./cmd/codegraph status
+	go run ./apps/cli status
 
 neo4j-schema: ## Create Neo4j schema (constraints and indexes)
-	go run ./cmd/codegraph schema create
+	go run ./apps/cli schema create
 
 neo4j-schema-drop: ## Drop Neo4j schema
-	go run ./cmd/codegraph schema drop
+	go run ./apps/cli schema drop
 
 neo4j-schema-info: ## Show schema information
-	go run ./cmd/codegraph schema info
+	go run ./apps/cli schema info
 
 # Code indexing operations
 index-self: ## Index this project itself using AST parsing
-	go run ./cmd/codegraph index project . --service="context-maximiser" --version="v1.0.0"
+	go run ./apps/cli index project . --service="context-maximiser" --version="v1.0.0"
 
 index-self-scip: ## Index this project itself using SCIP (Go)
-	go run ./cmd/codegraph index scip . --service="context-maximiser" --version="v1.0.0"
+	go run ./apps/cli index scip . --service="context-maximiser" --version="v1.0.0"
 
 index-ts-example: ## Index a TypeScript project example
 	@echo "To index a TypeScript project:"
-	@echo "  go run ./cmd/codegraph index scip /path/to/ts/project --language=typescript --service=\"my-service\""
+	@echo "  go run ./apps/cli index scip /path/to/ts/project --language=typescript --service=\"my-service\""
 
 index-python-example: ## Index a Python project example
 	@echo "To index a Python project:"
-	@echo "  go run ./cmd/codegraph index scip /path/to/python/project --language=python --service=\"my-service\""
+	@echo "  go run ./apps/cli index scip /path/to/python/project --language=python --service=\"my-service\""
 
 query-example: ## Run example queries
-	go run ./cmd/codegraph query search "Client"
+	go run ./apps/cli query search "Client"
 
 # Development workflow
 dev-setup: docker-up install-deps neo4j-schema ## Set up development environment
@@ -106,10 +106,10 @@ generate: ## Run go generate
 
 # Release
 release-build: ## Build release binaries
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-linux-amd64 ./cmd/codegraph
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-darwin-amd64 ./cmd/codegraph
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/codegraph-darwin-arm64 ./cmd/codegraph
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-windows-amd64.exe ./cmd/codegraph
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-linux-amd64 ./apps/cli
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-darwin-amd64 ./apps/cli
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/codegraph-darwin-arm64 ./apps/cli
+	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-windows-amd64.exe ./apps/cli
 
 # Documentation
 docs-serve: ## Serve documentation locally
@@ -123,7 +123,7 @@ watch: ## Watch for changes and rebuild
 	air
 
 debug: ## Run with debug logging
-	DEBUG=true go run ./cmd/codegraph --verbose
+	DEBUG=true go run ./apps/cli --verbose
 
 # Quick development cycle
 dev: build index-self ## Build and index project with AST
