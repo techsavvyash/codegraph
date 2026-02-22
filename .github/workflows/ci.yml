@@ -47,7 +47,8 @@ jobs:
           fi
 
       - name: Unit tests
-        run: go test ./pkg/... ./libs/... ./test/... -count=1 -timeout 120s
+        # Exclude test/integration — those need Neo4j and run in the integration job
+        run: go test ./pkg/... ./libs/... ./test -count=1 -timeout 120s
 
       - name: Build
         run: make build
@@ -65,19 +66,10 @@ jobs:
         ports:
           - 7687:7687
         options: >-
-          --health-cmd "neo4j status"
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
           --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      qdrant:
-        image: qdrant/qdrant:v1.9.0
-        ports:
-          - 6333:6333
-        options: >-
-          --health-cmd "curl -f http://localhost:6333/readyz"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+          --health-timeout 10s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

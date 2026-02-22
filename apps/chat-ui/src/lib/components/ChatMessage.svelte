@@ -66,7 +66,7 @@
       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
       {@html html}
       {#if streaming}
-        <span class="cursor" aria-hidden="true" />
+        <span class="cursor" aria-hidden="true"></span>
       {/if}
     </div>
 
@@ -82,10 +82,6 @@
     gap: 11px;
     padding: 18px 0;
     animation: slide-in-up 160ms ease both;
-  }
-
-  .message + .message {
-    border-top: 1px solid var(--border-light);
   }
 
   .message.user {

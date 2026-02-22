@@ -22,7 +22,7 @@
   <header class="header">
     <div class="header-brand">
       <div class="brand-mark" aria-hidden="true">
-        <div class="mark-dot" />
+        <div class="mark-dot"></div>
       </div>
       <span class="brand-name">CodeGraph</span>
       <span class="brand-sep">/</span>
@@ -37,7 +37,7 @@
           </svg>
         </span>
       {:else}
-        <span class="status-idle" title="Ready" aria-label="Ready" />
+        <span class="status-idle" title="Ready" aria-label="Ready"></span>
       {/if}
 
       {#if $messages.length > 0}

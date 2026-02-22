@@ -50,11 +50,10 @@
       {placeholder}
       rows="1"
       autocomplete="off"
-      autocorrect="off"
       spellcheck="false"
       class="textarea"
       aria-label="Message input"
-    />
+    ></textarea>
     <button
       type="submit"
       class="send-btn"
