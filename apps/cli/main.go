@@ -399,25 +399,22 @@ The language will be auto-detected from the project structure, or you can specif
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
 
-		// Set up tri-store support (embedding + Qdrant + OpenSearch).
-		embeddingService, err := createEmbeddingServiceFromFlags(cmd)
-		if err != nil {
-			return fmt.Errorf("tri-store setup failed: %w", err)
+		// Optionally set up tri-store support (embedding + Qdrant + OpenSearch).
+		if embeddingService, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+			scipIndexer.SetEmbeddingService(embeddingService)
+			if vectorStore, err := createVectorStore(); err == nil {
+				defer vectorStore.(*search.QdrantVectorStore).Close()
+				scipIndexer.SetVectorStore(vectorStore)
+			} else {
+				fmt.Printf("Warning: Qdrant unavailable, skipping vector store: %v\n", err)
+			}
+			fmt.Println("🧠 Embedding service configured for tri-store indexing")
 		}
-		vectorStore, err := createVectorStore()
-		if err != nil {
-			return fmt.Errorf("Qdrant connection failed: %w", err)
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			scipIndexer.SetTextStore(osStore)
+			fmt.Println("📤 OpenSearch enabled for BM25 text indexing")
 		}
-		defer vectorStore.(*search.QdrantVectorStore).Close()
-		osStore, err := createOpenSearchStoreRequired()
-		if err != nil {
-			return fmt.Errorf("OpenSearch connection failed: %w", err)
-		}
-		defer osStore.Close()
-
-		scipIndexer.SetEmbeddingService(embeddingService)
-		scipIndexer.SetVectorStore(vectorStore)
-		scipIndexer.SetTextStore(osStore)
 
 		if languageFlag != "" {
 			// Single-language path: validate env, then index.

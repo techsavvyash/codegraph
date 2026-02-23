@@ -436,13 +436,20 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 			"--project-name", si.serviceName,
 			"--output", outputFile,
 		)
-		// If a virtual environment exists, point scip-python at it so it can
-		// enumerate installed packages for type resolution.
-		if venvPath := detectPythonVenv(absPath); venvPath != "" {
-			args = append(args, "--environment-path", venvPath)
-			fmt.Printf("Detected Python venv at %s\n", venvPath)
-		}
 		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
+		// If a venv exists, prepend its bin/ to PATH so scip-python can find pip/python.
+		if venvPath := detectPythonVenv(absPath); venvPath != "" {
+			fmt.Printf("Detected Python venv at %s\n", venvPath)
+			venvBin := filepath.Join(venvPath, "bin")
+			env := os.Environ()
+			for i, e := range env {
+				if strings.HasPrefix(e, "PATH=") {
+					env[i] = "PATH=" + venvBin + ":" + e[5:]
+					break
+				}
+			}
+			cmd.Env = env
+		}
 	case LanguagePHP:
 		// scip-php generates index.scip in current directory
 		// We need to specify the source directory
@@ -478,8 +485,8 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 }
 
 // detectPythonVenv returns the path to a Python virtual environment inside
-// projectPath if one exists and contains a usable pip or python binary.
-// It checks the common venv directory names: .venv, venv, .env, env.
+// projectPath if one exists. It checks the common venv directory names and
+// confirms by looking for a pyvenv.cfg file or python/pip binaries.
 func detectPythonVenv(projectPath string) string {
 	candidates := []string{".venv", "venv", ".env", "env"}
 	for _, dir := range candidates {
@@ -488,8 +495,12 @@ func detectPythonVenv(projectPath string) string {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		// Require at least a pip or python binary to confirm it's a real venv.
-		for _, bin := range []string{"bin/pip", "bin/pip3", "bin/python", "bin/python3"} {
+		// pyvenv.cfg is the most reliable marker for a Python venv.
+		if _, err := os.Stat(filepath.Join(venvPath, "pyvenv.cfg")); err == nil {
+			return venvPath
+		}
+		// Fallback: check for any python or pip binary.
+		for _, bin := range []string{"bin/python", "bin/python3", "bin/pip", "bin/pip3"} {
 			if _, err := os.Stat(filepath.Join(venvPath, bin)); err == nil {
 				return venvPath
 			}
