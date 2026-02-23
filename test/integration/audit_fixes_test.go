@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
@@ -1432,6 +1434,118 @@ func TestContextGenerator_ListGeneratedDocs(t *testing.T) {
 		if title, _ := d["title"].(string); title == "Test Summary" {
 			t.Error("should NOT find pr-300's doc from pr-999 scope")
 		}
+	}
+}
+
+// ===========================================================================
+// Phase 0: Overlay-Aware Hybrid Retrieval — Guardrail Tests
+// ===========================================================================
+
+// TestOverlayAware_HybridRetrieval_ScopeFiltering verifies that hybrid search
+// respects scope boundaries: querying with a scopeId returns the overlay version,
+// tombstoned nodes are hidden, and no cross-scope bleed occurs.
+// This test exercises the Neo4j semantic search path (graph-based) since
+// vector/text stores require external services.
+func TestOverlayAware_HybridRetrieval_ScopeFiltering(t *testing.T) {
+	prefix := "phase0-hybrid-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create same-name Function in main and pr-42 scopes with different content.
+	sharedNodeKey := prefix + "func:pkg/handler.go#ProcessPayment(...)"
+
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": sharedNodeKey, "scopeId": "main"},
+		map[string]any{
+			"name": "ProcessPayment", "nodeKey": sharedNodeKey,
+			"signature": "ProcessPayment(amount float64) error",
+			"sourceCode": "func ProcessPayment(amount float64) error { return nil }",
+			"scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err)
+
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": sharedNodeKey, "scopeId": "pr-42"},
+		map[string]any{
+			"name": "ProcessPayment", "nodeKey": sharedNodeKey,
+			"signature": "ProcessPayment(amount float64, currency string) error",
+			"sourceCode": "func ProcessPayment(amount float64, currency string) error { return nil }",
+			"scope": "pr", "scopeId": "pr-42",
+		})
+	require.NoError(t, err)
+
+	// Create a main-scope Function that should be tombstoned in pr-42.
+	tombNodeKey := prefix + "func:pkg/legacy.go#OldPayment(...)"
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": tombNodeKey, "scopeId": "main"},
+		map[string]any{
+			"name": "OldPayment", "nodeKey": tombNodeKey,
+			"scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err)
+
+	tombKey := prefix + fmt.Sprintf("tombstone:pr-42:%s", tombNodeKey)
+	_, err = client.MergeNode(ctx, []string{"Tombstone"},
+		map[string]any{"nodeKey": tombKey, "scopeId": "pr-42"},
+		map[string]any{
+			"nodeKey": tombKey, "targetNodeKey": tombNodeKey,
+			"scope": "pr", "scopeId": "pr-42",
+		})
+	require.NoError(t, err)
+
+	// Create a Function in pr-99 — should NOT be visible from pr-42 scope.
+	otherPRKey := prefix + "func:pkg/other.go#OtherPayment(...)"
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": otherPRKey, "scopeId": "pr-99"},
+		map[string]any{
+			"name": "OtherPayment", "nodeKey": otherPRKey,
+			"scope": "pr", "scopeId": "pr-99",
+		})
+	require.NoError(t, err)
+
+	// Use SearchNodesScoped to simulate scope-aware retrieval.
+	qb := neo4j.NewQueryBuilder(client)
+	results, err := qb.SearchNodesScoped(ctx, "Payment", []string{"Function"}, 0, "pr-42")
+	require.NoError(t, err)
+
+	// Collect result nodeKeys and scopeIds.
+	type resultInfo struct {
+		nodeKey string
+		scopeId string
+	}
+	var found []resultInfo
+	for _, r := range results {
+		m := r.AsMap()
+		if nodeObj, ok := m["n"].(dbtype.Node); ok {
+			nk, _ := nodeObj.Props["nodeKey"].(string)
+			sid, _ := nodeObj.Props["scopeId"].(string)
+			found = append(found, resultInfo{nk, sid})
+		}
+	}
+
+	// ASSERTION 1: PR overlay version should be returned (not main).
+	hasOverlay := false
+	for _, f := range found {
+		if f.nodeKey == sharedNodeKey && f.scopeId == "pr-42" {
+			hasOverlay = true
+		}
+	}
+	assert.True(t, hasOverlay,
+		"expected pr-42 overlay version of ProcessPayment, got: %+v", found)
+
+	// ASSERTION 2: Tombstoned node should NOT appear.
+	for _, f := range found {
+		assert.NotEqual(t, tombNodeKey, f.nodeKey,
+			"tombstoned OldPayment should not appear in pr-42 scope")
+	}
+
+	// ASSERTION 3: Other PR's nodes should NOT bleed in.
+	for _, f := range found {
+		assert.NotEqual(t, "pr-99", f.scopeId,
+			"pr-99 nodes should not appear in pr-42 scope query")
 	}
 }
 

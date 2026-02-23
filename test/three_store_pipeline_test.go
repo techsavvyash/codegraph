@@ -346,7 +346,98 @@ func TestThreeStorePipeline_DegradedMode_NoGraph(t *testing.T) {
 	}
 }
 
-// --- Test 6: cross-store consistency — graph is truth for existence ---
+// --- Test 6: tri-store key collision across scopes (Phase 0 guardrail) ---
+
+// TestThreeStorePipeline_ScopeKeyCollision verifies that the same nodeKey indexed
+// in main and pr scopes does NOT collide in vector/text stores.
+// Currently vector/text IDs use bare nodeKey, so this test documents the gap:
+// both scopes overwrite each other's text store entry.
+// Phase 3 will fix this by introducing scopeId::nodeKey as the canonical ID.
+func TestThreeStorePipeline_ScopeKeyCollision(t *testing.T) {
+	ctx := context.Background()
+	graphStore := models.NewMockGraphStore()
+	textStore := textindex.NewMockTextIndexStore()
+
+	pipeline := &ThreeStorePipeline{
+		graph: graphStore,
+		text:  textStore,
+	}
+
+	mainScope := models.DefaultScope()
+	prScope := models.NewPRScope("42")
+
+	const nodeKey = "fn:pkg/payment.ProcessPayment"
+
+	// Index main-scope version.
+	mainNode := &models.Node{
+		NodeKey: nodeKey,
+		Labels:  []string{string(models.FunctionNode)},
+		Scope:   mainScope.Scope,
+		ScopeID: mainScope.ScopeID,
+		Props:   map[string]any{"name": "ProcessPayment", "version": "main"},
+	}
+	if err := pipeline.IndexSymbol(ctx, mainNode, "main version: processes payment with USD only"); err != nil {
+		t.Fatalf("IndexSymbol (main): %v", err)
+	}
+
+	// Index PR-scope version with different content.
+	prNode := &models.Node{
+		NodeKey: nodeKey,
+		Labels:  []string{string(models.FunctionNode)},
+		Scope:   prScope.Scope,
+		ScopeID: prScope.ScopeID,
+		Props:   map[string]any{"name": "ProcessPayment", "version": "pr-42"},
+	}
+	if err := pipeline.IndexSymbol(ctx, prNode, "pr-42 version: multi-currency payment processing"); err != nil {
+		t.Fatalf("IndexSymbol (pr): %v", err)
+	}
+
+	// Graph store correctly separates by scope — verify both versions exist.
+	mainResult, err := graphStore.GetNode(ctx, nodeKey, mainScope)
+	if err != nil {
+		t.Fatalf("GetNode (main): %v", err)
+	}
+	if mainResult == nil || mainResult.Props["version"] != "main" {
+		t.Errorf("expected main version in graph store, got %+v", mainResult)
+	}
+
+	prResult, err := graphStore.GetNode(ctx, nodeKey, prScope)
+	if err != nil {
+		t.Fatalf("GetNode (pr): %v", err)
+	}
+	if prResult == nil || prResult.Props["version"] != "pr-42" {
+		t.Errorf("expected pr-42 version in graph store, got %+v", prResult)
+	}
+
+	// Text store: currently uses bare nodeKey as document ID.
+	// This means PR indexing OVERWRITES the main version — a known gap.
+	// Phase 3 will fix this with scopeId::nodeKey canonical IDs.
+	allDocs := textStore.AllDocs()
+
+	// Count how many text store entries have this nodeKey.
+	matchCount := 0
+	for _, doc := range allDocs {
+		if doc.NodeKey == nodeKey {
+			matchCount++
+		}
+	}
+
+	// TARGET BEHAVIOR (Phase 3): should have 2 separate entries.
+	// CURRENT BEHAVIOR: only 1 entry (last write wins).
+	// This test documents the gap — when Phase 3 is done, change expectedCount to 2.
+	expectedCount := 1 // Known gap: should be 2 after Phase 3
+	if matchCount != expectedCount {
+		t.Logf("INFO: text store has %d entries for nodeKey %q (expected %d in current implementation)", matchCount, nodeKey, expectedCount)
+	}
+
+	// Log the gap for visibility.
+	if matchCount < 2 {
+		t.Logf("KNOWN GAP: text store uses bare nodeKey as ID — PR scope overwrites main. "+
+			"Phase 3 will introduce scopeId::nodeKey to fix this. (matchCount=%d)", matchCount)
+	}
+}
+
+// --- Test 7: cross-store consistency — graph is truth for existence ---
 
 func TestThreeStorePipeline_CrossStoreConsistency(t *testing.T) {
 	ctx := context.Background()

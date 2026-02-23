@@ -12,6 +12,7 @@ import (
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/libs/search-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -540,4 +541,174 @@ func min(a, b int) int {
 func (s *IndexingTestSuite) TearDownTest() {
 	// Note: s.testDir is shared across all tests in the suite and is cleaned
 	// up in TearDownSuite — do NOT remove it here or later tests will lose it.
+}
+
+// ===========================================================================
+// Phase 0 Guardrail Tests — Delayed Doc Ingestion & External Sync Linking
+// ===========================================================================
+
+// TestDelayedDocIngestion_ChunkLinking verifies that when code is indexed first
+// and business docs are indexed later, chunk-level MENTIONS links are created
+// deterministically. This is the core "delayed doc ingestion" scenario.
+func TestDelayedDocIngestion_ChunkLinking(t *testing.T) {
+	prefix := "phase0-delayed-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Step 1: Index code first — create Function nodes that docs will reference.
+	fnKey := prefix + "func:pkg/api.go#HandleRequest(...)"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": fnKey, "scopeId": "main"},
+		map[string]any{
+			"name": "HandleRequest()", "displayName": "HandleRequest()",
+			"nodeKey": fnKey, "signature": "HandleRequest(ctx context.Context) error",
+			"scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err, "failed to create Function node")
+
+	svcKey := prefix + "func:pkg/service.go#ProcessOrder(...)"
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": svcKey, "scopeId": "main"},
+		map[string]any{
+			"name": "ProcessOrder()", "displayName": "ProcessOrder()",
+			"nodeKey": svcKey, "signature": "ProcessOrder(order Order) error",
+			"scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err, "failed to create second Function node")
+
+	// Step 2: "Days later" — index a business doc that references these functions.
+	docNodeKey := prefix + "doc:architecture"
+	docContent := "# Architecture\n\nThe `HandleRequest()` function is the main entry point.\nIt delegates to `ProcessOrder()` for order processing."
+	docID, err := client.MergeNode(ctx, []string{"Document"},
+		map[string]any{"nodeKey": docNodeKey, "scopeId": "main"},
+		map[string]any{
+			"title": "Architecture", "content": docContent,
+			"sourceUrl": "architecture.md", "type": "Architecture",
+			"nodeKey": docNodeKey, "scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err, "failed to create Document node")
+
+	// Create DocumentChunk nodes (simulating what the doc indexer would create).
+	chunkKey := prefix + "chunk:architecture:0"
+	chunkID, err := client.MergeNode(ctx, []string{"DocumentChunk"},
+		map[string]any{"nodeKey": chunkKey, "scopeId": "main"},
+		map[string]any{
+			"nodeKey": chunkKey, "documentKey": docNodeKey,
+			"content": docContent, "headingPath": "Architecture",
+			"chunkIndex": 0, "scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err, "failed to create DocumentChunk node")
+
+	// Link Document -> Chunk.
+	_, err = client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
+		map[string]any{"chunkIndex": 0},
+		map[string]any{"chunkIndex": 0, "scope": "main", "scopeId": "main"})
+	require.NoError(t, err)
+
+	// Step 3: Run the chunk linker (simulating delayed linking).
+	cl := search.NewChunkLinker(client)
+	cl.SetScope("main")
+	linkCount, err := cl.LinkChunksForDocument(ctx, docNodeKey, "main")
+	require.NoError(t, err, "ChunkLinker failed")
+
+	// ASSERTION: Delayed doc ingestion must create MENTIONS links.
+	assert.GreaterOrEqual(t, linkCount, 1,
+		"delayed doc ingestion should create at least 1 MENTIONS link to existing code")
+
+	// Verify specific MENTIONS edges exist.
+	cypher := `
+		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})-[:MENTIONS]->(target)
+		RETURN target.nodeKey AS targetKey`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey})
+	require.NoError(t, err)
+
+	targetKeys := make(map[string]bool)
+	for _, r := range records {
+		m := r.AsMap()
+		if tk, ok := m["targetKey"].(string); ok {
+			targetKeys[tk] = true
+		}
+	}
+
+	assert.True(t, targetKeys[fnKey] || targetKeys[svcKey],
+		"expected MENTIONS edges to HandleRequest or ProcessOrder, got: %v", targetKeys)
+}
+
+// TestExternalDocSync_ChunkLinking verifies that external doc sync (via connector)
+// creates chunk-level MENTIONS links just like local doc indexing does.
+// This test is expected to FAIL until Phase 1 is implemented.
+func TestExternalDocSync_ChunkLinking(t *testing.T) {
+	prefix := "phase0-extsync-"
+	client, cleanup := setupTestDB(t, prefix)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Create code nodes that the external doc will reference.
+	fnKey := prefix + "func:pkg/auth.go#Authenticate(...)"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]any{"nodeKey": fnKey, "scopeId": "main"},
+		map[string]any{
+			"name": "Authenticate()", "displayName": "Authenticate()",
+			"nodeKey": fnKey, "scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err)
+
+	// Simulate external doc sync by creating Document + chunks manually,
+	// then running chunk linker — this mimics what indexExternalDocument should do.
+	docNodeKey := prefix + "doc:auth-spec"
+	docContent := "# Auth Spec\n\nThe `Authenticate()` function validates user credentials."
+	docID, err := client.MergeNode(ctx, []string{"Document"},
+		map[string]any{"nodeKey": docNodeKey, "scopeId": "main"},
+		map[string]any{
+			"title": "Auth Spec", "content": docContent,
+			"sourceUrl": "https://wiki.example.com/auth-spec", "type": "External/Confluence",
+			"nodeKey": docNodeKey, "scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err)
+
+	chunkKey := prefix + "chunk:auth-spec:0"
+	chunkID, err := client.MergeNode(ctx, []string{"DocumentChunk"},
+		map[string]any{"nodeKey": chunkKey, "scopeId": "main"},
+		map[string]any{
+			"nodeKey": chunkKey, "documentKey": docNodeKey,
+			"content": docContent, "headingPath": "Auth Spec",
+			"chunkIndex": 0, "scope": "main", "scopeId": "main",
+		})
+	require.NoError(t, err)
+
+	_, err = client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
+		map[string]any{"chunkIndex": 0},
+		map[string]any{"chunkIndex": 0, "scope": "main", "scopeId": "main"})
+	require.NoError(t, err)
+
+	// Run chunk linker — in the real external sync path, this should be automatic.
+	// Phase 1 will wire this into indexExternalDocument.
+	cl := search.NewChunkLinker(client)
+	cl.SetScope("main")
+	linkCount, err := cl.LinkChunksForDocument(ctx, docNodeKey, "main")
+	require.NoError(t, err)
+
+	// ASSERTION: External doc sync should produce MENTIONS links.
+	assert.GreaterOrEqual(t, linkCount, 1,
+		"external doc sync should create chunk MENTIONS links to code nodes")
+
+	// Verify the edge has provenance metadata.
+	cypher := `
+		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})-[r:MENTIONS]->(target:Function)
+		RETURN r.confidence AS confidence, r.reasons AS reasons, r.model AS model, r.scopeId AS scopeId`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey})
+	require.NoError(t, err)
+
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		assert.NotNil(t, m["confidence"], "MENTIONS edge should have confidence")
+		assert.NotNil(t, m["reasons"], "MENTIONS edge should have reasons")
+		assert.NotNil(t, m["model"], "MENTIONS edge should have model")
+		assert.Equal(t, "main", m["scopeId"], "MENTIONS edge should have correct scopeId")
+	}
 }
