@@ -8,6 +8,7 @@ import (
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
+	"github.com/context-maximiser/code-graph/libs/query-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
 )
 
@@ -59,11 +60,14 @@ func (s *GenerateFlowSpinesStage) Name() StageName { return StageGenerateFlowSpi
 func (s *GenerateFlowSpinesStage) Optional() bool  { return true }
 
 func (s *GenerateFlowSpinesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
-	// Flow spine generation detects HTTP handlers, event processors, etc.
-	// and expands bounded call graphs from those entrypoints.
-	// Full implementation in Phase 5; this stage is a placeholder.
-	log.Printf("[GenerateFlowSpines] Flow spine generation (Phase 5 placeholder)")
-	return 0, nil
+	gen := query.NewFlowSpineGenerator(cfg.Client)
+	gen.SetScope(cfg.ScopeCtx)
+
+	results, err := gen.GenerateFromAPIEndpoints(ctx, 3)
+	if err != nil {
+		return 0, fmt.Errorf("GenerateFlowSpines: %w", err)
+	}
+	return len(results), nil
 }
 
 // --- Stage 4: IngestDocuments ---
@@ -124,12 +128,14 @@ func (s *LinkDocumentChunksStage) Run(ctx context.Context, cfg *PipelineConfig) 
 	}
 
 	totalLinks := 0
+	docKeys := make([]string, 0)
 	for _, r := range records {
 		m := r.AsMap()
 		nk, _ := m["nodeKey"].(string)
 		if nk == "" {
 			continue
 		}
+		docKeys = append(docKeys, nk)
 		n, linkErr := cl.LinkChunksForDocument(ctx, nk, cfg.ScopeCtx.ScopeID)
 		if linkErr != nil {
 			log.Printf("Warning: chunk linking failed for %s: %v", nk, linkErr)
@@ -137,6 +143,19 @@ func (s *LinkDocumentChunksStage) Run(ctx context.Context, cfg *PipelineConfig) 
 		}
 		totalLinks += n
 	}
+
+	// Flow-aware linking: create MENTIONS edges from chunks to Flow nodes.
+	fl := search.NewFlowLinker(cfg.Client)
+	fl.SetScope(cfg.ScopeCtx.ScopeID)
+	for _, dk := range docKeys {
+		n, err := fl.LinkFlowsForDocument(ctx, dk)
+		if err != nil {
+			log.Printf("Warning: flow linking failed for %s: %v", dk, err)
+			continue
+		}
+		totalLinks += n
+	}
+
 	return totalLinks, nil
 }
 
