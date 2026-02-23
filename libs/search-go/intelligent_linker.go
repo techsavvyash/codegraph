@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
@@ -19,6 +18,15 @@ type IntelligentDocumentLinker struct {
 	semanticAnalyzer *SemanticDocumentAnalyzer
 	vectorStore      VectorStore
 	hybridSearch     *HybridSearchManager
+	scopeID          string // Scope filter for target node lookup
+}
+
+// SetScope sets the scope ID used for target node lookups and relationship creation.
+func (idl *IntelligentDocumentLinker) SetScope(scopeID string) {
+	if scopeID == "" {
+		scopeID = "main"
+	}
+	idl.scopeID = scopeID
 }
 
 // NewIntelligentDocumentLinker creates a new intelligent document linker
@@ -28,12 +36,13 @@ func NewIntelligentDocumentLinker(client *neo4j.Client, embeddingService Embeddi
 		semanticAnalyzer: NewSemanticDocumentAnalyzer(embeddingService),
 		vectorStore:      vectorStore,
 		hybridSearch:     NewHybridSearchManager(client, embeddingService, vectorStore),
+		scopeID:          "main",
 	}
 }
 
 // CodeMatch represents a potential match between document and code
 type CodeMatch struct {
-	NodeID         string   `json:"nodeId"`
+	NodeKey        string   `json:"nodeKey"`
 	NodeType       string   `json:"nodeType"`
 	Name           string   `json:"name"`
 	Signature      string   `json:"signature,omitempty"`
@@ -112,15 +121,18 @@ func (idl *IntelligentDocumentLinker) findDirectMatches(ctx context.Context, con
 
 	for _, symbol := range symbols {
 		cypher := `
-			MATCH (n:Function|Method|Class)
-			WHERE n.name = $symbol OR n.displayName = $symbol
-			RETURN n.id AS id, labels(n)[0] AS type, n.name AS name,
+			MATCH (n)
+			WHERE (n:Function OR n:Method OR n:Class)
+			AND (n.name = $symbol OR n.displayName = $symbol)
+			AND (n.scopeId = $scopeId OR n.scopeId = 'main')
+			RETURN n.nodeKey AS nodeKey, labels(n)[0] AS type, n.name AS name,
 				   n.signature AS signature, n.filePath AS filePath
 			LIMIT 5
 		`
 
 		results, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"symbol": symbol,
+			"symbol":  symbol,
+			"scopeId": idl.scopeID,
 		})
 		if err != nil {
 			continue
@@ -128,14 +140,18 @@ func (idl *IntelligentDocumentLinker) findDirectMatches(ctx context.Context, con
 
 		for _, record := range results {
 			recordMap := record.AsMap()
+			nk := getStringValue(recordMap, "nodeKey")
+			if nk == "" {
+				continue
+			}
 			matches = append(matches, CodeMatch{
-				NodeID:       recordMap["id"].(string),
-				NodeType:     recordMap["type"].(string),
-				Name:         recordMap["name"].(string),
-				Signature:    getStringValue(recordMap, "signature"),
-				FilePath:     getStringValue(recordMap, "filePath"),
-				Confidence:   1.0, // Direct matches have highest confidence
-				MatchReasons: []string{"direct_reference"},
+				NodeKey:        nk,
+				NodeType:       getStringValue(recordMap, "type"),
+				Name:           getStringValue(recordMap, "name"),
+				Signature:      getStringValue(recordMap, "signature"),
+				FilePath:       getStringValue(recordMap, "filePath"),
+				Confidence:     1.0, // Direct matches have highest confidence
+				MatchReasons:   []string{"direct_reference"},
 				CallGraphDepth: 0,
 			})
 		}
@@ -168,8 +184,12 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 					sig, _ := result.Metadata["signature"].(string)
 					fp, _ := result.Metadata["filePath"].(string)
 					nl, _ := result.Metadata["nodeLabel"].(string)
+					nk, _ := result.Metadata["nodeKey"].(string)
+					if nk == "" {
+						nk = result.ID
+					}
 					allMatches = append(allMatches, CodeMatch{
-						NodeID:         result.ID,
+						NodeKey:        nk,
 						NodeType:       nl,
 						Name:           name,
 						Signature:      sig,
@@ -193,14 +213,18 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 		for _, result := range hybridResults.Results {
 			confidence := idl.calculateHybridConfidence(result.CombinedScore, query, getStringValue(result.Node, "name"))
 			if confidence > 0.2 {
+				nk := getStringValue(result.Node, "nodeKey")
+				if nk == "" {
+					continue
+				}
 				allMatches = append(allMatches, CodeMatch{
-					NodeID:       getStringValue(result.Node, "id"),
-					NodeType:     strings.Join(result.Labels, ","),
-					Name:         getStringValue(result.Node, "name"),
-					Signature:    getStringValue(result.Node, "signature"),
-					FilePath:     getStringValue(result.Node, "filePath"),
-					Confidence:   confidence,
-					MatchReasons: []string{"hybrid_search", "query:" + query},
+					NodeKey:        nk,
+					NodeType:       strings.Join(result.Labels, ","),
+					Name:           getStringValue(result.Node, "name"),
+					Signature:      getStringValue(result.Node, "signature"),
+					FilePath:       getStringValue(result.Node, "filePath"),
+					Confidence:     confidence,
+					MatchReasons:   []string{"hybrid_search", "query:" + query},
 					CallGraphDepth: 0,
 				})
 			}
@@ -232,7 +256,7 @@ func (idl *IntelligentDocumentLinker) expandWithCallGraph(ctx context.Context, b
 		}
 
 		// Find functions called by this function (callees)
-		callees, err := idl.findCallees(ctx, match.NodeID, 2) // Max depth of 2
+		callees, err := idl.findCallees(ctx, match.NodeKey, 2) // Max depth of 2
 		if err == nil {
 			for _, callee := range callees {
 				confidence := match.Confidence * 0.7 * math.Pow(0.8, float64(callee.CallGraphDepth)) // Decay with depth
@@ -245,7 +269,7 @@ func (idl *IntelligentDocumentLinker) expandWithCallGraph(ctx context.Context, b
 		}
 
 		// Find functions that call this function (callers)
-		callers, err := idl.findCallers(ctx, match.NodeID, 2) // Max depth of 2
+		callers, err := idl.findCallers(ctx, match.NodeKey, 2) // Max depth of 2
 		if err == nil {
 			for _, caller := range callers {
 				confidence := match.Confidence * 0.6 * math.Pow(0.8, float64(caller.CallGraphDepth)) // Slightly lower confidence for callers
@@ -262,17 +286,21 @@ func (idl *IntelligentDocumentLinker) expandWithCallGraph(ctx context.Context, b
 }
 
 // findCallees finds functions called by the given function
-func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionID string, maxDepth int) ([]CodeMatch, error) {
+func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionNodeKey string, maxDepth int) ([]CodeMatch, error) {
 	cypher := `
-		MATCH (f:Function {id: $functionId})-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(callee:Function)
-		RETURN callee.id AS id, labels(callee)[0] AS type, callee.name AS name,
-			   callee.signature AS signature, callee.filePath AS filePath,
-			   length(()-[:CALLS*]->(callee)) AS depth
+		MATCH (f:Function {nodeKey: $nodeKey})
+		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
+		WITH f
+		MATCH (f)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(callee:Function)
+		WHERE callee.scopeId = $scopeId OR callee.scopeId = 'main'
+		RETURN callee.nodeKey AS nodeKey, labels(callee)[0] AS type, callee.name AS name,
+			   callee.signature AS signature, callee.filePath AS filePath
 		LIMIT 20
 	`
 
 	results, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"functionId": functionID,
+		"nodeKey": functionNodeKey,
+		"scopeId": idl.scopeID,
 	})
 	if err != nil {
 		return nil, err
@@ -281,18 +309,17 @@ func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionI
 	var matches []CodeMatch
 	for _, record := range results {
 		recordMap := record.AsMap()
-		depth := 0
-		if d, ok := recordMap["depth"].(int64); ok {
-			depth = int(d)
+		nk := getStringValue(recordMap, "nodeKey")
+		if nk == "" {
+			continue
 		}
-
 		matches = append(matches, CodeMatch{
-			NodeID:         recordMap["id"].(string),
-			NodeType:       recordMap["type"].(string),
-			Name:           recordMap["name"].(string),
+			NodeKey:        nk,
+			NodeType:       getStringValue(recordMap, "type"),
+			Name:           getStringValue(recordMap, "name"),
 			Signature:      getStringValue(recordMap, "signature"),
 			FilePath:       getStringValue(recordMap, "filePath"),
-			CallGraphDepth: depth,
+			CallGraphDepth: 1,
 		})
 	}
 
@@ -300,17 +327,21 @@ func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionI
 }
 
 // findCallers finds functions that call the given function
-func (idl *IntelligentDocumentLinker) findCallers(ctx context.Context, functionID string, maxDepth int) ([]CodeMatch, error) {
+func (idl *IntelligentDocumentLinker) findCallers(ctx context.Context, functionNodeKey string, maxDepth int) ([]CodeMatch, error) {
 	cypher := `
-		MATCH (caller:Function)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(f:Function {id: $functionId})
-		RETURN caller.id AS id, labels(caller)[0] AS type, caller.name AS name,
-			   caller.signature AS signature, caller.filePath AS filePath,
-			   length((caller)-[:CALLS*]->()) AS depth
+		MATCH (f:Function {nodeKey: $nodeKey})
+		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
+		WITH f
+		MATCH (caller:Function)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(f)
+		WHERE caller.scopeId = $scopeId OR caller.scopeId = 'main'
+		RETURN caller.nodeKey AS nodeKey, labels(caller)[0] AS type, caller.name AS name,
+			   caller.signature AS signature, caller.filePath AS filePath
 		LIMIT 20
 	`
 
 	results, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"functionId": functionID,
+		"nodeKey": functionNodeKey,
+		"scopeId": idl.scopeID,
 	})
 	if err != nil {
 		return nil, err
@@ -319,18 +350,17 @@ func (idl *IntelligentDocumentLinker) findCallers(ctx context.Context, functionI
 	var matches []CodeMatch
 	for _, record := range results {
 		recordMap := record.AsMap()
-		depth := 0
-		if d, ok := recordMap["depth"].(int64); ok {
-			depth = int(d)
+		nk := getStringValue(recordMap, "nodeKey")
+		if nk == "" {
+			continue
 		}
-
 		matches = append(matches, CodeMatch{
-			NodeID:         recordMap["id"].(string),
-			NodeType:       recordMap["type"].(string),
-			Name:           recordMap["name"].(string),
+			NodeKey:        nk,
+			NodeType:       getStringValue(recordMap, "type"),
+			Name:           getStringValue(recordMap, "name"),
 			Signature:      getStringValue(recordMap, "signature"),
 			FilePath:       getStringValue(recordMap, "filePath"),
-			CallGraphDepth: depth,
+			CallGraphDepth: 1,
 		})
 	}
 
@@ -345,7 +375,7 @@ func (idl *IntelligentDocumentLinker) consolidateMatches(directMatches, semantic
 	allMatches := [][]CodeMatch{directMatches, semanticMatches, callGraphMatches}
 	for _, matchGroup := range allMatches {
 		for _, match := range matchGroup {
-			if existing, exists := seen[match.NodeID]; exists {
+			if existing, exists := seen[match.NodeKey]; exists {
 				// Combine confidence scores (take the higher one)
 				if match.Confidence > existing.Confidence {
 					existing.Confidence = match.Confidence
@@ -355,7 +385,7 @@ func (idl *IntelligentDocumentLinker) consolidateMatches(directMatches, semantic
 			} else {
 				// Create copy to avoid modifying original
 				matchCopy := match
-				seen[match.NodeID] = &matchCopy
+				seen[match.NodeKey] = &matchCopy
 			}
 		}
 	}
@@ -383,14 +413,28 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 			continue
 		}
 
-		relProps := map[string]any{
-			"confidence":   match.Confidence,
-			"reasons":      match.MatchReasons,
-			"contextType":  "intelligent_linking",
+		cypher := `
+			MATCH (doc {nodeKey: $docKey})
+			WHERE doc.scopeId = $scopeId OR doc.scopeId = 'main'
+			WITH doc ORDER BY CASE WHEN doc.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
+			MATCH (target {nodeKey: $targetKey})
+			WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
+			WITH doc, target ORDER BY CASE WHEN target.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
+			MERGE (doc)-[r:MENTIONS]->(target)
+			SET r.confidence = $confidence,
+			    r.reasons = $reasons,
+			    r.contextType = 'intelligent_linking',
+			    r.callGraphDepth = $callGraphDepth
+			RETURN elementId(r) AS id
+		`
+		_, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
+			"docKey":         documentID,
+			"targetKey":      match.NodeKey,
+			"scopeId":        idl.scopeID,
+			"confidence":     match.Confidence,
+			"reasons":        match.MatchReasons,
 			"callGraphDepth": match.CallGraphDepth,
-		}
-
-		_, err := idl.client.CreateRelationship(ctx, documentID, match.NodeID, string(models.MentionsRel), relProps)
+		})
 		if err != nil {
 			log.Printf("Warning: failed to create MENTIONS relationship: %v", err)
 			continue
@@ -426,8 +470,8 @@ func (idl *IntelligentDocumentLinker) deduplicateMatches(matches []CodeMatch) []
 	var unique []CodeMatch
 
 	for _, match := range matches {
-		if !seen[match.NodeID] {
-			seen[match.NodeID] = true
+		if !seen[match.NodeKey] {
+			seen[match.NodeKey] = true
 			unique = append(unique, match)
 		}
 	}
