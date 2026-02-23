@@ -20,11 +20,9 @@ import (
 	_ "github.com/context-maximiser/code-graph/libs/llm-go/litellm"
 	_ "github.com/context-maximiser/code-graph/libs/llm-go/openai"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/context-maximiser/code-graph/libs/query-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -401,6 +399,26 @@ The language will be auto-detected from the project structure, or you can specif
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
 
+		// Set up tri-store support (embedding + Qdrant + OpenSearch).
+		embeddingService, err := createEmbeddingServiceFromFlags(cmd)
+		if err != nil {
+			return fmt.Errorf("tri-store setup failed: %w", err)
+		}
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return fmt.Errorf("Qdrant connection failed: %w", err)
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
+		osStore, err := createOpenSearchStoreRequired()
+		if err != nil {
+			return fmt.Errorf("OpenSearch connection failed: %w", err)
+		}
+		defer osStore.Close()
+
+		scipIndexer.SetEmbeddingService(embeddingService)
+		scipIndexer.SetVectorStore(vectorStore)
+		scipIndexer.SetTextStore(osStore)
+
 		if languageFlag != "" {
 			// Single-language path: validate env, then index.
 			noAutoInstall, _ := cmd.Flags().GetBool("no-auto-install")
@@ -493,6 +511,17 @@ var indexDocsCmd = &cobra.Command{
 			defer osStore.Close()
 			indexer.WithTextStore(osStore)
 			fmt.Println("📤 OpenSearch enabled — chunks will be indexed for BM25")
+		}
+
+		// Optionally wire vector store for embeddings + intelligent linking.
+		if embSvc, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+			if vs, err := createVectorStore(); err == nil {
+				defer vs.(*search.QdrantVectorStore).Close()
+				indexer.WithVectorStore(embSvc, vs)
+				fmt.Println("🧠 Vector store enabled — embeddings + intelligent linking active")
+			} else {
+				fmt.Printf("Warning: vector store unavailable, skipping embeddings: %v\n", err)
+			}
 		}
 
 		// Set scope if provided
@@ -699,6 +728,13 @@ var querySearchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		searchTerm := args[0]
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		// Set up tri-store hybrid search.
+		embeddingService, err := createEmbeddingServiceFromFlags(cmd)
+		if err != nil {
+			return fmt.Errorf("hybrid search setup failed: %w", err)
+		}
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -706,95 +742,106 @@ var querySearchCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		queryBuilder := neo4j.NewQueryBuilder(client)
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return fmt.Errorf("Qdrant connection failed: %w", err)
+		}
+		defer vectorStore.(*search.QdrantVectorStore).Close()
 
-		// Get limit from flags, 0 means no limit
-		limit, _ := cmd.Flags().GetInt("limit")
-		scopeID, _ := cmd.Flags().GetString("scope-id")
+		osStore, err := createOpenSearchStoreRequired()
+		if err != nil {
+			return fmt.Errorf("OpenSearch connection failed: %w", err)
+		}
+		defer osStore.Close()
+
+		hybridSearch := search.NewHybridSearchManager(client, embeddingService, vectorStore)
+		hybridSearch.WithTextStore(osStore)
 
 		ctx := context.Background()
-		nodeTypes := []string{"Function", "Method", "Class", "Variable", "File", "Symbol", "Document", "Feature"}
-
-		// Use overlay-aware search when scope-id is provided
-		var results []*neo4jdriver.Record
-		if scopeID != "" {
-			results, err = queryBuilder.SearchNodesScoped(ctx, searchTerm, nodeTypes, limit, scopeID)
-		} else {
-			results, err = queryBuilder.SearchNodes(ctx, searchTerm, nodeTypes, limit)
-		}
+		response, err := hybridSearch.UnifiedSearch(ctx, searchTerm, limit)
 		if err != nil {
-			return fmt.Errorf("failed to search: %w", err)
+			return fmt.Errorf("hybrid search failed: %w", err)
 		}
 
-		fmt.Printf("Search results for '%s':\n", searchTerm)
-		fmt.Println("========================")
+		// Display results using RRF-fused rendering.
+		fmt.Printf("\nSearch Results (%d total):\n", response.TotalResults)
+		fmt.Printf("Search Types: %v\n", response.SearchTypes)
+		fmt.Printf("Vector Results: %d | Full-Text Results: %d | Semantic Results: %d\n",
+			response.Metadata.VectorResults,
+			response.Metadata.FullTextResults,
+			response.Metadata.SemanticResults)
 
-		for _, record := range results {
-			recordMap := record.AsMap()
-			if nodeObj, ok := recordMap["n"]; ok {
-				// Handle Neo4j Node object
-				if node, ok := nodeObj.(dbtype.Node); ok {
-					props := node.Props
-					if labels, ok := recordMap["nodeLabels"].([]interface{}); ok {
-						// Handle different node types
-						var displayName string
-						var details []string
+		fmt.Println("\nResults:")
+		fmt.Println("---------")
 
-						switch labels[0].(string) {
-						case "File":
-							if path, ok := props["path"]; ok {
-								displayName = fmt.Sprintf("%s", path)
-								if lang, ok := props["language"]; ok {
-									details = append(details, fmt.Sprintf("Language: %s", lang))
-								}
-							}
-						case "Symbol":
-							if symbol, ok := props["symbol"]; ok {
-								displayName = fmt.Sprintf("%s", symbol)
-								if kind, ok := props["kind"]; ok {
-									details = append(details, fmt.Sprintf("Kind: %s", kind))
-								}
-							}
-						case "Document":
-							if title, ok := props["title"]; ok {
-								displayName = fmt.Sprintf("%s", title)
-								if docType, ok := props["type"]; ok {
-									details = append(details, fmt.Sprintf("Type: %s", docType))
-								}
-								if sourceUrl, ok := props["sourceUrl"]; ok {
-									details = append(details, fmt.Sprintf("Source: %s", sourceUrl))
-								}
-							}
-						case "Feature":
-							if name, ok := props["name"]; ok {
-								displayName = fmt.Sprintf("%s", name)
-								if desc, ok := props["description"]; ok && desc != "" {
-									details = append(details, fmt.Sprintf("Description: %s", desc))
-								}
-								if status, ok := props["status"]; ok {
-									details = append(details, fmt.Sprintf("Status: %s", status))
-								}
-							}
-						default:
-							if name, ok := props["name"]; ok {
-								displayName = fmt.Sprintf("%s", name)
-								if filePath, ok := props["filePath"]; ok {
-									details = append(details, fmt.Sprintf("File: %s", filePath))
-								}
-								if signature, ok := props["signature"]; ok && signature != "" {
-									details = append(details, fmt.Sprintf("Signature: %s", signature))
-								}
-							}
-						}
+		for i, result := range response.Results {
+			fmt.Printf("\n%d. ", i+1)
 
-						if displayName != "" {
-							fmt.Printf("- %s (%s)\n", displayName, labels[0])
-							for _, detail := range details {
-								fmt.Printf("  %s\n", detail)
-							}
-						}
-					}
+			name := ""
+			for _, field := range []string{"name", "title", "displayName", "signature", "symbol", "path"} {
+				if v, ok := result.Node[field].(string); ok && v != "" {
+					name = v
+					break
 				}
+			}
+			if name == "" {
+				if v, ok := result.Node["snippet"].(string); ok && v != "" {
+					name = v
+				} else if v, ok := result.Node["nodeKey"].(string); ok && v != "" {
+					name = v
+				} else {
+					name = "Unknown"
+				}
+			}
+			if len(name) > 80 {
+				name = name[:77] + "..."
+			}
+			fmt.Printf("**%s**", name)
+
+			labels := result.Labels
+			if len(labels) == 0 {
+				if nt, ok := result.Node["nodeType"].(string); ok && nt != "" {
+					labels = []string{nt}
+				}
+			}
+			if len(labels) > 0 {
+				fmt.Printf(" (%s)", strings.Join(labels, ", "))
+			}
+			fmt.Printf("\n   RRF Score: %.5f | Source: %s | Relevance: %s\n",
+				result.CombinedScore, result.Source, result.Relevance)
+
+			var scores []string
+			if result.VectorScore > 0 {
+				scores = append(scores, fmt.Sprintf("Vector: %.4f", result.VectorScore))
+			}
+			if result.FullTextScore > 0 {
+				scores = append(scores, fmt.Sprintf("BM25: %.2f", result.FullTextScore))
+			}
+			if result.SemanticScore > 0 {
+				scores = append(scores, fmt.Sprintf("Semantic: %.4f", result.SemanticScore))
+			}
+			if len(scores) > 0 {
+				fmt.Printf("   Raw scores: %s\n", strings.Join(scores, " | "))
+			}
+
+			if fp, ok := result.Node["filePath"].(string); ok && fp != "" {
+				loc := fp
+				if sl, ok := result.Node["startLine"]; ok {
+					loc = fmt.Sprintf("%s:%v", fp, sl)
+				}
+				fmt.Printf("   Location: %s\n", loc)
+			}
+
+			if description, ok := result.Node["description"].(string); ok && description != "" {
+				if len(description) > 120 {
+					description = description[:117] + "..."
+				}
+				fmt.Printf("   Description: %s\n", description)
+			} else if content, ok := result.Node["content"].(string); ok && content != "" {
+				if len(content) > 120 {
+					content = content[:117] + "..."
+				}
+				fmt.Printf("   Content: %s\n", content)
 			}
 		}
 
@@ -2403,10 +2450,18 @@ func init() {
 	indexSCIPCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexSCIPCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
 	indexSCIPCmd.Flags().Bool("no-auto-install", false, "Skip automatic SCIP indexer installation (fail if not found)")
+	indexSCIPCmd.Flags().String("embedding-api-key", "", "API key for embedding service (also reads EMBEDDING_API_KEY env)")
+	indexSCIPCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
+	indexSCIPCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	indexSCIPCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	indexDocsCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42'). Defaults to scope value if not set.")
+	indexDocsCmd.Flags().String("embedding-api-key", "", "API key for embedding service (also reads EMBEDDING_API_KEY env)")
+	indexDocsCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
+	indexDocsCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	indexDocsCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 
 	// Flags for docs sync command
 	docsSyncCmd.Flags().String("source", "", "Document source (e.g., 'confluence')")
@@ -2435,8 +2490,12 @@ func init() {
 	queryCmd.AddCommand(queryFlowsCmd)
 
 	// Query flags
-	querySearchCmd.Flags().IntP("limit", "l", 0, "Limit search results (0 = no limit)")
+	querySearchCmd.Flags().IntP("limit", "l", 10, "Limit search results")
 	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
+	querySearchCmd.Flags().String("embedding-api-key", "", "API key for embedding service (also reads EMBEDDING_API_KEY env)")
+	querySearchCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
+	querySearchCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	querySearchCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 
@@ -2578,6 +2637,52 @@ func createOpenSearchStore() (*textindex.OpenSearchStore, bool) {
 		return nil, false
 	}
 	return store, true
+}
+
+// createOpenSearchStoreRequired is like createOpenSearchStore but returns an error
+// instead of (nil, false) when OpenSearch is unreachable. It also calls EnsureIndex.
+func createOpenSearchStoreRequired() (*textindex.OpenSearchStore, error) {
+	url := opensearchURL
+	if url == "" {
+		url = "http://localhost:9200"
+	}
+	index := opensearchIndex
+	if index == "" {
+		index = "codegraph"
+	}
+	store := textindex.NewOpenSearchStore(textindex.OpenSearchConfig{
+		BaseURL:   url,
+		IndexName: index,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := store.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("OpenSearch not reachable at %s: %w", url, err)
+	}
+	return store, nil
+}
+
+// createEmbeddingServiceFromFlags parses embedding flags and returns the service.
+// Returns an error if no API key is provided.
+func createEmbeddingServiceFromFlags(cmd *cobra.Command) (search.EmbeddingService, error) {
+	apiKey, _ := cmd.Flags().GetString("embedding-api-key")
+	if apiKey == "" {
+		apiKey = os.Getenv("EMBEDDING_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("--embedding-api-key or EMBEDDING_API_KEY env var is required for tri-store indexing")
+	}
+	model, _ := cmd.Flags().GetString("embedding-model")
+	useGemini, _ := cmd.Flags().GetBool("embedding-gemini")
+	baseURL, _ := cmd.Flags().GetString("embedding-base-url")
+
+	if useGemini {
+		return search.NewGeminiEmbeddingService(apiKey, model), nil
+	}
+	if baseURL != "" {
+		return search.NewSimpleEmbeddingService(baseURL, apiKey, model), nil
+	}
+	return nil, fmt.Errorf("either --embedding-gemini or --embedding-base-url must be specified")
 }
 
 // createVectorStore creates a Qdrant-backed VectorStore.

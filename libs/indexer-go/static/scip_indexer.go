@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	"github.com/context-maximiser/code-graph/libs/search-go"
+	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 )
 
 // PipelineTimer is an optional interface for timing pipeline phases.
@@ -39,6 +41,12 @@ type SCIPIndexer struct {
 	scopeCtx         models.ScopeContext
 	timer            PipelineTimer
 	fileContentCache map[string][]byte // cache for calculateByteOffsets
+
+	// Tri-store support: secondary stores populated after Neo4j indexing.
+	embeddingService    search.EmbeddingService
+	vectorStore         search.VectorStore
+	textStore           textindex.TextIndexStore
+	skipSecondaryStores bool // true for sub-indexers in polyglot mode
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -204,12 +212,26 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		fmt.Println("Building call graph from SCIP references + Go AST...")
 		cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
 		cgBuilder.SetScope(si.scopeCtx)
+		cgBuilder.SetServiceName(si.serviceName)
 		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
 			fmt.Printf("Warning: call graph construction failed: %v\n", err)
 		}
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")
+	}
+
+	// Step 10b: Populate secondary stores (Qdrant + OpenSearch)
+	if !si.skipSecondaryStores && si.embeddingService != nil && si.vectorStore != nil {
+		if si.timer != nil {
+			si.timer.Start("Secondary stores")
+		}
+		fmt.Println("Populating secondary stores (Qdrant + OpenSearch)...")
+		si.ensureSecondaryStoreIndexes(ctx)
+		si.populateSecondaryStores(ctx)
+		if si.timer != nil {
+			si.timer.Stop(0, "")
+		}
 	}
 
 	// Step 11: Generate context for PR overlays (creates PullRequest node + PR summary)
@@ -326,11 +348,24 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 		if si.timer != nil {
 			sub.SetBenchmarkTimer(si.timer)
 		}
+		// Propagate tri-store clients but skip per-root population;
+		// we populate once after all roots are indexed.
+		sub.SetEmbeddingService(si.embeddingService)
+		sub.SetVectorStore(si.vectorStore)
+		sub.SetTextStore(si.textStore)
+		sub.skipSecondaryStores = true
 
 		if err := sub.IndexProject(ctx, r.Path); err != nil {
 			fmt.Printf("Warning: %s indexing at %s failed: %v\n", cfg.DisplayName, rel, err)
 			errs = append(errs, fmt.Errorf("%s@%s: %w", r.Language, rel, err))
 		}
+	}
+
+	// Populate secondary stores once after all roots are indexed.
+	if si.embeddingService != nil && si.vectorStore != nil {
+		fmt.Println("\nPopulating secondary stores (Qdrant + OpenSearch)...")
+		si.ensureSecondaryStoreIndexes(ctx)
+		si.populateSecondaryStores(ctx)
 	}
 
 	if len(errs) == len(roots) {
@@ -1095,6 +1130,21 @@ func (si *SCIPIndexer) SetScope(scope models.ScopeContext) {
 // When set, each phase of IndexProject() will be timed.
 func (si *SCIPIndexer) SetBenchmarkTimer(timer PipelineTimer) {
 	si.timer = timer
+}
+
+// SetEmbeddingService sets the embedding service for vector generation.
+func (si *SCIPIndexer) SetEmbeddingService(svc search.EmbeddingService) {
+	si.embeddingService = svc
+}
+
+// SetVectorStore sets the vector store for embedding storage.
+func (si *SCIPIndexer) SetVectorStore(store search.VectorStore) {
+	si.vectorStore = store
+}
+
+// SetTextStore sets the text index store for BM25 search.
+func (si *SCIPIndexer) SetTextStore(store textindex.TextIndexStore) {
+	si.textStore = store
 }
 
 // GetLanguage returns the language this indexer is configured for

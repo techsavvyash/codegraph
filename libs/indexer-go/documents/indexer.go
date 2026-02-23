@@ -24,6 +24,8 @@ type DocumentIndexer struct {
 	useIntelligentLinking bool
 	scopeCtx              models.ScopeContext
 	textStore             textindex.TextIndexStore
+	embeddingService      search.EmbeddingService
+	vectorStore           search.VectorStore
 }
 
 // NewDocumentIndexer creates a new document indexer
@@ -45,6 +47,16 @@ func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
 // WithTextStore sets an optional TextIndexStore for pushing chunks to OpenSearch (or any BM25 backend).
 func (di *DocumentIndexer) WithTextStore(ts textindex.TextIndexStore) *DocumentIndexer {
 	di.textStore = ts
+	return di
+}
+
+// WithVectorStore sets an embedding service and vector store for pushing
+// Document/Feature/DocumentChunk nodes to Qdrant. Also auto-enables
+// intelligent linking since both dependencies are satisfied.
+func (di *DocumentIndexer) WithVectorStore(es search.EmbeddingService, vs search.VectorStore) *DocumentIndexer {
+	di.embeddingService = es
+	di.vectorStore = vs
+	di.EnableIntelligentLinking(es, vs)
 	return di
 }
 
@@ -98,9 +110,40 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 			chunkStats.Total, chunkStats.Created, chunkStats.Unchanged, chunkStats.Updated)
 	}
 
+	// Push Document and Feature nodes to vector store (Qdrant) and text store (OpenSearch).
+	docNodeKey2 := models.DocumentNodeKey(doc.SourceURL)
+	var embedItems []embedItem
+	var textDocs []textindex.IndexDoc
+
+	docText := doc.Title + " " + doc.Content
+	if len(docText) > 2000 {
+		docText = docText[:2000]
+	}
+	embedItems = append(embedItems, embedItem{nodeKey: docNodeKey2, text: docText, label: "Document"})
+	textDocs = append(textDocs, textindex.IndexDoc{
+		NodeKey: docNodeKey2, Content: doc.Title + " " + doc.Content,
+		Metadata: map[string]string{"nodeType": "Document"},
+	})
+
+	for _, feature := range features {
+		fKey := models.FeatureNodeKey(feature.Name)
+		fText := feature.Name + " " + feature.Description
+		embedItems = append(embedItems, embedItem{nodeKey: fKey, text: fText, label: "Feature"})
+		textDocs = append(textDocs, textindex.IndexDoc{
+			NodeKey: fKey, Content: fText,
+			Metadata: map[string]string{"nodeType": "Feature"},
+		})
+	}
+
+	if err := di.embedNodes(ctx, embedItems); err != nil {
+		fmt.Printf("Warning: vector embedding for doc nodes failed: %v\n", err)
+	} else if len(embedItems) > 0 && di.embeddingService != nil {
+		fmt.Printf("Embedded %d doc/feature nodes into vector store\n", len(embedItems))
+	}
+	di.pushToTextStore(ctx, textDocs)
+
 	// Create chunk-level MENTIONS links with provenance.
 	if di.chunkLinker != nil {
-		docNodeKey2 := models.DocumentNodeKey(doc.SourceURL)
 		linkCount, err := di.chunkLinker.LinkChunksForDocument(ctx, docNodeKey2, di.scopeCtx.ScopeID)
 		if err != nil {
 			fmt.Printf("Warning: chunk-level linking failed: %v\n", err)
@@ -330,6 +373,73 @@ func (di *DocumentIndexer) linkToCodeSymbols(ctx context.Context, docID string, 
 	return di.simpleLinkToCodeSymbols(ctx, docID, content)
 }
 
+// embedItem holds the data needed to embed a single node into the vector store.
+type embedItem struct {
+	nodeKey string
+	text    string
+	label   string
+}
+
+// embedNodes generates embeddings for a batch of nodes and upserts them into
+// Qdrant. It also stamps embeddedAt in Neo4j so nodes are skipped on re-runs.
+func (di *DocumentIndexer) embedNodes(ctx context.Context, items []embedItem) error {
+	if di.embeddingService == nil || di.vectorStore == nil || len(items) == 0 {
+		return nil
+	}
+
+	texts := make([]string, len(items))
+	for i, it := range items {
+		texts[i] = it.text
+	}
+
+	embeddings, err := di.embeddingService.GenerateBatchEmbeddings(ctx, texts)
+	if err != nil {
+		return fmt.Errorf("failed to generate embeddings: %w", err)
+	}
+
+	var upserts []search.VectorUpsert
+	for i, emb := range embeddings {
+		upserts = append(upserts, search.VectorUpsert{
+			ID:        items[i].nodeKey,
+			Vector:    emb,
+			NodeLabel: items[i].label,
+			Metadata: map[string]any{
+				"name": items[i].nodeKey,
+			},
+		})
+	}
+
+	if err := di.vectorStore.UpsertVectors(ctx, upserts); err != nil {
+		return fmt.Errorf("failed to upsert vectors: %w", err)
+	}
+
+	// Stamp embeddedAt in Neo4j.
+	nodeKeys := make([]string, len(items))
+	for i, it := range items {
+		nodeKeys[i] = it.nodeKey
+	}
+	stampQuery := `
+		UNWIND $keys AS key
+		MATCH (n {nodeKey: key})
+		SET n.embeddedAt = datetime()
+	`
+	if _, err := di.client.ExecuteQuery(ctx, stampQuery, map[string]any{"keys": nodeKeys}); err != nil {
+		fmt.Printf("Warning: failed to stamp embeddedAt: %v\n", err)
+	}
+
+	return nil
+}
+
+// pushToTextStore indexes Document/Feature nodes into the text store (OpenSearch).
+func (di *DocumentIndexer) pushToTextStore(ctx context.Context, docs []textindex.IndexDoc) {
+	if di.textStore == nil || len(docs) == 0 {
+		return
+	}
+	if err := di.textStore.IndexDocuments(ctx, docs); err != nil {
+		fmt.Printf("Warning: text store indexing failed: %v\n", err)
+	}
+}
+
 // simpleLinkToCodeSymbols creates MENTIONS relationships using simple backtick extraction
 func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID string, content string) error {
 	symbols := extractCodeSymbols(content)
@@ -464,6 +574,19 @@ func (di *DocumentIndexer) indexExternalDocument(ctx context.Context, extDoc *Ex
 
 	fmt.Printf("  Chunks: %d total, %d created, %d unchanged, %d updated\n",
 		chunkStats.Total, chunkStats.Created, chunkStats.Unchanged, chunkStats.Updated)
+
+	// Push Document node to vector store and text store.
+	docText := extDoc.Title + " " + extDoc.Content
+	if len(docText) > 2000 {
+		docText = docText[:2000]
+	}
+	if err := di.embedNodes(ctx, []embedItem{{nodeKey: docNodeKey, text: docText, label: "Document"}}); err != nil {
+		fmt.Printf("  Warning: vector embedding for external doc failed: %v\n", err)
+	}
+	di.pushToTextStore(ctx, []textindex.IndexDoc{{
+		NodeKey: docNodeKey, Content: extDoc.Title + " " + extDoc.Content,
+		Metadata: map[string]string{"nodeType": "Document"},
+	}})
 
 	// Link to code symbols.
 	if err := di.linkToCodeSymbols(ctx, docID, extDoc.Content); err != nil {

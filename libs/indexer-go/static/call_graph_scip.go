@@ -29,6 +29,7 @@ type SCIPCallGraphBuilder struct {
 	client      *neo4j.Client
 	projectPath string
 	modulePath  string // Go module path from go.mod, used to filter external targets
+	serviceName string // Service node name used to restrict listGoFiles to this module only
 	scopeCtx    models.ScopeContext
 }
 
@@ -40,6 +41,13 @@ func NewSCIPCallGraphBuilder(client *neo4j.Client, projectPath string) *SCIPCall
 		modulePath:  readModulePath(projectPath),
 		scopeCtx:    models.DefaultScope(),
 	}
+}
+
+// SetServiceName restricts the file list to only files owned by the named
+// Service node. This prevents the builder from attempting to parse files
+// from other modules that were indexed independently.
+func (cg *SCIPCallGraphBuilder) SetServiceName(name string) {
+	cg.serviceName = name
 }
 
 // readModulePath reads the module path from go.mod in the given directory.
@@ -92,16 +100,36 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 }
 
 // listGoFiles returns all file paths with a .go extension that are indexed in the graph.
+// When serviceName is set, only files owned by that Service node are returned, preventing
+// cross-module path mismatches during call graph construction.
 func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]string, error) {
-	query := `
-		MATCH (f:File)
-		WHERE f.path ENDS WITH '.go'
-		  AND f.scopeId = $scopeId
-		RETURN f.path AS path
-	`
-	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"scopeId": cg.scopeCtx.ScopeID,
-	})
+	var query string
+	var params map[string]any
+
+	if cg.serviceName != "" {
+		query = `
+			MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
+			WHERE f.path ENDS WITH '.go'
+			  AND f.scopeId = $scopeId
+			RETURN f.path AS path
+		`
+		params = map[string]any{
+			"scopeId":     cg.scopeCtx.ScopeID,
+			"serviceName": cg.serviceName,
+		}
+	} else {
+		query = `
+			MATCH (f:File)
+			WHERE f.path ENDS WITH '.go'
+			  AND f.scopeId = $scopeId
+			RETURN f.path AS path
+		`
+		params = map[string]any{
+			"scopeId": cg.scopeCtx.ScopeID,
+		}
+	}
+
+	results, err := cg.client.ExecuteQuery(ctx, query, params)
 	if err != nil {
 		return nil, err
 	}
