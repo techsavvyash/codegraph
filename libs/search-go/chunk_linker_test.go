@@ -122,6 +122,57 @@ func TestChunkLinker_SetScope_EmptyDefaultsToMain(t *testing.T) {
 	}
 }
 
+func TestChunkMentionEdge_Fields(t *testing.T) {
+	edge := ChunkMentionEdge{
+		ChunkNodeKey:  "chunk:doc:readme.md#0",
+		TargetNodeKey: "func:pkg/foo.go#Bar()",
+		TargetLabel:   "Function",
+		Confidence:    0.85,
+		Reasons:       []string{"backtick_reference", "mentioned as `Bar()`"},
+		Model:         "backtick_extraction",
+	}
+
+	if edge.ChunkNodeKey != "chunk:doc:readme.md#0" {
+		t.Errorf("unexpected ChunkNodeKey: %s", edge.ChunkNodeKey)
+	}
+	if edge.Confidence != 0.85 {
+		t.Errorf("unexpected Confidence: %f", edge.Confidence)
+	}
+	if len(edge.Reasons) != 2 {
+		t.Errorf("expected 2 reasons, got %d", len(edge.Reasons))
+	}
+}
+
+func TestStrVal(t *testing.T) {
+	m := map[string]any{
+		"name":  "Foo",
+		"count": 42,
+		"empty": "",
+	}
+	if strVal(m, "name") != "Foo" {
+		t.Error("expected Foo")
+	}
+	if strVal(m, "count") != "" {
+		t.Error("expected empty string for non-string value")
+	}
+	if strVal(m, "missing") != "" {
+		t.Error("expected empty string for missing key")
+	}
+	if strVal(m, "empty") != "" {
+		t.Error("expected empty string for empty value")
+	}
+}
+
+func TestRemoveDuplicateStringsSearch(t *testing.T) {
+	input := []string{"Foo", "foo", "Bar", "FOO", "bar", "Baz"}
+	result := removeDuplicateStringsSearch(input)
+
+	// Case-insensitive dedup: Foo, Bar, Baz
+	if len(result) != 3 {
+		t.Errorf("expected 3 unique strings, got %d: %v", len(result), result)
+	}
+}
+
 func TestDeduplicateEdges(t *testing.T) {
 	edges := []ChunkMentionEdge{
 		{ChunkNodeKey: "c1", TargetNodeKey: "t1", Confidence: 0.6, Reasons: []string{"heading"}},
@@ -145,5 +196,72 @@ func TestDeduplicateEdges(t *testing.T) {
 				t.Errorf("expected 2 merged reasons, got %d", len(e.Reasons))
 			}
 		}
+	}
+}
+
+func TestDeduplicateEdges_Empty(t *testing.T) {
+	result := deduplicateEdges(nil)
+	if len(result) != 0 {
+		t.Errorf("expected 0 edges for nil input, got %d", len(result))
+	}
+}
+
+func TestDeduplicateEdges_NoDuplicates(t *testing.T) {
+	edges := []ChunkMentionEdge{
+		{ChunkNodeKey: "c1", TargetNodeKey: "t1", Confidence: 0.9},
+		{ChunkNodeKey: "c1", TargetNodeKey: "t2", Confidence: 0.8},
+		{ChunkNodeKey: "c2", TargetNodeKey: "t1", Confidence: 0.7},
+	}
+	result := deduplicateEdges(edges)
+	if len(result) != 3 {
+		t.Errorf("expected 3 edges (no duplicates), got %d", len(result))
+	}
+}
+
+func TestDeduplicateEdges_SameChunkDifferentTargets(t *testing.T) {
+	edges := []ChunkMentionEdge{
+		{ChunkNodeKey: "c1", TargetNodeKey: "t1", Confidence: 0.5},
+		{ChunkNodeKey: "c1", TargetNodeKey: "t2", Confidence: 0.6},
+		{ChunkNodeKey: "c1", TargetNodeKey: "t3", Confidence: 0.7},
+	}
+	result := deduplicateEdges(edges)
+	if len(result) != 3 {
+		t.Errorf("expected 3 edges (different targets), got %d", len(result))
+	}
+}
+
+// TestExtractBacktickRefs_ComplexPatterns tests more complex code patterns.
+func TestExtractBacktickRefs_ComplexPatterns(t *testing.T) {
+	content := "See `pkg.NewClient()` and `neo4j.Client.Close` for details."
+	refs := extractBacktickRefs(content)
+
+	found := map[string]bool{}
+	for _, r := range refs {
+		found[r] = true
+	}
+
+	if !found["pkg.NewClient()"] {
+		t.Error("expected to find pkg.NewClient()")
+	}
+	if !found["neo4j.Client.Close"] {
+		t.Error("expected to find neo4j.Client.Close")
+	}
+}
+
+// TestExtractHeadingRefs_MultipleSections tests multi-level heading paths.
+func TestExtractHeadingRefs_MultipleSections(t *testing.T) {
+	refs := extractHeadingRefs("Architecture > DataStore > QueryBuilder > FilterEngine")
+	found := map[string]bool{}
+	for _, r := range refs {
+		found[r] = true
+	}
+	if !found["DataStore"] {
+		t.Error("expected DataStore")
+	}
+	if !found["QueryBuilder"] {
+		t.Error("expected QueryBuilder")
+	}
+	if !found["FilterEngine"] {
+		t.Error("expected FilterEngine")
 	}
 }

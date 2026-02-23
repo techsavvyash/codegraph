@@ -185,5 +185,98 @@ func TestMockTextIndexStore_Close(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ScopeID filtering tests (Phase 3)
+// ---------------------------------------------------------------------------
+
+func TestMockTextIndexStore_SearchScopeFilter_MatchesExactScope(t *testing.T) {
+	store := NewMockTextIndexStore()
+	ctx := context.Background()
+
+	_ = store.IndexDocument(ctx, "main::k1", "matching content", map[string]string{"scopeId": "main"})
+	_ = store.IndexDocument(ctx, "pr-42::k2", "matching content", map[string]string{"scopeId": "pr-42"})
+	_ = store.IndexDocument(ctx, "pr-99::k3", "matching content", map[string]string{"scopeId": "pr-99"})
+
+	results, err := store.Search(ctx, "matching", SearchOpts{ScopeID: "pr-42"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	// Should match pr-42 and main (overlay precedence), but NOT pr-99.
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (pr-42 + main), got %d", len(results))
+	}
+	keys := map[string]bool{}
+	for _, r := range results {
+		keys[r.NodeKey] = true
+	}
+	if !keys["main::k1"] {
+		t.Error("expected main::k1 in results")
+	}
+	if !keys["pr-42::k2"] {
+		t.Error("expected pr-42::k2 in results")
+	}
+	if keys["pr-99::k3"] {
+		t.Error("pr-99::k3 should NOT be in results")
+	}
+}
+
+func TestMockTextIndexStore_SearchScopeFilter_MainSeesBothMainScope(t *testing.T) {
+	store := NewMockTextIndexStore()
+	ctx := context.Background()
+
+	_ = store.IndexDocument(ctx, "main::k1", "hello world", map[string]string{"scopeId": "main"})
+	_ = store.IndexDocument(ctx, "pr-42::k2", "hello world", map[string]string{"scopeId": "pr-42"})
+
+	results, err := store.Search(ctx, "hello", SearchOpts{ScopeID: "main"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	// main scope should only see "main" docs.
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (only main), got %d", len(results))
+	}
+	if results[0].NodeKey != "main::k1" {
+		t.Errorf("expected main::k1, got %s", results[0].NodeKey)
+	}
+}
+
+func TestMockTextIndexStore_SearchScopeFilter_EmptyScopeReturnsAll(t *testing.T) {
+	store := NewMockTextIndexStore()
+	ctx := context.Background()
+
+	_ = store.IndexDocument(ctx, "k1", "content", map[string]string{"scopeId": "main"})
+	_ = store.IndexDocument(ctx, "k2", "content", map[string]string{"scopeId": "pr-42"})
+	_ = store.IndexDocument(ctx, "k3", "content", map[string]string{"scopeId": "pr-99"})
+
+	results, err := store.Search(ctx, "content", SearchOpts{}) // No ScopeID filter
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(results) != 3 {
+		t.Errorf("expected 3 results with no scope filter, got %d", len(results))
+	}
+}
+
+func TestMockTextIndexStore_SearchScopeFilter_NoMetadata(t *testing.T) {
+	store := NewMockTextIndexStore()
+	ctx := context.Background()
+
+	// Doc without scopeId metadata
+	_ = store.IndexDocument(ctx, "k1", "content", nil)
+
+	results, err := store.Search(ctx, "content", SearchOpts{ScopeID: "pr-42"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	// Doc without scopeId metadata should be filtered out when ScopeID is set.
+	if len(results) != 0 {
+		t.Errorf("expected 0 results (doc has no scopeId), got %d", len(results))
+	}
+}
+
 // Compile-time check that MockTextIndexStore implements TextIndexStore.
 var _ TextIndexStore = (*MockTextIndexStore)(nil)

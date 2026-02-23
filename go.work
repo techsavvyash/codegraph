@@ -6,6 +6,7 @@ use (
 	./apps/mcp-server-go
 	./libs/benchmarks-go
 	./libs/core-models-go
+	./libs/evals-go
 	./libs/indexer-go
 	./libs/llm-go
 	./libs/neo4j-client-go

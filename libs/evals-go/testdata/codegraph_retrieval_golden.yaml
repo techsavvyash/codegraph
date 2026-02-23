@@ -1,0 +1,161 @@
+name: "CodeGraph Retrieval Golden Set"
+description: "Ground-truth queries for evaluating CodeGraph hybrid retrieval quality"
+version: "1.1.0"
+defaultK: 20
+
+queries:
+  - id: q01
+    query: "hybrid search with RRF fusion"
+    description: "Find the hybrid search implementation that uses Reciprocal Rank Fusion"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/HybridSearchManager#UnifiedSearch()."
+        grade: 3
+        nodeType: Symbol
+        comment: "Primary RRF implementation symbol"
+      - nodeKey: "method:hybrid_search.go#scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/HybridSearchManager#UnifiedSearch()."
+        grade: 3
+        nodeType: Method
+        comment: "HybridSearchManager.UnifiedSearch method definition"
+
+  - id: q02
+    query: "how are docs linked with code"
+    description: "Find document-code linking logic"
+    category: concept
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/IntelligentDocumentLinker#LinkDocumentToCode()."
+        grade: 3
+        nodeType: Symbol
+        comment: "Main doc-code linking symbol"
+      - nodeKey: "method:intelligent_linker.go#scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/IntelligentDocumentLinker#LinkDocumentToCode()."
+        grade: 3
+        nodeType: Method
+        comment: "LinkDocumentToCode method definition"
+      - nodeKey: "doc:docs/10-business-context-docs-and-embeddings.md"
+        grade: 2
+        nodeType: Document
+        comment: "Business context docs overview"
+
+  - id: q03
+    query: "SCIP indexer parse symbols"
+    description: "Find the SCIP indexing implementation"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/indexer-go . `github.com/context-maximiser/code-graph/libs/indexer-go/static`/SCIPIndexer#IndexProject()."
+        grade: 3
+        nodeType: Symbol
+        comment: "SCIP index entry point symbol"
+      - nodeKey: "method:static/scip_indexer.go#scip-go gomod github.com/context-maximiser/code-graph/libs/indexer-go . `github.com/context-maximiser/code-graph/libs/indexer-go/static`/SCIPIndexer#IndexProject()."
+        grade: 3
+        nodeType: Method
+        comment: "SCIP indexer IndexProject method"
+
+  - id: q04
+    query: "node key generation for functions and classes"
+    description: "Find nodeKey generation utilities"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/core-models-go . `github.com/context-maximiser/code-graph/libs/core-models-go`/FunctionNodeKey()."
+        grade: 3
+        nodeType: Symbol
+        comment: "FunctionNodeKey generator symbol"
+      - nodeKey: "func:nodekey.go#scip-go gomod github.com/context-maximiser/code-graph/libs/core-models-go . `github.com/context-maximiser/code-graph/libs/core-models-go`/FunctionNodeKey()."
+        grade: 3
+        nodeType: Function
+        comment: "FunctionNodeKey function definition"
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/core-models-go . `github.com/context-maximiser/code-graph/libs/core-models-go`/ClassNodeKey()."
+        grade: 3
+        nodeType: Symbol
+        comment: "ClassNodeKey generator symbol"
+      - nodeKey: "func:nodekey.go#scip-go gomod github.com/context-maximiser/code-graph/libs/core-models-go . `github.com/context-maximiser/code-graph/libs/core-models-go`/ClassNodeKey()."
+        grade: 3
+        nodeType: Function
+        comment: "ClassNodeKey function definition"
+
+  - id: q05
+    query: "Neo4j graph database connection client"
+    description: "Find Neo4j client initialization"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/neo4j-go . `github.com/context-maximiser/code-graph/libs/neo4j-go`/NewClient()."
+        grade: 3
+        nodeType: Symbol
+        comment: "Neo4j client constructor symbol"
+      - nodeKey: "func:client.go#scip-go gomod github.com/context-maximiser/code-graph/libs/neo4j-go . `github.com/context-maximiser/code-graph/libs/neo4j-go`/NewClient()."
+        grade: 3
+        nodeType: Function
+        comment: "Neo4j NewClient function definition"
+
+  - id: q06
+    query: "memory monitor benchmark profiling"
+    description: "Find benchmarking and memory profiling tools"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/benchmarks-go . `github.com/context-maximiser/code-graph/libs/benchmarks-go`/NewMemoryMonitor()."
+        grade: 3
+        nodeType: Symbol
+        comment: "Memory monitor constructor symbol"
+      - nodeKey: "func:memory_monitor.go#scip-go gomod github.com/context-maximiser/code-graph/libs/benchmarks-go . `github.com/context-maximiser/code-graph/libs/benchmarks-go`/NewMemoryMonitor()."
+        grade: 3
+        nodeType: Function
+        comment: "NewMemoryMonitor function definition"
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/benchmarks-go . `github.com/context-maximiser/code-graph/libs/benchmarks-go`/NewPhaseTimer()."
+        grade: 2
+        nodeType: Symbol
+        comment: "Phase timer constructor symbol"
+
+  - id: q07
+    query: "embedding service generate text vectors"
+    description: "Find embedding generation service"
+    category: code
+    expected:
+      - nodeKey: "scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/NewGeminiEmbeddingService()."
+        grade: 3
+        nodeType: Symbol
+        comment: "Gemini embedding service symbol"
+      - nodeKey: "func:embedding_service.go#scip-go gomod github.com/context-maximiser/code-graph/libs/search-go . `github.com/context-maximiser/code-graph/libs/search-go`/NewGeminiEmbeddingService()."
+        grade: 3
+        nodeType: Function
+        comment: "NewGeminiEmbeddingService function definition"
+
+  - id: q08
+    query: "document chunk linking mentions relationship"
+    description: "Find document mention/linking logic"
+    category: concept
+    expected:
+      - nodeKey: "doc:docs/03-graph-schema.md"
+        grade: 3
+        nodeType: Document
+        comment: "Graph schema documentation with MENTIONS"
+      - nodeKey: "doc:docs/04-indexing.md"
+        grade: 2
+        nodeType: Document
+        comment: "Indexing documentation"
+
+  - id: q09
+    query: "polyglot monorepo language detection"
+    description: "Find polyglot/monorepo support docs"
+    category: concept
+    expected:
+      - nodeKey: "doc:docs/15-polyglot-monorepo.md"
+        grade: 3
+        nodeType: Document
+        comment: "Polyglot monorepo documentation"
+      - nodeKey: "doc:docs/16-monorepo-execution-plan.md"
+        grade: 2
+        nodeType: Document
+        comment: "Monorepo execution plan"
+
+  - id: q10
+    query: "CodeGraph architecture overview"
+    description: "Find architecture documentation"
+    category: document
+    expected:
+      - nodeKey: "doc:docs/02-architecture.md"
+        grade: 3
+        nodeType: Document
+        comment: "Architecture overview document"
+      - nodeKey: "doc:docs/01-what-is-codegraph.md"
+        grade: 2
+        nodeType: Document
+        comment: "What is CodeGraph intro"

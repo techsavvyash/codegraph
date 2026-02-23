@@ -121,7 +121,8 @@ func TestMainScopeAndPRScopeHaveDifferentScopeField(t *testing.T) {
 }
 
 // TestPropsKeysAreStable verifies that Props() always returns exactly the keys
-// "scope" and "scopeId". Renaming these would break all Cypher property lookups.
+// "scope" and "scopeId" for a basic scope. Renaming these would break all
+// Cypher property lookups.
 func TestPropsKeysAreStable(t *testing.T) {
 	for _, sc := range []ScopeContext{DefaultScope(), NewPRScope("7")} {
 		props := sc.Props()
@@ -132,7 +133,82 @@ func TestPropsKeysAreStable(t *testing.T) {
 			t.Error("Props() must contain key \"scopeId\"")
 		}
 		if len(props) != 2 {
-			t.Errorf("Props() must have exactly 2 keys, got %d", len(props))
+			t.Errorf("Props() must have exactly 2 keys (no tenant/repo), got %d", len(props))
 		}
+	}
+}
+
+// TestPropsWithTenantID verifies that TenantID is included in Props() when set.
+func TestPropsWithTenantID(t *testing.T) {
+	sc := DefaultScope()
+	sc.TenantID = "acme-corp"
+	props := sc.Props()
+
+	if props["tenantId"] != "acme-corp" {
+		t.Errorf("expected tenantId=acme-corp, got %v", props["tenantId"])
+	}
+	if len(props) != 3 {
+		t.Errorf("expected 3 props (scope, scopeId, tenantId), got %d", len(props))
+	}
+}
+
+// TestPropsWithRepo verifies that Repo is included in Props() when set.
+func TestPropsWithRepo(t *testing.T) {
+	sc := NewPRScope("42")
+	sc.Repo = "codegraph"
+	props := sc.Props()
+
+	if props["repoId"] != "codegraph" {
+		t.Errorf("expected repoId=codegraph, got %v", props["repoId"])
+	}
+	if len(props) != 3 {
+		t.Errorf("expected 3 props (scope, scopeId, repoId), got %d", len(props))
+	}
+}
+
+// TestPropsWithTenantAndRepo verifies both TenantID and Repo appear in Props().
+func TestPropsWithTenantAndRepo(t *testing.T) {
+	sc := DefaultScope()
+	sc.TenantID = "tenant-1"
+	sc.Repo = "repo-1"
+	props := sc.Props()
+
+	if props["tenantId"] != "tenant-1" {
+		t.Errorf("expected tenantId=tenant-1, got %v", props["tenantId"])
+	}
+	if props["repoId"] != "repo-1" {
+		t.Errorf("expected repoId=repo-1, got %v", props["repoId"])
+	}
+	if len(props) != 4 {
+		t.Errorf("expected 4 props, got %d", len(props))
+	}
+}
+
+// TestPropsOmitsEmptyTenantAndRepo verifies empty strings are not included.
+func TestPropsOmitsEmptyTenantAndRepo(t *testing.T) {
+	sc := DefaultScope()
+	sc.TenantID = ""
+	sc.Repo = ""
+	props := sc.Props()
+
+	if _, ok := props["tenantId"]; ok {
+		t.Error("empty TenantID should not appear in Props()")
+	}
+	if _, ok := props["repoId"]; ok {
+		t.Error("empty Repo should not appear in Props()")
+	}
+}
+
+// TestScopeContextFieldsPreserved verifies that all struct fields survive
+// assignment and can be read back.
+func TestScopeContextFieldsPreserved(t *testing.T) {
+	sc := ScopeContext{
+		Scope:    ScopePR,
+		ScopeID:  "pr-99",
+		TenantID: "org-abc",
+		Repo:     "my-repo",
+	}
+	if sc.Scope != "pr" || sc.ScopeID != "pr-99" || sc.TenantID != "org-abc" || sc.Repo != "my-repo" {
+		t.Errorf("field values not preserved: %+v", sc)
 	}
 }

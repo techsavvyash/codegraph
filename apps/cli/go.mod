@@ -5,6 +5,7 @@ go 1.24.3
 require (
 	github.com/context-maximiser/code-graph/libs/benchmarks-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/evals-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/llm-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
@@ -133,6 +134,7 @@ require (
 replace (
 	github.com/context-maximiser/code-graph/libs/benchmarks-go => ../../libs/benchmarks-go
 	github.com/context-maximiser/code-graph/libs/core-models-go => ../../libs/core-models-go
+	github.com/context-maximiser/code-graph/libs/evals-go => ../../libs/evals-go
 	github.com/context-maximiser/code-graph/libs/indexer-go => ../../libs/indexer-go
 	github.com/context-maximiser/code-graph/libs/llm-go => ../../libs/llm-go
 	github.com/context-maximiser/code-graph/libs/neo4j-go => ../../libs/neo4j-go

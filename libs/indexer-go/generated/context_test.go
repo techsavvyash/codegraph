@@ -111,3 +111,93 @@ func TestGeneratedDocModel(t *testing.T) {
 		t.Errorf("unexpected Model: %s", doc.Model)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Doc type constant stability tests
+// ---------------------------------------------------------------------------
+
+func TestDocTypeConstantsAreDistinct(t *testing.T) {
+	types := []string{DocTypePRSummary, DocTypeFlowSummary, DocTypeDocstringSuggestion}
+	seen := map[string]bool{}
+	for _, dt := range types {
+		if seen[dt] {
+			t.Errorf("duplicate doc type constant: %s", dt)
+		}
+		seen[dt] = true
+	}
+}
+
+func TestDocTypeConstantsNotEmpty(t *testing.T) {
+	for _, dt := range []string{DocTypePRSummary, DocTypeFlowSummary, DocTypeDocstringSuggestion} {
+		if dt == "" {
+			t.Error("doc type constant must not be empty")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ContextGenerator scope behavior
+// ---------------------------------------------------------------------------
+
+func TestContextGenerator_DefaultScopeIsMain(t *testing.T) {
+	gen := NewContextGenerator(nil)
+	if gen.scopeCtx.ScopeID != "main" {
+		t.Errorf("expected default scopeID 'main', got %q", gen.scopeCtx.ScopeID)
+	}
+}
+
+func TestContextGenerator_SetScopePR(t *testing.T) {
+	gen := NewContextGenerator(nil)
+	gen.SetScope(models.NewPRScope("100"))
+	if gen.scopeCtx.ScopeID != "pr-100" {
+		t.Errorf("expected scopeID 'pr-100', got %q", gen.scopeCtx.ScopeID)
+	}
+	if gen.scopeCtx.Scope != "pr" {
+		t.Errorf("expected scope 'pr', got %q", gen.scopeCtx.Scope)
+	}
+}
+
+func TestContextGenerator_SetScopeWithTenantAndRepo(t *testing.T) {
+	gen := NewContextGenerator(nil)
+	sc := models.DefaultScope()
+	sc.TenantID = "org-abc"
+	sc.Repo = "my-repo"
+	gen.SetScope(sc)
+
+	if gen.scopeCtx.TenantID != "org-abc" {
+		t.Errorf("expected TenantID 'org-abc', got %q", gen.scopeCtx.TenantID)
+	}
+	if gen.scopeCtx.Repo != "my-repo" {
+		t.Errorf("expected Repo 'my-repo', got %q", gen.scopeCtx.Repo)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GeneratedDocNodeKey determinism tests
+// ---------------------------------------------------------------------------
+
+func TestGeneratedDocNodeKey_Deterministic(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		a := models.GeneratedDocNodeKey(DocTypePRSummary, "pr:42")
+		b := models.GeneratedDocNodeKey(DocTypePRSummary, "pr:42")
+		if a != b {
+			t.Fatal("GeneratedDocNodeKey is not deterministic")
+		}
+	}
+}
+
+func TestGeneratedDocNodeKey_DifferentSourcesDiffer(t *testing.T) {
+	k1 := models.GeneratedDocNodeKey(DocTypePRSummary, "pr:1")
+	k2 := models.GeneratedDocNodeKey(DocTypePRSummary, "pr:2")
+	if k1 == k2 {
+		t.Error("different sources should produce different keys")
+	}
+}
+
+func TestGeneratedDocNodeKey_DifferentTypesDiffer(t *testing.T) {
+	k1 := models.GeneratedDocNodeKey(DocTypePRSummary, "pr:1")
+	k2 := models.GeneratedDocNodeKey(DocTypeFlowSummary, "pr:1")
+	if k1 == k2 {
+		t.Error("different doc types should produce different keys")
+	}
+}

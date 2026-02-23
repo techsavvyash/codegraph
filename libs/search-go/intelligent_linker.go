@@ -179,7 +179,7 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 		if err == nil {
 			for _, result := range vectorResults {
 				confidence := idl.calculateSemanticConfidence(result.Score)
-				if confidence > 0.3 {
+				if confidence > 0.1 {
 					name, _ := result.Metadata["name"].(string)
 					sig, _ := result.Metadata["signature"].(string)
 					fp, _ := result.Metadata["filePath"].(string)
@@ -212,7 +212,7 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 
 		for _, result := range hybridResults.Results {
 			confidence := idl.calculateHybridConfidence(result.CombinedScore, query, getStringValue(result.Node, "name"))
-			if confidence > 0.2 {
+			if confidence > 0.05 {
 				nk := getStringValue(result.Node, "nodeKey")
 				if nk == "" {
 					continue
@@ -417,6 +417,8 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 		return 0, nil
 	}
 
+	log.Printf("Creating MENTIONS edges: docID=%s, %d matches after confidence filter (>= 0.15)", documentID, len(filtered))
+
 	// Build batch parameter list.
 	edgeMaps := make([]map[string]any, len(filtered))
 	for i, match := range filtered {
@@ -428,10 +430,12 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 		}
 	}
 
+	// documentID may be a Neo4j element ID (e.g. "4:abc:123") or a nodeKey.
+	// Try matching by elementId first, fall back to nodeKey.
 	cypher := `
-		MATCH (doc {nodeKey: $docKey})
-		WHERE doc.scopeId = $scopeId OR doc.scopeId = 'main'
-		WITH doc ORDER BY CASE WHEN doc.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
+		MATCH (doc)
+		WHERE elementId(doc) = $docKey OR doc.nodeKey = $docKey
+		WITH doc LIMIT 1
 		UNWIND $edges AS edge
 		MATCH (target {nodeKey: edge.targetKey})
 		WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
@@ -466,20 +470,26 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 // Helper functions
 
 func (idl *IntelligentDocumentLinker) calculateSemanticConfidence(similarity float64) float64 {
-	// Convert similarity score to confidence (normalize and apply threshold)
-	return math.Max(0, (similarity-0.5)*2) // Convert 0.5-1.0 to 0-1.0
+	// Convert cosine similarity to confidence.
+	// OpenAI text-embedding-3-small typically returns 0.2-0.6 for related content.
+	// Gemini returns 0.5-0.9.  Use a floor of 0.15 so both providers work.
+	if similarity < 0.15 {
+		return 0
+	}
+	return math.Min(1.0, math.Max(0, (similarity-0.15)/0.65)) // 0.15→0, 0.80→1.0
 }
 
 func (idl *IntelligentDocumentLinker) calculateHybridConfidence(score float64, query, functionName string) float64 {
-	// Base confidence from search score
-	confidence := math.Min(score/100.0, 1.0) // Normalize score
+	// CombinedScore is an RRF score with k=60, so the top result ≈ 1/61 ≈ 0.016.
+	// Multi-source results can sum to ~0.05.  Normalize to [0, 1].
+	confidence := math.Min(score/0.05, 1.0)
 
 	// Boost if query appears in function name
 	if len(query) > 2 && contains(functionName, query) {
-		confidence *= 1.5
+		confidence = math.Min(confidence*1.5, 1.0)
 	}
 
-	return math.Min(confidence, 1.0)
+	return confidence
 }
 
 func (idl *IntelligentDocumentLinker) deduplicateMatches(matches []CodeMatch) []CodeMatch {
