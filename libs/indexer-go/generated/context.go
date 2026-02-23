@@ -238,3 +238,89 @@ func (g *ContextGenerator) ListGeneratedDocs(ctx context.Context, docType, sourc
 	}
 	return results, nil
 }
+
+// GenerateDocstringSuggestionsForScope queries for exported Functions/Methods in
+// the current scope that lack a docstring and creates GeneratedDoc suggestions.
+// Returns the number of suggestions created.
+func (g *ContextGenerator) GenerateDocstringSuggestionsForScope(ctx context.Context) (int, error) {
+	cypher := `
+		MATCH (n)
+		WHERE (n:Function OR n:Method)
+		  AND n.scopeId = $scopeId
+		  AND n.isExported = true
+		  AND (n.docstring IS NULL OR n.docstring = '')
+		RETURN n.nodeKey AS nodeKey, n.name AS name, n.signature AS signature
+		LIMIT 50
+	`
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": g.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to query exported symbols without docstrings: %w", err)
+	}
+
+	created := 0
+	for _, r := range records {
+		m := r.AsMap()
+		nk, _ := m["nodeKey"].(string)
+		name, _ := m["name"].(string)
+		sig, _ := m["signature"].(string)
+		if nk == "" {
+			continue
+		}
+
+		title := fmt.Sprintf("Docstring suggestion for %s", name)
+		content := fmt.Sprintf("// TODO: Add documentation for %s\n// Signature: %s", name, sig)
+
+		if _, err := g.StoreDocstringSuggestion(ctx, nk, title, content, "auto-stub"); err != nil {
+			fmt.Printf("Warning: failed to create docstring suggestion for %s: %v\n", name, err)
+			continue
+		}
+		created++
+	}
+	return created, nil
+}
+
+// GenerateFlowSummariesForScope queries for Flow nodes in the current scope
+// and creates GeneratedDoc summaries for any that don't already have one.
+// Returns the number of summaries created.
+func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (int, error) {
+	cypher := `
+		MATCH (f:Flow)
+		WHERE f.scopeId = $scopeId
+		  AND NOT EXISTS {
+		    MATCH (:GeneratedDoc {type: $docType, sourceKey: f.nodeKey})
+		  }
+		RETURN f.nodeKey AS nodeKey, f.name AS name, f.flowType AS flowType,
+		       f.entrypoint AS entrypoint
+		LIMIT 50
+	`
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": g.scopeCtx.ScopeID,
+		"docType": DocTypeFlowSummary,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to query flows without summaries: %w", err)
+	}
+
+	created := 0
+	for _, r := range records {
+		m := r.AsMap()
+		nk, _ := m["nodeKey"].(string)
+		name, _ := m["name"].(string)
+		flowType, _ := m["flowType"].(string)
+		if nk == "" {
+			continue
+		}
+
+		title := fmt.Sprintf("Flow summary: %s", name)
+		content := fmt.Sprintf("Auto-generated summary for %s flow '%s'.", flowType, name)
+
+		if _, err := g.StoreFlowSummary(ctx, nk, title, content, "auto-stub"); err != nil {
+			fmt.Printf("Warning: failed to create flow summary for %s: %v\n", name, err)
+			continue
+		}
+		created++
+	}
+	return created, nil
+}

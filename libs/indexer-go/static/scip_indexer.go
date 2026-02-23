@@ -247,10 +247,10 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			"", "", "", ""); err != nil {
 			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
 		} else {
-			// Store a basic PR summary with indexed file list
-			fileKeys := make([]string, 0)
-			for _, f := range fileNodes {
-				fileKeys = append(fileKeys, f)
+			// Store a basic PR summary with indexed file list (use nodeKeys, not element IDs).
+			fileKeys := make([]string, 0, len(fileNodes))
+			for filePath := range fileNodes {
+				fileKeys = append(fileKeys, models.FileNodeKey(filePath))
 			}
 			summary := fmt.Sprintf("Indexed %d files and %d symbols for service %s",
 				len(fileNodes), len(symbolDefs), si.serviceName)
@@ -258,6 +258,20 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 				fmt.Sprintf("Indexing summary for %s", si.serviceName),
 				summary, "scip-indexer", fileKeys); err != nil {
 				fmt.Printf("Warning: failed to store PR summary: %v\n", err)
+			}
+
+			// Generate docstring suggestions for changed exported symbols without docs.
+			if n, err := ctxGen.GenerateDocstringSuggestionsForScope(ctx); err != nil {
+				fmt.Printf("Warning: docstring suggestion generation failed: %v\n", err)
+			} else if n > 0 {
+				fmt.Printf("Generated %d docstring suggestions\n", n)
+			}
+
+			// Generate flow summaries for any Flow nodes in this scope.
+			if n, err := ctxGen.GenerateFlowSummariesForScope(ctx); err != nil {
+				fmt.Printf("Warning: flow summary generation failed: %v\n", err)
+			} else if n > 0 {
+				fmt.Printf("Generated %d flow summaries\n", n)
 			}
 		}
 	}
