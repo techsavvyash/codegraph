@@ -42,6 +42,7 @@ func (s *OpenSearchStore) EnsureIndex(ctx context.Context) error {
 				"content":  map[string]string{"type": "text", "analyzer": "standard"},
 				"tenantId": map[string]string{"type": "keyword"},
 				"repo":     map[string]string{"type": "keyword"},
+				"scopeId":  map[string]string{"type": "keyword"},
 				"nodeType": map[string]string{"type": "keyword"},
 				"metadata": map[string]string{"type": "object"},
 			},
@@ -79,6 +80,9 @@ func (s *OpenSearchStore) IndexDocument(ctx context.Context, nodeKey, content st
 	if v, ok := meta["nodeType"]; ok {
 		doc["nodeType"] = v
 	}
+	if v, ok := meta["scopeId"]; ok {
+		doc["scopeId"] = v
+	}
 
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -108,6 +112,9 @@ func (s *OpenSearchStore) IndexDocuments(ctx context.Context, docs []IndexDoc) e
 		meta := map[string]interface{}{"index": map[string]string{"_index": s.indexName, "_id": doc.NodeKey}}
 		metaLine, _ := json.Marshal(meta)
 		docBody := map[string]interface{}{"nodeKey": doc.NodeKey, "content": doc.Content, "metadata": doc.Metadata}
+		if v, ok := doc.Metadata["scopeId"]; ok {
+			docBody["scopeId"] = v
+		}
 		docLine, _ := json.Marshal(docBody)
 		buf.Write(metaLine)
 		buf.WriteByte('\n')
@@ -150,6 +157,12 @@ func (s *OpenSearchStore) Search(ctx context.Context, query string, opts SearchO
 	}
 	if opts.Repo != "" {
 		filter = append(filter, map[string]interface{}{"term": map[string]string{"repo": opts.Repo}})
+	}
+	if opts.ScopeID != "" {
+		// Include both the requested scope and "main" (base) scope.
+		filter = append(filter, map[string]interface{}{
+			"terms": map[string]interface{}{"scopeId": []string{opts.ScopeID, "main"}},
+		})
 	}
 	if len(opts.NodeTypes) > 0 {
 		filter = append(filter, map[string]interface{}{"terms": map[string]interface{}{"nodeType": opts.NodeTypes}})

@@ -398,14 +398,22 @@ func (di *DocumentIndexer) embedNodes(ctx context.Context, items []embedItem) er
 		return fmt.Errorf("failed to generate embeddings: %w", err)
 	}
 
+	scopeId := di.scopeCtx.ScopeID
+	if scopeId == "" {
+		scopeId = "main"
+	}
+
 	var upserts []search.VectorUpsert
 	for i, emb := range embeddings {
+		// Use scopeId::nodeKey as vector ID to prevent cross-scope collisions.
+		vectorID := scopeId + "::" + items[i].nodeKey
 		upserts = append(upserts, search.VectorUpsert{
-			ID:        items[i].nodeKey,
+			ID:        vectorID,
 			Vector:    emb,
 			NodeLabel: items[i].label,
 			Metadata: map[string]any{
-				"name": items[i].nodeKey,
+				"nodeKey": items[i].nodeKey,
+				"scopeId": scopeId,
 			},
 		})
 	}

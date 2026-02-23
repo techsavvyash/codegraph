@@ -84,7 +84,8 @@ func (si *SCIPIndexer) populateVectorsForNodeType(ctx context.Context, nodeType 
 		RETURN elementId(n) as nodeId, n.name as name, n.nodeKey as nodeKey,
 		       n.signature as signature, n.description as description,
 		       n.content as content, n.title as title,
-		       n.filePath as filePath, n.startLine as startLine, n.endLine as endLine
+		       n.filePath as filePath, n.startLine as startLine, n.endLine as endLine,
+		       coalesce(n.scopeId, 'main') as scopeId
 		LIMIT 1000
 	`, nodeType)
 
@@ -99,8 +100,8 @@ func (si *SCIPIndexer) populateVectorsForNodeType(ctx context.Context, nodeType 
 	fmt.Printf("   Embedding %d %s nodes...\n", len(results), nodeType)
 
 	type nodeInfo struct {
-		nodeId, nodeKey, name, signature, description, filePath string
-		startLine, endLine                                      int64
+		nodeId, nodeKey, name, signature, description, filePath, scopeId string
+		startLine, endLine                                               int64
 	}
 
 	processed := 0
@@ -124,6 +125,10 @@ func (si *SCIPIndexer) populateVectorsForNodeType(ctx context.Context, nodeType 
 			fp, _ := m["filePath"].(string)
 			sl, _ := m["startLine"].(int64)
 			el, _ := m["endLine"].(int64)
+			sid, _ := m["scopeId"].(string)
+			if sid == "" {
+				sid = "main"
+			}
 
 			var parts []string
 			if name != "" {
@@ -153,7 +158,7 @@ func (si *SCIPIndexer) populateVectorsForNodeType(ctx context.Context, nodeType 
 			infos = append(infos, nodeInfo{
 				nodeId: nid, nodeKey: nk, name: name,
 				signature: sig, description: desc, filePath: fp,
-				startLine: sl, endLine: el,
+				scopeId: sid, startLine: sl, endLine: el,
 			})
 		}
 
@@ -166,15 +171,19 @@ func (si *SCIPIndexer) populateVectorsForNodeType(ctx context.Context, nodeType 
 		var embeddedNodeIds []string
 		for j, emb := range embeddings {
 			info := infos[j]
-			id := info.nodeKey
-			if id == "" {
-				id = info.nodeId
+			nk := info.nodeKey
+			if nk == "" {
+				nk = info.nodeId
 			}
+			// Use scopeId::nodeKey as the vector ID to prevent cross-scope collisions.
+			vectorID := info.scopeId + "::" + nk
 			upserts = append(upserts, search.VectorUpsert{
-				ID:        id,
+				ID:        vectorID,
 				Vector:    emb,
 				NodeLabel: nodeType,
 				Metadata: map[string]any{
+					"nodeKey":   nk,
+					"scopeId":   info.scopeId,
 					"name":      info.name,
 					"signature": info.signature,
 					"filePath":  info.filePath,
@@ -216,19 +225,19 @@ func (si *SCIPIndexer) populateTextIndexForNodeType(ctx context.Context, nodeTyp
 	switch nodeType {
 	case "Function", "Method":
 		query = fmt.Sprintf(`MATCH (n:%s)
-RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.signature,'') + ' ' + coalesce(n.docstring,'') AS content, labels(n)[0] AS nodeType`, nodeType)
+RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.signature,'') + ' ' + coalesce(n.docstring,'') AS content, labels(n)[0] AS nodeType, coalesce(n.scopeId,'main') AS scopeId`, nodeType)
 	case "Symbol":
-		query = `MATCH (n:Symbol) RETURN n.nodeKey AS nodeKey, coalesce(n.displayName,'') + ' ' + coalesce(n.documentation,'') AS content`
+		query = `MATCH (n:Symbol) RETURN n.nodeKey AS nodeKey, coalesce(n.displayName,'') + ' ' + coalesce(n.documentation,'') AS content, coalesce(n.scopeId,'main') AS scopeId`
 	case "Class":
-		query = `MATCH (n:Class) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.fqn,'') + ' ' + coalesce(n.docstring,'') AS content`
+		query = `MATCH (n:Class) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.fqn,'') + ' ' + coalesce(n.docstring,'') AS content, coalesce(n.scopeId,'main') AS scopeId`
 	case "Document":
-		query = `MATCH (n:Document) RETURN n.nodeKey AS nodeKey, coalesce(n.title,'') + ' ' + coalesce(n.content,'') AS content`
+		query = `MATCH (n:Document) RETURN n.nodeKey AS nodeKey, coalesce(n.title,'') + ' ' + coalesce(n.content,'') AS content, coalesce(n.scopeId,'main') AS scopeId`
 	case "DocumentChunk":
-		query = `MATCH (n:DocumentChunk) RETURN n.nodeKey AS nodeKey, coalesce(n.headingPath,'') + ' ' + coalesce(n.content,'') AS content`
+		query = `MATCH (n:DocumentChunk) RETURN n.nodeKey AS nodeKey, coalesce(n.headingPath,'') + ' ' + coalesce(n.content,'') AS content, coalesce(n.scopeId,'main') AS scopeId`
 	case "Feature":
-		query = `MATCH (n:Feature) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.description,'') AS content`
+		query = `MATCH (n:Feature) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.description,'') AS content, coalesce(n.scopeId,'main') AS scopeId`
 	default:
-		query = fmt.Sprintf(`MATCH (n:%s) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') AS content`, nodeType)
+		query = fmt.Sprintf(`MATCH (n:%s) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') AS content, coalesce(n.scopeId,'main') AS scopeId`, nodeType)
 	}
 
 	rows, err := si.client.ExecuteQuery(ctx, query, nil)
@@ -247,13 +256,19 @@ RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.signature,''
 		m := r.AsMap()
 		nk, _ := m["nodeKey"].(string)
 		ct, _ := m["content"].(string)
+		sid, _ := m["scopeId"].(string)
 		if nk == "" {
 			continue
 		}
+		if sid == "" {
+			sid = "main"
+		}
+		// Use scopeId::nodeKey as document ID to prevent cross-scope collisions.
+		scopedKey := sid + "::" + nk
 		batch = append(batch, textindex.IndexDoc{
-			NodeKey:  nk,
+			NodeKey:  scopedKey,
 			Content:  ct,
-			Metadata: map[string]string{"nodeType": nodeType},
+			Metadata: map[string]string{"nodeType": nodeType, "scopeId": sid, "nodeKey": nk},
 		})
 		if len(batch) >= batchSize {
 			if e := si.textStore.IndexDocuments(ctx, batch); e == nil {

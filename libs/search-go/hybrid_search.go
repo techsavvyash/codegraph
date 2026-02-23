@@ -22,6 +22,7 @@ type HybridSearchManager struct {
 	queryBuilder        *neo4j.QueryBuilder
 	embeddingService    EmbeddingService // Interface for generating embeddings
 	commentSearch       *CommentEmbeddingService // For comment-based function discovery
+	scopeID             string // Scope for overlay-aware queries (e.g. "main", "pr-42").
 }
 
 // NewHybridSearchManager creates a comprehensive hybrid search manager.
@@ -35,6 +36,11 @@ func NewHybridSearchManager(client *neo4j.Client, embeddingService EmbeddingServ
 		embeddingService: embeddingService,
 		commentSearch:    NewCommentEmbeddingService(client, embeddingService),
 	}
+}
+
+// SetScope configures the scope for overlay-aware retrieval.
+func (hsm *HybridSearchManager) SetScope(scopeID string) {
+	hsm.scopeID = scopeID
 }
 
 // WithTextStore sets an optional TextIndexStore for pluggable fulltext search.
@@ -180,10 +186,17 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 		if err != nil {
 			log.Printf("Warning: failed to generate query embedding: %v", err)
 		} else {
-			storeResults, err := hsm.vectorStore.Query(ctx, VectorQuery{
+			vq := VectorQuery{
 				Vector: queryVector,
 				Limit:  limit,
-			})
+			}
+			// Apply scope filter to vector query if set.
+			if hsm.scopeID != "" {
+				vq.Filters = map[string]any{
+					"scopeId": []string{hsm.scopeID, "main"},
+				}
+			}
+			storeResults, err := hsm.vectorStore.Query(ctx, vq)
 			if err != nil {
 				log.Printf("Warning: vector store search failed: %v", err)
 			} else {
@@ -216,7 +229,7 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 	// or a mock without changing search logic.
 	var fullTextResults []FullTextSearchResult
 	if hsm.textStore != nil {
-		tsResults, tsErr := hsm.textStore.Search(ctx, query, textindex.SearchOpts{Limit: limit})
+		tsResults, tsErr := hsm.textStore.Search(ctx, query, textindex.SearchOpts{Limit: limit, ScopeID: hsm.scopeID})
 		if tsErr != nil {
 			log.Printf("Warning: text store search failed: %v", tsErr)
 		} else {
@@ -264,9 +277,16 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 	}
 
 	// 3. Semantic Search (graph-based name/description matching)
-	semanticResults, err := hsm.queryBuilder.SearchNodes(ctx, query, []string{"Function", "Method", "Class", "Document", "Feature", "Symbol"}, limit)
-	if err != nil {
-		log.Printf("Warning: semantic search failed: %v", err)
+	nodeLabels := []string{"Function", "Method", "Class", "Document", "Feature", "Symbol"}
+	var semanticResults []*neo4jdriver.Record
+	var semanticErr error
+	if hsm.scopeID != "" && hsm.scopeID != "main" {
+		semanticResults, semanticErr = hsm.queryBuilder.SearchNodesScoped(ctx, query, nodeLabels, limit, hsm.scopeID)
+	} else {
+		semanticResults, semanticErr = hsm.queryBuilder.SearchNodes(ctx, query, nodeLabels, limit)
+	}
+	if semanticErr != nil {
+		log.Printf("Warning: semantic search failed: %v", semanticErr)
 	} else {
 		for i, record := range semanticResults {
 			recordMap := record.AsMap()
@@ -375,8 +395,13 @@ func (hsm *HybridSearchManager) UnifiedSearch(ctx context.Context, query string,
 
 // getResultKey generates a stable unique key for result deduplication.
 // Priority: nodeKey (most stable) > elementId > name+type fallback.
+// Strips any scopeId:: prefix so that overlay and main entries merge.
 func (hsm *HybridSearchManager) getResultKey(node map[string]interface{}) string {
 	if nk, ok := node["nodeKey"].(string); ok && nk != "" {
+		// Strip scopeId:: prefix if present.
+		if idx := strings.Index(nk, "::"); idx >= 0 {
+			return nk[idx+2:]
+		}
 		return nk
 	}
 	if id, ok := node["elementId"].(string); ok && id != "" {
@@ -594,12 +619,17 @@ func (hsm *HybridSearchManager) resolveNodeKeys(ctx context.Context, results []V
 	nodes := make([]map[string]interface{}, len(results))
 
 	// Collect nodeKeys for batch lookup.
+	// Vector IDs may be scoped (scopeId::nodeKey); extract the bare nodeKey.
 	var nodeKeys []string
 	keyIndex := make(map[string][]int) // nodeKey -> indices in results
 	for i, r := range results {
 		nk, _ := r.Metadata["nodeKey"].(string)
 		if nk == "" {
 			nk = r.ID
+			// Strip scopeId:: prefix if present.
+			if idx := strings.Index(nk, "::"); idx >= 0 {
+				nk = nk[idx+2:]
+			}
 		}
 		if nk != "" {
 			keyIndex[nk] = append(keyIndex[nk], i)
@@ -617,14 +647,21 @@ func (hsm *HybridSearchManager) resolveNodeKeys(ctx context.Context, results []V
 		return nodes
 	}
 
-	// Batch-resolve from Neo4j.
+	// Batch-resolve from Neo4j, preferring overlay scope.
 	resolveQuery := `
 		UNWIND $keys AS key
 		MATCH (n)
 		WHERE n.nodeKey = key
+		WITH key, n
+		ORDER BY CASE WHEN n.scopeId = $scopeId THEN 0 ELSE 1 END
+		WITH key, collect(n)[0] AS n
 		RETURN n.nodeKey AS nodeKey, n, labels(n) AS labels
 	`
-	records, err := hsm.client.ExecuteQuery(ctx, resolveQuery, map[string]any{"keys": nodeKeys})
+	scopeID := hsm.scopeID
+	if scopeID == "" {
+		scopeID = "main"
+	}
+	records, err := hsm.client.ExecuteQuery(ctx, resolveQuery, map[string]any{"keys": nodeKeys, "scopeId": scopeID})
 	if err != nil {
 		log.Printf("Warning: failed to resolve nodeKeys from Neo4j: %v", err)
 		return nodes

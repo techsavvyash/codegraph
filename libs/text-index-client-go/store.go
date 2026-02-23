@@ -16,6 +16,7 @@ type SearchOpts struct {
 	MinScore  float64
 	TenantID  string
 	Repo      string
+	ScopeID   string   // Filter results to this scope (e.g. "main", "pr-42").
 	NodeTypes []string
 }
 

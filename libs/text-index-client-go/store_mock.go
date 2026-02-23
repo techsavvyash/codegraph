@@ -50,6 +50,13 @@ func (m *MockTextIndexStore) Search(ctx context.Context, query string, opts Sear
 	var out []TextResult
 	for _, d := range m.docs {
 		if strings.Contains(strings.ToLower(d.Content), lower) {
+			// Scope filter: if ScopeID is set, only return docs from that scope or "main".
+			if opts.ScopeID != "" {
+				docScope := d.Metadata["scopeId"]
+				if docScope != opts.ScopeID && docScope != "main" {
+					continue
+				}
+			}
 			out = append(out, TextResult{NodeKey: d.NodeKey, Score: 1.0, Snippet: d.Content, Metadata: d.Metadata})
 		}
 	}
