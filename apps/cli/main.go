@@ -14,6 +14,7 @@ import (
 	"github.com/context-maximiser/code-graph/libs/benchmarks-go"
 	"github.com/context-maximiser/code-graph/libs/evals-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/pipeline"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/llm-go"
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -442,6 +443,86 @@ The language will be auto-detected from the project structure, or you can specif
 				return fmt.Errorf("polyglot indexing failed: %w", err)
 			}
 			fmt.Println("✓ Polyglot indexing completed successfully")
+		}
+		return nil
+	},
+}
+
+// indexPipelineCmd runs the full 7-stage enrichment pipeline.
+var indexPipelineCmd = &cobra.Command{
+	Use:   "pipeline [path]",
+	Short: "Run the full enrichment pipeline (code + docs + linking + generated context)",
+	Long:  "Runs all 7 pipeline stages in canonical order: IngestCode, InferServiceDeps, GenerateFlowSpines, IngestDocuments, LinkDocumentChunks, GenerateContextDocs, RefreshRetrievalIndexes.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		docPaths, _ := cmd.Flags().GetStringSlice("doc-paths")
+
+		if serviceName == "" {
+			serviceName = "context-maximiser"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		scopeCtx := models.DefaultScope()
+		scopeFlag, _ := cmd.Flags().GetString("scope")
+		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		if scopeFlag == "pr" {
+			prID := scopeIDFlag
+			if prID == "" {
+				return fmt.Errorf("--scope-id is required when --scope=pr")
+			}
+			if strings.HasPrefix(prID, "pr-") {
+				prID = prID[3:]
+			}
+			scopeCtx = models.NewPRScope(prID)
+			fmt.Printf("Pipeline running in PR scope: pr-%s\n", prID)
+		}
+
+		cfg := &pipeline.PipelineConfig{
+			Client:      client,
+			ScopeCtx:    scopeCtx,
+			ProjectPath: projectPath,
+			ServiceName: serviceName,
+			Version:     version,
+			RepoURL:     repoURL,
+			DocPaths:    docPaths,
+		}
+
+		// Optionally wire embedding + vector + text stores.
+		if embSvc, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+			cfg.EmbeddingService = embSvc
+			if vs, err := createVectorStore(); err == nil {
+				defer vs.(*search.QdrantVectorStore).Close()
+				cfg.VectorStore = vs
+			}
+		}
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			cfg.TextStore = osStore
+		}
+
+		p := pipeline.New(pipeline.DefaultStages()...)
+		results := p.Run(context.Background(), cfg)
+		fmt.Println(pipeline.Summary(results))
+		for _, r := range results {
+			if r.Err != nil && !r.Skipped {
+				return fmt.Errorf("pipeline failed at stage %s: %w", r.Name, r.Err)
+			}
 		}
 		return nil
 	},
@@ -2523,6 +2604,7 @@ func init() {
 	// Index subcommands
 	indexCmd.AddCommand(indexProjectCmd)
 	indexCmd.AddCommand(indexSCIPCmd)
+	indexCmd.AddCommand(indexPipelineCmd)
 	indexCmd.AddCommand(indexIncrementalCmd)
 	indexCmd.AddCommand(indexDocsCmd)
 	indexDocsCmd.AddCommand(docsSyncCmd)
@@ -2551,6 +2633,18 @@ func init() {
 	indexSCIPCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
 	indexSCIPCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
 	indexSCIPCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
+
+	// Flags for pipeline command
+	indexPipelineCmd.Flags().StringP("service", "s", "", "Service name")
+	indexPipelineCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	indexPipelineCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	indexPipelineCmd.Flags().String("scope", "main", "Scope: 'main' (default) or 'pr'")
+	indexPipelineCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
+	indexPipelineCmd.Flags().StringSlice("doc-paths", nil, "Paths to local documentation directories")
+	indexPipelineCmd.Flags().String("embedding-api-key", "", "API key for embedding service")
+	indexPipelineCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model")
+	indexPipelineCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	indexPipelineCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
