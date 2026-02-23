@@ -21,7 +21,15 @@ func (s *IngestCodeStage) Optional() bool  { return false }
 
 func (s *IngestCodeStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
 	indexer := static.NewSCIPIndexer(cfg.Client, cfg.ServiceName, cfg.Version, cfg.RepoURL)
-	indexer.SetScope(cfg.ScopeCtx)
+	// Propagate tenant/repo into scope context.
+	scopeCtx := cfg.ScopeCtx
+	if cfg.TenantID != "" {
+		scopeCtx.TenantID = cfg.TenantID
+	}
+	if cfg.Repo != "" {
+		scopeCtx.Repo = cfg.Repo
+	}
+	indexer.SetScope(scopeCtx)
 	if cfg.EmbeddingService != nil {
 		indexer.SetEmbeddingService(cfg.EmbeddingService)
 	}

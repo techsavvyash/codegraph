@@ -457,6 +457,37 @@ func GetIndexes() []Index {
 			Properties: []string{"targetNodeKey", "scopeId"},
 			Type:       "BTREE",
 		},
+		// Tenant/repo namespacing indexes (Phase 7)
+		{
+			Name:       "function_tenant_repo_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"tenantId", "repoId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "file_tenant_repo_idx",
+			NodeLabel:  "File",
+			Properties: []string{"tenantId", "repoId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "service_tenant_repo_idx",
+			NodeLabel:  "Service",
+			Properties: []string{"tenantId", "repoId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "document_tenant_repo_idx",
+			NodeLabel:  "Document",
+			Properties: []string{"tenantId", "repoId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "flow_tenant_repo_idx",
+			NodeLabel:  "Flow",
+			Properties: []string{"tenantId", "repoId"},
+			Type:       "BTREE",
+		},
 	}
 }
 

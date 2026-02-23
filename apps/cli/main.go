@@ -493,6 +493,15 @@ var indexPipelineCmd = &cobra.Command{
 			fmt.Printf("Pipeline running in PR scope: pr-%s\n", prID)
 		}
 
+		tenantID, _ := cmd.Flags().GetString("tenant-id")
+		repo, _ := cmd.Flags().GetString("repo")
+		if tenantID != "" {
+			scopeCtx.TenantID = tenantID
+		}
+		if repo != "" {
+			scopeCtx.Repo = repo
+		}
+
 		cfg := &pipeline.PipelineConfig{
 			Client:      client,
 			ScopeCtx:    scopeCtx,
@@ -500,6 +509,8 @@ var indexPipelineCmd = &cobra.Command{
 			ServiceName: serviceName,
 			Version:     version,
 			RepoURL:     repoURL,
+			TenantID:    tenantID,
+			Repo:        repo,
 			DocPaths:    docPaths,
 		}
 
@@ -2641,6 +2652,8 @@ func init() {
 	indexPipelineCmd.Flags().String("scope", "main", "Scope: 'main' (default) or 'pr'")
 	indexPipelineCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
 	indexPipelineCmd.Flags().StringSlice("doc-paths", nil, "Paths to local documentation directories")
+	indexPipelineCmd.Flags().String("tenant-id", "", "Tenant ID for multi-tenant namespacing")
+	indexPipelineCmd.Flags().String("repo", "", "Repository identifier for repo-level isolation")
 	indexPipelineCmd.Flags().String("embedding-api-key", "", "API key for embedding service")
 	indexPipelineCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model")
 	indexPipelineCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")

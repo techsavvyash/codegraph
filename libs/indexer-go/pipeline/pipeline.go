@@ -53,6 +53,8 @@ type PipelineConfig struct {
 	Version          string
 	RepoURL          string
 	Language         string // Auto-detected or explicit.
+	TenantID         string // Multi-tenant namespace (optional).
+	Repo             string // Repository identifier (optional).
 	EmbeddingService search.EmbeddingService
 	VectorStore      search.VectorStore
 	TextStore        textindex.TextIndexStore
