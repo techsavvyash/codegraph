@@ -404,46 +404,63 @@ func (idl *IntelligentDocumentLinker) consolidateMatches(directMatches, semantic
 	return result
 }
 
-// createMentionsRelationships creates MENTIONS relationships in the database
+// createMentionsRelationships creates MENTIONS relationships in the database using batch UNWIND.
 func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Context, documentID string, matches []CodeMatch) (int, error) {
-	createdLinks := 0
-
+	// Filter out low-confidence matches.
+	var filtered []CodeMatch
 	for _, match := range matches {
-		if match.Confidence < 0.15 { // Skip very low confidence matches
-			continue
+		if match.Confidence >= 0.15 {
+			filtered = append(filtered, match)
 		}
+	}
+	if len(filtered) == 0 {
+		return 0, nil
+	}
 
-		cypher := `
-			MATCH (doc {nodeKey: $docKey})
-			WHERE doc.scopeId = $scopeId OR doc.scopeId = 'main'
-			WITH doc ORDER BY CASE WHEN doc.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
-			MATCH (target {nodeKey: $targetKey})
-			WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
-			WITH doc, target ORDER BY CASE WHEN target.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
-			MERGE (doc)-[r:MENTIONS]->(target)
-			SET r.confidence = $confidence,
-			    r.reasons = $reasons,
-			    r.contextType = 'intelligent_linking',
-			    r.callGraphDepth = $callGraphDepth
-			RETURN elementId(r) AS id
-		`
-		_, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"docKey":         documentID,
+	// Build batch parameter list.
+	edgeMaps := make([]map[string]any, len(filtered))
+	for i, match := range filtered {
+		edgeMaps[i] = map[string]any{
 			"targetKey":      match.NodeKey,
-			"scopeId":        idl.scopeID,
 			"confidence":     match.Confidence,
 			"reasons":        match.MatchReasons,
 			"callGraphDepth": match.CallGraphDepth,
-		})
-		if err != nil {
-			log.Printf("Warning: failed to create MENTIONS relationship: %v", err)
-			continue
 		}
-
-		createdLinks++
 	}
 
-	return createdLinks, nil
+	cypher := `
+		MATCH (doc {nodeKey: $docKey})
+		WHERE doc.scopeId = $scopeId OR doc.scopeId = 'main'
+		WITH doc ORDER BY CASE WHEN doc.scopeId = $scopeId THEN 0 ELSE 1 END LIMIT 1
+		UNWIND $edges AS edge
+		MATCH (target {nodeKey: edge.targetKey})
+		WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
+		WITH doc, target, edge ORDER BY CASE WHEN target.scopeId = $scopeId THEN 0 ELSE 1 END
+		WITH doc, head(collect(target)) AS target, edge
+		WHERE target IS NOT NULL
+		MERGE (doc)-[r:MENTIONS]->(target)
+		SET r.confidence = edge.confidence,
+		    r.reasons = edge.reasons,
+		    r.contextType = 'intelligent_linking',
+		    r.callGraphDepth = edge.callGraphDepth
+		RETURN count(r) AS created
+	`
+	records, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"docKey":  documentID,
+		"scopeId": idl.scopeID,
+		"edges":   edgeMaps,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("batch MENTIONS creation failed: %w", err)
+	}
+
+	if len(records) > 0 {
+		m := records[0].AsMap()
+		if cnt, ok := m["created"].(int64); ok {
+			return int(cnt), nil
+		}
+	}
+	return len(filtered), nil
 }
 
 // Helper functions

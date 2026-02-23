@@ -51,17 +51,19 @@ func (cl *ChunkLinker) LinkChunksForDocument(ctx context.Context, docNodeKey, sc
 		return 0, fmt.Errorf("failed to load chunks: %w", err)
 	}
 
-	totalLinks := 0
+	var allEdges []ChunkMentionEdge
 	for _, chunk := range chunks {
 		edges := cl.analyzeChunkForMentions(ctx, chunk)
-		for _, edge := range edges {
-			if err := cl.createMentionEdge(ctx, edge, scopeID); err != nil {
-				log.Printf("Warning: failed to create mention edge from %s to %s: %v",
-					edge.ChunkNodeKey, edge.TargetNodeKey, err)
-				continue
-			}
-			totalLinks++
-		}
+		allEdges = append(allEdges, edges...)
+	}
+
+	if len(allEdges) == 0 {
+		return 0, nil
+	}
+
+	totalLinks, err := cl.createMentionEdgesBatch(ctx, allEdges, scopeID)
+	if err != nil {
+		return totalLinks, fmt.Errorf("batch mention edge creation: %w", err)
 	}
 
 	return totalLinks, nil
@@ -197,6 +199,81 @@ func (cl *ChunkLinker) createMentionEdge(ctx context.Context, edge ChunkMentionE
 
 	_, err := cl.client.ExecuteQuery(ctx, cypher, params)
 	return err
+}
+
+// createMentionEdgesBatch creates MENTIONS edges in batches using UNWIND.
+// This is significantly faster than individual createMentionEdge calls for
+// documents with many chunk-to-code references.
+func (cl *ChunkLinker) createMentionEdgesBatch(ctx context.Context, edges []ChunkMentionEdge, scopeID string) (int, error) {
+	const batchSize = 50
+	totalCreated := 0
+
+	for i := 0; i < len(edges); i += batchSize {
+		end := i + batchSize
+		if end > len(edges) {
+			end = len(edges)
+		}
+		batch := edges[i:end]
+
+		edgeMaps := make([]map[string]any, len(batch))
+		now := time.Now().UTC().Format(time.RFC3339)
+		for j, e := range batch {
+			edgeMaps[j] = map[string]any{
+				"chunkKey":   e.ChunkNodeKey,
+				"targetKey":  e.TargetNodeKey,
+				"confidence": e.Confidence,
+				"reasons":    e.Reasons,
+				"model":      e.Model,
+				"createdAt":  now,
+			}
+		}
+
+		cypher := `
+			UNWIND $edges AS edge
+			MATCH (chunk:DocumentChunk {nodeKey: edge.chunkKey, scopeId: $scopeId})
+			MATCH (target {nodeKey: edge.targetKey})
+			WHERE target.scopeId = $scopeId OR target.scopeId = 'main'
+			WITH chunk, target, edge ORDER BY CASE WHEN target.scopeId = $scopeId THEN 0 ELSE 1 END
+			WITH chunk, head(collect(target)) AS target, edge
+			WHERE target IS NOT NULL
+			MERGE (chunk)-[r:MENTIONS]->(target)
+			SET r.confidence = edge.confidence,
+			    r.reasons = edge.reasons,
+			    r.model = edge.model,
+			    r.createdAt = edge.createdAt,
+			    r.scopeId = $scopeId
+			RETURN count(r) AS created`
+		params := map[string]any{
+			"edges":   edgeMaps,
+			"scopeId": scopeID,
+		}
+
+		records, err := cl.client.ExecuteQuery(ctx, cypher, params)
+		if err != nil {
+			log.Printf("Warning: batch mention edge creation failed for batch starting at %d: %v", i, err)
+			// Fallback to individual writes for this batch.
+			for _, edge := range batch {
+				if err := cl.createMentionEdge(ctx, edge, scopeID); err != nil {
+					log.Printf("Warning: failed to create mention edge from %s to %s: %v",
+						edge.ChunkNodeKey, edge.TargetNodeKey, err)
+					continue
+				}
+				totalCreated++
+			}
+			continue
+		}
+
+		if len(records) > 0 {
+			m := records[0].AsMap()
+			if cnt, ok := m["created"].(int64); ok {
+				totalCreated += int(cnt)
+			} else {
+				totalCreated += len(batch) // Assume all created if count unavailable.
+			}
+		}
+	}
+
+	return totalCreated, nil
 }
 
 // extractBacktickRefs extracts code references from backtick expressions.

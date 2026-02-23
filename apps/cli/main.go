@@ -527,8 +527,16 @@ var indexPipelineCmd = &cobra.Command{
 			cfg.TextStore = osStore
 		}
 
+		parallel, _ := cmd.Flags().GetBool("parallel")
+
 		p := pipeline.New(pipeline.DefaultStages()...)
-		results := p.Run(context.Background(), cfg)
+		var results []pipeline.StageResult
+		if parallel {
+			fmt.Println("Running pipeline with parallel tier execution")
+			results = p.RunParallel(context.Background(), cfg, pipeline.DefaultTiers())
+		} else {
+			results = p.Run(context.Background(), cfg)
+		}
 		fmt.Println(pipeline.Summary(results))
 		for _, r := range results {
 			if r.Err != nil && !r.Skipped {
@@ -2658,6 +2666,7 @@ func init() {
 	indexPipelineCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model")
 	indexPipelineCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
 	indexPipelineCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
+	indexPipelineCmd.Flags().Bool("parallel", false, "Run independent pipeline stages in parallel tiers")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")

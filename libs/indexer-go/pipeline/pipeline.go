@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -120,6 +121,84 @@ func (p *Pipeline) Run(ctx context.Context, cfg *PipelineConfig) []StageResult {
 	}
 
 	return results
+}
+
+// StageTier groups stages that can run concurrently within a tier.
+// Tiers execute sequentially; stages within a tier execute in parallel.
+type StageTier struct {
+	Stages []Stage
+}
+
+// DefaultTiers returns the default parallel execution tiers.
+// Tier 0: IngestCode (required, must run first)
+// Tier 1: InferServiceDeps, GenerateFlowSpines, IngestDocuments (independent)
+// Tier 2: LinkDocumentChunks, GenerateContextDocs (depend on tier 1)
+// Tier 3: RefreshRetrievalIndexes (final)
+func DefaultTiers() []StageTier {
+	return []StageTier{
+		{Stages: []Stage{&IngestCodeStage{}}},
+		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}, &IngestDocumentsStage{}}},
+		{Stages: []Stage{&LinkDocumentChunksStage{}, &GenerateContextDocsStage{}}},
+		{Stages: []Stage{&RefreshRetrievalIndexesStage{}}},
+	}
+}
+
+// RunParallel executes stages in tiered parallel groups.
+// Stages within a tier run concurrently; tiers run sequentially.
+// A non-optional failure in any tier aborts the pipeline.
+func (p *Pipeline) RunParallel(ctx context.Context, cfg *PipelineConfig, tiers []StageTier) []StageResult {
+	var allResults []StageResult
+
+	for tierIdx, tier := range tiers {
+		log.Printf("[pipeline] Starting tier %d with %d stage(s)", tierIdx, len(tier.Stages))
+
+		tierResults := make([]StageResult, len(tier.Stages))
+		var wg sync.WaitGroup
+
+		for i, stage := range tier.Stages {
+			wg.Add(1)
+			go func(idx int, s Stage) {
+				defer wg.Done()
+				start := time.Now()
+				log.Printf("[pipeline] Running stage: %s (tier %d)", s.Name(), tierIdx)
+
+				items, err := s.Run(ctx, cfg)
+				dur := time.Since(start)
+
+				result := StageResult{
+					Name:     s.Name(),
+					Duration: dur,
+					Items:    items,
+					Err:      err,
+				}
+
+				if err != nil {
+					if s.Optional() {
+						log.Printf("[pipeline] Optional stage %s failed (%.1fs): %v", s.Name(), dur.Seconds(), err)
+						result.Skipped = true
+					} else {
+						log.Printf("[pipeline] Stage %s failed (%.1fs): %v", s.Name(), dur.Seconds(), err)
+					}
+				} else {
+					log.Printf("[pipeline] Stage %s completed (%.1fs): %d items", s.Name(), dur.Seconds(), items)
+				}
+
+				tierResults[idx] = result
+			}(i, stage)
+		}
+
+		wg.Wait()
+
+		// Check for non-optional failures in this tier.
+		for _, result := range tierResults {
+			allResults = append(allResults, result)
+			if result.Err != nil && !result.Skipped {
+				return allResults // Abort on non-optional failure.
+			}
+		}
+	}
+
+	return allResults
 }
 
 // Summary returns a human-readable summary of the pipeline run.

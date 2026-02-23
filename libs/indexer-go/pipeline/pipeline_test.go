@@ -77,6 +77,55 @@ func TestPipeline_OptionalFailureContinues(t *testing.T) {
 	}
 }
 
+func TestPipeline_RunParallel(t *testing.T) {
+	s1 := &fakeStage{name: "A", items: 5}
+	s2 := &fakeStage{name: "B", items: 3, optional: true}
+	s3 := &fakeStage{name: "C", items: 2, optional: true}
+	s4 := &fakeStage{name: "D", items: 1}
+
+	tiers := []StageTier{
+		{Stages: []Stage{s1}},
+		{Stages: []Stage{s2, s3}},
+		{Stages: []Stage{s4}},
+	}
+
+	p := New(s1, s2, s3, s4)
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+	results := p.RunParallel(context.Background(), cfg, tiers)
+
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+	if !s1.ran || !s2.ran || !s3.ran || !s4.ran {
+		t.Fatal("expected all stages to run")
+	}
+}
+
+func TestPipeline_RunParallelAbortOnNonOptionalFailure(t *testing.T) {
+	s1 := &fakeStage{name: "A", items: 1}
+	s2 := &fakeStage{name: "B", err: errors.New("boom")} // non-optional
+	s3 := &fakeStage{name: "C", items: 2, optional: true}
+	s4 := &fakeStage{name: "D", items: 1}
+
+	tiers := []StageTier{
+		{Stages: []Stage{s1}},
+		{Stages: []Stage{s2, s3}}, // B fails non-optionally
+		{Stages: []Stage{s4}},     // should not run
+	}
+
+	p := New(s1, s2, s3, s4)
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+	results := p.RunParallel(context.Background(), cfg, tiers)
+
+	// Tier 0 (1 result) + tier 1 (up to 2 results, aborts at non-optional failure)
+	if len(results) > 3 {
+		t.Fatalf("expected at most 3 results (abort in tier 1), got %d", len(results))
+	}
+	if s4.ran {
+		t.Error("stage D should not have run after non-optional failure in previous tier")
+	}
+}
+
 func TestSummary(t *testing.T) {
 	results := []StageResult{
 		{Name: "A", Items: 5},

@@ -96,19 +96,20 @@ func (g *ContextGenerator) StorePRSummary(ctx context.Context, prID, title, cont
 		fmt.Printf("Warning: failed to create DOCUMENTS edge: %v\n", err)
 	}
 
-	// Link GeneratedDoc -[DERIVED_FROM]-> changed Files
-	for _, fileKey := range changedFileKeys {
-		cypher := `
+	// Link GeneratedDoc -[DERIVED_FROM]-> changed Files (batch)
+	if len(changedFileKeys) > 0 {
+		cypher = `
+			UNWIND $fileKeys AS fk
 			MATCH (gd:GeneratedDoc {nodeKey: $genDocKey, scopeId: $scopeId})
-			MATCH (f:File {nodeKey: $fileKey})
+			MATCH (f:File {nodeKey: fk})
 			MERGE (gd)-[:DERIVED_FROM]->(f)`
 		_, err = g.client.ExecuteQuery(ctx, cypher, map[string]any{
 			"genDocKey": genDocKey,
-			"fileKey":   fileKey,
+			"fileKeys":  changedFileKeys,
 			"scopeId":   g.scopeCtx.ScopeID,
 		})
 		if err != nil {
-			fmt.Printf("Warning: failed to create DERIVED_FROM edge to %s: %v\n", fileKey, err)
+			fmt.Printf("Warning: failed to create DERIVED_FROM edges: %v\n", err)
 		}
 	}
 
