@@ -12,6 +12,7 @@ import (
 
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/libs/benchmarks-go"
+	"github.com/context-maximiser/code-graph/libs/evals-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/llm-go"
@@ -90,6 +91,7 @@ func init() {
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(benchmarkCmd)
+	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(indexersCmd)
 	indexersCmd.AddCommand(indexersInstallCmd)
@@ -604,6 +606,22 @@ var docsSyncCmd = &cobra.Command{
 
 		indexer := documents.NewDocumentIndexer(client)
 
+		// Attach OpenSearch text store if available (parity with index docs).
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			indexer.WithTextStore(osStore)
+			fmt.Println("📤 OpenSearch enabled — chunks will be indexed for BM25")
+		}
+
+		// Optionally wire vector store for embeddings + intelligent linking.
+		if embSvc, embErr := createEmbeddingServiceFromFlags(cmd); embErr == nil {
+			if vs, vsErr := createVectorStore(); vsErr == nil {
+				defer vs.(*search.QdrantVectorStore).Close()
+				indexer.WithVectorStore(embSvc, vs)
+				fmt.Println("🧠 Vector store enabled — embeddings + intelligent linking active")
+			}
+		}
+
 		// Set scope if provided.
 		syncScopeFlag, _ := cmd.Flags().GetString("scope")
 		syncScopeIDFlag, _ := cmd.Flags().GetString("scope-id")
@@ -1092,6 +1110,88 @@ var benchmarkCmd = &cobra.Command{
 	Use:   "benchmark",
 	Short: "Performance and memory benchmarking",
 	Long:  "Run comprehensive benchmarks to analyze performance and memory usage of indexing operations",
+}
+
+// evalCmd is the parent command for evaluation tasks
+var evalCmd = &cobra.Command{
+	Use:   "eval",
+	Short: "Retrieval quality evaluation",
+	Long:  "Evaluate retrieval quality using ground-truth datasets with metrics like Recall@K, nDCG, and MRR",
+}
+
+// evalRetrievalCmd runs a retrieval evaluation against a golden dataset
+var evalRetrievalCmd = &cobra.Command{
+	Use:   "retrieval",
+	Short: "Evaluate retrieval quality against a golden dataset",
+	Long: `Run retrieval evaluation using a ground-truth YAML/JSON dataset.
+
+Measures Recall@K, nDCG, MRR, Precision, per-source contribution, and latency
+across hybrid, vector-only, bm25-only, or semantic-only search modes.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		datasetPath, _ := cmd.Flags().GetString("dataset")
+		if datasetPath == "" {
+			return fmt.Errorf("--dataset is required")
+		}
+		mode, _ := cmd.Flags().GetString("mode")
+		limit, _ := cmd.Flags().GetInt("limit")
+		warmup, _ := cmd.Flags().GetInt("warmup")
+		jsonOutput, _ := cmd.Flags().GetBool("json")
+		verboseFlag, _ := cmd.Flags().GetBool("verbose")
+
+		// Load dataset
+		dataset, err := evals.LoadDataset(datasetPath)
+		if err != nil {
+			return fmt.Errorf("load dataset: %w", err)
+		}
+		fmt.Printf("Loaded dataset %q with %d queries\n", dataset.Name, len(dataset.Queries))
+
+		// Create search infrastructure
+		embSvc, err := createEmbeddingServiceFromFlags(cmd)
+		if err != nil {
+			return fmt.Errorf("create embedding service: %w", err)
+		}
+
+		vectorStore, err := createVectorStore()
+		if err != nil {
+			return fmt.Errorf("create vector store: %w", err)
+		}
+
+		neo4jClient, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("create neo4j client: %w", err)
+		}
+		defer neo4jClient.Close(context.Background())
+
+		searchMgr := search.NewHybridSearchManager(neo4jClient, embSvc, vectorStore)
+
+		// Optionally attach OpenSearch text store
+		if osStore, ok := createOpenSearchStore(); ok {
+			searchMgr = searchMgr.WithTextStore(osStore)
+		}
+
+		// Run evaluation
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		runner := evals.NewEvalRunner(searchMgr)
+		run, err := runner.Run(ctx, evals.RunConfig{
+			Dataset: dataset,
+			Mode:    evals.SearchMode(mode),
+			Limit:   limit,
+			Warmup:  warmup,
+			Verbose: verboseFlag,
+		})
+		if err != nil {
+			return fmt.Errorf("eval run: %w", err)
+		}
+
+		// Output
+		if jsonOutput {
+			return evals.PrintJSON(os.Stdout, run)
+		}
+		evals.PrintReport(os.Stdout, run)
+		return nil
+	},
 }
 
 var benchmarkMemoryCmd = &cobra.Command{
@@ -2470,6 +2570,10 @@ func init() {
 	docsSyncCmd.Flags().String("api-token", "", "API token for authentication")
 	docsSyncCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
 	docsSyncCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
+	docsSyncCmd.Flags().String("embedding-api-key", "", "API key for embedding service (also reads EMBEDDING_API_KEY env)")
+	docsSyncCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model to use")
+	docsSyncCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	docsSyncCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 
 	// Flags for tombstone command
 	indexTombstoneCmd.Flags().String("scope", "pr", "Scope for tombstone creation (must be 'pr')")
@@ -2581,6 +2685,20 @@ func init() {
 	// Deprecated flags (backward compatibility)
 	linkFeaturesCmd.Flags().String("model", "gemini-embedding-001", "Deprecated: use --embedding-model instead")
 	linkFeaturesCmd.Flags().Bool("gemini", false, "Deprecated: use --provider=gemini instead")
+
+	// Eval subcommands
+	evalCmd.AddCommand(evalRetrievalCmd)
+
+	// Eval retrieval flags
+	evalRetrievalCmd.Flags().String("dataset", "", "Path to ground-truth YAML/JSON dataset (required)")
+	evalRetrievalCmd.Flags().String("mode", "hybrid", "Search mode: hybrid, vector-only, bm25-only, semantic-only")
+	evalRetrievalCmd.Flags().Int("limit", 0, "Max results per query (0 = use dataset defaultK)")
+	evalRetrievalCmd.Flags().Int("warmup", 2, "Number of warmup queries before evaluation")
+	evalRetrievalCmd.Flags().Bool("json", false, "Output results as JSON instead of table")
+	evalRetrievalCmd.Flags().String("embedding-api-key", "", "Embedding API key")
+	evalRetrievalCmd.Flags().String("embedding-base-url", "", "Embedding API base URL")
+	evalRetrievalCmd.Flags().String("embedding-model", "text-embedding-3-small", "Embedding model name")
+	evalRetrievalCmd.Flags().Bool("embedding-gemini", false, "Use Google Gemini embedding API")
 
 	// Server flags
 	serverCmd.Flags().IntP("port", "p", 8080, "Server port")

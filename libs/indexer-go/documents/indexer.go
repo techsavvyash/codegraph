@@ -144,6 +144,7 @@ func (di *DocumentIndexer) IndexDocument(ctx context.Context, filePath string) e
 
 	// Create chunk-level MENTIONS links with provenance.
 	if di.chunkLinker != nil {
+		di.chunkLinker.SetScope(di.scopeCtx.ScopeID)
 		linkCount, err := di.chunkLinker.LinkChunksForDocument(ctx, docNodeKey2, di.scopeCtx.ScopeID)
 		if err != nil {
 			fmt.Printf("Warning: chunk-level linking failed: %v\n", err)
@@ -587,6 +588,17 @@ func (di *DocumentIndexer) indexExternalDocument(ctx context.Context, extDoc *Ex
 		NodeKey: docNodeKey, Content: extDoc.Title + " " + extDoc.Content,
 		Metadata: map[string]string{"nodeType": "Document"},
 	}})
+
+	// Create chunk-level MENTIONS links with provenance (parity with IndexDocument).
+	if di.chunkLinker != nil {
+		di.chunkLinker.SetScope(di.scopeCtx.ScopeID)
+		linkCount, linkErr := di.chunkLinker.LinkChunksForDocument(ctx, docNodeKey, di.scopeCtx.ScopeID)
+		if linkErr != nil {
+			fmt.Printf("  Warning: chunk-level linking failed: %v\n", linkErr)
+		} else if linkCount > 0 {
+			fmt.Printf("  Chunk MENTIONS links: %d\n", linkCount)
+		}
+	}
 
 	// Link to code symbols.
 	if err := di.linkToCodeSymbols(ctx, docID, extDoc.Content); err != nil {
