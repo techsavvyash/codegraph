@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/pkg/indexer/documents"
-	"github.com/context-maximiser/code-graph/pkg/neo4j"
-	"github.com/context-maximiser/code-graph/pkg/search"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
+	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	"github.com/context-maximiser/code-graph/libs/search-go"
 	"github.com/joho/godotenv"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )

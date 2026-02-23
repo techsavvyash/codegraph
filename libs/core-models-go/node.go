@@ -249,7 +249,7 @@ type GeneratedDoc struct {
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
 func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 	now := time.Now()
-
+	
 	switch nodeType {
 	case ServiceNode:
 		return &Service{

@@ -1,0 +1,21 @@
+go 1.24.3
+
+use (
+	.
+	./apps/cli
+	./apps/mcp-server-go
+	./libs/benchmarks-go
+	./libs/core-models-go
+	./libs/evals-go
+	./libs/indexer-go
+	./libs/llm-go
+	./libs/neo4j-client-go
+	./libs/neo4j-go
+	./libs/query-go
+	./libs/schema-go
+	./libs/search-go
+	./libs/text-index-client-go
+	./libs/vector-client-go
+	./services/indexing-go
+	./services/retrieval-go
+)

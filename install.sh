@@ -178,6 +178,59 @@ setup_repository() {
     log_success "Repository ready at $INSTALL_DIR"
 }
 
+# Install SCIP indexers for polyglot code indexing
+install_scip_indexers() {
+    log_info "Installing SCIP indexers for polyglot code indexing..."
+
+    # scip-go — requires Go (already verified above)
+    if command_exists scip-go; then
+        log_success "scip-go already installed: $(which scip-go)"
+    else
+        log_info "Installing scip-go v0.1.26..."
+        if go install github.com/sourcegraph/scip-go/cmd/scip-go@v0.1.26; then
+            log_success "scip-go installed"
+        else
+            log_warn "Failed to install scip-go. Install it later with:"
+            echo "    go install github.com/sourcegraph/scip-go/cmd/scip-go@v0.1.26"
+        fi
+    fi
+
+    # npm-based indexers require Node.js
+    if ! command_exists npm; then
+        log_warn "npm not found — TypeScript and Python indexers will not be installed."
+        log_warn "Install Node.js from https://nodejs.org, then run:"
+        echo "    npm install -g @sourcegraph/scip-typescript@0.3.11"
+        echo "    npm install -g @sourcegraph/scip-python@0.6.6"
+        return 0
+    fi
+
+    # scip-typescript
+    if command_exists scip-typescript; then
+        log_success "scip-typescript already installed: $(which scip-typescript)"
+    else
+        log_info "Installing scip-typescript 0.3.11..."
+        if npm install -g @sourcegraph/scip-typescript@0.3.11; then
+            log_success "scip-typescript installed"
+        else
+            log_warn "Failed to install scip-typescript. Install it later with:"
+            echo "    npm install -g @sourcegraph/scip-typescript@0.3.11"
+        fi
+    fi
+
+    # scip-python
+    if command_exists scip-python; then
+        log_success "scip-python already installed: $(which scip-python)"
+    else
+        log_info "Installing scip-python 0.6.6..."
+        if npm install -g @sourcegraph/scip-python@0.6.6; then
+            log_success "scip-python installed"
+        else
+            log_warn "Failed to install scip-python. Install it later with:"
+            echo "    npm install -g @sourcegraph/scip-python@0.6.6"
+        fi
+    fi
+}
+
 # Build CLI
 build_cli() {
     log_info "Building CodeGraph CLI..."
@@ -299,10 +352,10 @@ EOF
 build_mcp_server() {
     log_info "Building MCP server..."
 
-    cd "$INSTALL_DIR/mcp-server"
-    go build -o codegraph-mcp .
+    cd "$INSTALL_DIR"
+    make build-mcp
 
-    log_success "MCP server built at $INSTALL_DIR/mcp-server/codegraph-mcp"
+    log_success "MCP server built at $INSTALL_DIR/bin/codegraph-mcp"
 }
 
 # Setup MCP server with Claude Code
@@ -314,7 +367,7 @@ setup_mcp_server() {
         log_warn "Claude CLI not found. MCP server will not be configured automatically."
         log_info "To add the MCP server manually, run:"
         echo ""
-        echo "    claude mcp add codegraph $INSTALL_DIR/mcp-server/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=$NEO4J_PASSWORD"
+        echo "    claude mcp add codegraph $INSTALL_DIR/bin/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=$NEO4J_PASSWORD"
         echo ""
         return 0
     fi
@@ -323,7 +376,7 @@ setup_mcp_server() {
         log_info "Adding MCP server to Claude Code..."
 
         claude mcp add codegraph \
-            "$INSTALL_DIR/mcp-server/codegraph-mcp" \
+            "$INSTALL_DIR/bin/codegraph-mcp" \
             NEO4J_URI=bolt://localhost:7687 \
             NEO4J_USERNAME=neo4j \
             NEO4J_PASSWORD="$NEO4J_PASSWORD"
@@ -333,7 +386,7 @@ setup_mcp_server() {
     else
         log_info "Skipping MCP server setup. You can add it later with:"
         echo ""
-        echo "    claude mcp add codegraph $INSTALL_DIR/mcp-server/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=$NEO4J_PASSWORD"
+        echo "    claude mcp add codegraph $INSTALL_DIR/bin/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=$NEO4J_PASSWORD"
         echo ""
     fi
 }
@@ -349,7 +402,7 @@ print_next_steps() {
     echo "  • CodeGraph CLI: $(which codegraph 2>/dev/null || echo "$INSTALL_DIR/bin/codegraph")"
     echo "  • Neo4j Database: bolt://localhost:7687"
     echo "  • Neo4j Browser: http://localhost:7474"
-    echo "  • MCP Server: $INSTALL_DIR/mcp-server/codegraph-mcp"
+    echo "  • MCP Server: $INSTALL_DIR/bin/codegraph-mcp"
     echo "  • Configuration: $HOME/.codegraph.yaml"
     echo ""
     echo -e "${BLUE}Quick Start:${NC}"
@@ -375,11 +428,9 @@ print_next_steps() {
         echo ""
     fi
 
-    echo -e "${BLUE}Install SCIP Indexers (language support):${NC}"
-    echo "  • Go:         go install github.com/sourcegraph/scip-go/cmd/scip-go@latest"
-    echo "  • TypeScript: npm install -g @sourcegraph/scip-typescript"
-    echo "  • Python:     pip install scip-python"
-    echo "  • Java:       See https://sourcegraph.github.io/scip-java/"
+    echo -e "${BLUE}SCIP Indexers (for polyglot indexing):${NC}"
+    echo "  • scip-go, scip-typescript, scip-python installed automatically above."
+    echo "  • Java/Scala/Kotlin: see https://sourcegraph.github.io/scip-java/"
     echo ""
     echo -e "${BLUE}Resources:${NC}"
     echo "  • Installation directory: $INSTALL_DIR"
@@ -413,6 +464,7 @@ main() {
     check_prerequisites
     setup_repository
     build_cli
+    install_scip_indexers
     create_config
     setup_neo4j
     build_mcp_server

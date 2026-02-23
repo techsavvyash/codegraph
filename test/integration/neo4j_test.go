@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/pkg/neo4j"
-	"github.com/context-maximiser/code-graph/pkg/schema"
-	"github.com/context-maximiser/code-graph/pkg/indexer/static"
+	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 )
 
 // Test configuration

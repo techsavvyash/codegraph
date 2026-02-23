@@ -36,14 +36,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 CodeGraph is a Neo4j-based code intelligence platform that creates a Code Property Graph (CPG). The system consists of:
 
 ### Core Components
-1. **CLI Application** (`cmd/codegraph/`) - Main entry point with Cobra commands
-2. **Neo4j Client** (`pkg/neo4j/`) - Database connectivity and query building
-3. **Schema Management** (`pkg/schema/`) - Neo4j constraints and indexes
-4. **Indexing Pipelines** (`pkg/indexer/`) - Two main indexers:
+1. **CLI Application** (`apps/cli/`) - Main entry point with Cobra commands
+2. **MCP Server** (`apps/mcp-server-go/`) - Model Context Protocol server
+3. **Neo4j Client** (`libs/neo4j-go/`) - Database connectivity and query building
+4. **Schema Management** (`libs/schema-go/`) - Neo4j constraints and indexes
+5. **Indexing Pipelines** (`libs/indexer-go/`) - Two main indexers:
    - `static/` - AST-based Go code indexing and SCIP protocol indexing
    - `documents/` - Document and feature extraction
-5. **Query Services** (`pkg/query/`) - LSP-like features and advanced queries
-6. **Data Models** (`pkg/models/`) - Graph node and relationship definitions
+6. **Query Services** (`libs/query-go/`) - LSP-like features and advanced queries
+7. **Data Models** (`libs/core-models-go/`) - Graph node and relationship definitions
 
 ### Neo4j Schema
 The platform uses a rich graph schema with node types:
@@ -131,7 +132,7 @@ Language auto-detection works by checking for:
 
 ## Project Structure Notes
 
-- **cmd/codegraph/main.go** - Single main file with all CLI commands using Cobra
+- **apps/cli/main.go** - Single main file with all CLI commands using Cobra
 - **Makefile** - Comprehensive build automation with 30+ targets
 - **docker-compose.yml** - Neo4j 5.15 with APOC plugins
 - Uses Go 1.24+ with modern dependency management
