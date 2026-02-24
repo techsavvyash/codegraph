@@ -60,10 +60,42 @@ test: ## Run unit tests across all workspace modules (excludes integration)
 test-integration: ## Run integration tests (requires Neo4j)
 	go test -v ./test/integration/...
 
-benchmark: ## Run benchmarks
+benchmark: ## Run all benchmarks
 	@for mod in $(GO_MODULES); do \
+		echo "--- benchmarking $$mod ---"; \
 		(cd $$mod && go test -bench=. -benchmem ./...); \
 	done
+
+benchmark-indexing: ## Run indexing-specific benchmarks
+	@echo "Running indexing benchmarks..."
+	cd libs/benchmarks-go && go test -bench=BenchmarkFullIndexing -benchmem -benchtime=3x ./...
+	cd libs/benchmarks-go && go test -bench=BenchmarkIncrementalIndexing -benchmem -benchtime=3x ./...
+	cd libs/indexer-go/static && go test -bench=. -benchmem ./...
+	cd libs/indexer-go/documents && go test -bench=. -benchmem ./...
+	cd libs/indexer-go/pipeline && go test -bench=. -benchmem ./...
+
+benchmark-report: ## Generate detailed benchmark report with comparison
+	@echo "Generating benchmark report..."
+	@mkdir -p benchmarks/reports
+	go test -bench=. -benchmem -benchtime=5x ./libs/benchmarks-go/... | tee benchmarks/reports/indexing-$(shell date +%Y%m%d-%H%M%S).txt
+	go test -bench=. -benchmem ./libs/indexer-go/... | tee -a benchmarks/reports/indexing-$(shell date +%Y%m%d-%H%M%S).txt
+	@echo "Report saved to benchmarks/reports/"
+
+benchmark-compare: ## Run benchmarks and save baseline for comparison
+	@echo "Running benchmarks and saving baseline..."
+	@mkdir -p benchmarks/baseline
+	go test -bench=. -benchmem ./libs/benchmarks-go/... > benchmarks/baseline/current.txt
+	@if [ -f benchmarks/baseline/baseline.txt ]; then \
+		echo "Comparing with baseline..."; \
+		benchstat benchmarks/baseline/baseline.txt benchmarks/baseline/current.txt; \
+	else \
+		echo "No baseline found. Saving current as baseline..."; \
+		cp benchmarks/baseline/current.txt benchmarks/baseline/baseline.txt; \
+	fi
+
+benchmark-quick: ## Run quick benchmarks (reduced iterations)
+	@echo "Running quick benchmarks..."
+	cd libs/indexer-go/pipeline && go test -bench=. -benchtime=1x ./...
 
 lint: ## Run golangci-lint across all workspace modules
 	@for mod in $(GO_MODULES); do \

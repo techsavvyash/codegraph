@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 )
 
 // slowFakeStage simulates a stage that takes a configurable duration.
@@ -113,5 +115,141 @@ func TestOverlaySLA_PRScopeCreation(t *testing.T) {
 	// 10,000 scope creations should complete in well under 100ms.
 	if dur > 100*time.Millisecond {
 		t.Errorf("scope creation too slow: %v for 10000 iterations", dur)
+	}
+}
+
+// BenchmarkPipelineWithManyStages benchmarks pipeline execution with many stages
+func BenchmarkPipelineWithManyStages(b *testing.B) {
+	var stages []Stage
+	for i := 0; i < 10; i++ {
+		stages = append(stages, &fakeStage{
+			name:     StageName(fmt.Sprintf("Stage%d", i)),
+			items:    i + 1,
+			optional: i > 0,
+		})
+	}
+
+	p := New(stages...)
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p.Run(context.Background(), cfg)
+	}
+}
+
+// BenchmarkPipelineParallelTiers benchmarks parallel execution with different tier configurations
+func BenchmarkPipelineParallelTiers(b *testing.B) {
+	tests := []struct {
+		name  string
+		tiers []StageTier
+	}{
+		{
+			name: "2Tiers_2Parallel",
+			tiers: []StageTier{
+				{Stages: []Stage{&fakeStage{name: "A", items: 1}}},
+				{Stages: []Stage{
+					&fakeStage{name: "B", items: 1, optional: true},
+					&fakeStage{name: "C", items: 1, optional: true},
+				}},
+			},
+		},
+		{
+			name: "3Tiers_Mixed",
+			tiers: []StageTier{
+				{Stages: []Stage{&fakeStage{name: "A", items: 1}}},
+				{Stages: []Stage{
+					&fakeStage{name: "B", items: 1, optional: true},
+					&fakeStage{name: "C", items: 1, optional: true},
+					&fakeStage{name: "D", items: 1, optional: true},
+				}},
+				{Stages: []Stage{&fakeStage{name: "E", items: 1, optional: true}}},
+			},
+		},
+		{
+			name: "4Tiers_Balanced",
+			tiers: []StageTier{
+				{Stages: []Stage{&fakeStage{name: "A", items: 1}}},
+				{Stages: []Stage{
+					&fakeStage{name: "B", items: 1, optional: true},
+					&fakeStage{name: "C", items: 1, optional: true},
+				}},
+				{Stages: []Stage{
+					&fakeStage{name: "D", items: 1, optional: true},
+					&fakeStage{name: "E", items: 1, optional: true},
+				}},
+				{Stages: []Stage{&fakeStage{name: "F", items: 1, optional: true}}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			var stages []Stage
+			for _, tier := range tt.tiers {
+				stages = append(stages, tier.Stages...)
+			}
+			p := New(stages...)
+			cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				p.RunParallel(context.Background(), cfg, tt.tiers)
+			}
+		})
+	}
+}
+
+// BenchmarkPipelineScopeCreation benchmarks different scope creation patterns
+func BenchmarkPipelineScopeCreation(b *testing.B) {
+	tests := []struct {
+		name      string
+		scopeFunc func() models.ScopeContext
+	}{
+		{
+			name:      "DefaultScope",
+			scopeFunc: models.DefaultScope,
+		},
+		{
+			name: "PRScope",
+			scopeFunc: func() models.ScopeContext {
+				return models.NewPRScope("123")
+			},
+		},
+		{
+			name: "TenantScope",
+			scopeFunc: func() models.ScopeContext {
+				sc := models.DefaultScope()
+				sc.TenantID = "tenant-123"
+				sc.Repo = "my-repo"
+				return sc
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = tt.scopeFunc()
+			}
+		})
+	}
+}
+
+// BenchmarkPipelineErrorHandling benchmarks pipeline execution with stage failures
+func BenchmarkPipelineErrorHandling(b *testing.B) {
+	stages := []Stage{
+		&fakeStage{name: "A", items: 1},
+		&fakeStage{name: "B", items: 1, optional: true, err: fmt.Errorf("simulated error")},
+		&fakeStage{name: "C", items: 1, optional: true},
+	}
+	p := New(stages...)
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Pipeline should continue despite optional stage failure
+		p.Run(context.Background(), cfg)
 	}
 }
