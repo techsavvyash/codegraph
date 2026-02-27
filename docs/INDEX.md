@@ -191,6 +191,7 @@ graph LR
 ### RFCs (Technical Specifications)
 
 - **[RFC-002](rfc/RFC-002-COMPLIANCE.md)** - LLM-based feature linking specification
+- **[RFC-003](rfc/003-evidence-driven-intelligence-architecture.md)** - Evidence-driven architecture blueprint (package boundaries, interfaces, eval gates)
 - See `docs/rfc/` for all RFCs
 
 ### Implementation Guides
