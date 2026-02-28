@@ -24,7 +24,7 @@ Related references:
 | 1 | P0-A: Make Stage 6 the Single Generation Authority | P0 | ✅ Done | Removed generation from SCIP Step 11; Stage 6 is sole authority for PR summaries, docstrings, flow summaries |
 | 2 | P0-B: Wire Generator + Verifier + Policy into Pipeline CLI | P0 | ✅ Done | Added Policy field to PipelineConfig; wired generator/verifier/policy in CLI pipeline+replay commands; graceful LLM fallback |
 | 3 | P0-C: Persist Statement-Level Citations | P0 | ✅ Done | Added Statements/Citations fields to GeneratedDoc model; Store methods accept+serialize GenerationResult citations; pre-persistence validation rejects uncited docs as diagnostics |
-| 4 | P0-D: Enforce Policy Gate and Persist Rejections as Diagnostics | P0 | ⬜ TODO | |
+| 4 | P0-D: Enforce Policy Gate and Persist Rejections as Diagnostics | P0 | ✅ Done | PR summaries routed through generateAndVerify; policy gate unit tests added |
 | 5 | P1-A: Provenance Validator as Mandatory Write Gate | P1 | ⬜ TODO | |
 | 6 | P1-B: Flow Quality Controls (Noise Reduction) | P1 | ⬜ TODO | |
 | 7 | P1-C: CI Quality Gate as Blocking | P1 | ⬜ TODO | |

@@ -358,6 +358,29 @@ func (g *ContextGenerator) GeneratePRSummaryForScope(ctx context.Context) (int, 
 			}
 		}
 
+		if g.generator != nil {
+			prNodeKey, _ := m["nodeKey"].(string)
+			bundle := &contracts.ContextBundle{
+				Anchors: []contracts.RetrievalCandidate{
+					{NodeKey: prNodeKey, NodeType: "PullRequest", Metadata: map[string]any{"prId": prID, "title": prTitle}},
+				},
+				Template:  DocTypePRSummary,
+				MaxTokens: 1000,
+				Scope:     g.scopeCtx.Scope,
+				ScopeID:   g.scopeCtx.ScopeID,
+			}
+
+			ok, err := g.generateAndVerify(ctx, bundle, DocTypePRSummary, "pull_request", prNodeKey, title)
+			if err != nil {
+				fmt.Printf("Warning: evidence-backed PR summary generation failed for %s: %v\n", prID, err)
+				continue
+			}
+			if ok {
+				created++
+			}
+			continue
+		}
+
 		if _, err := g.StorePRSummary(ctx, prID, title, summary, "stage6-auto", fileKeys, nil); err != nil {
 			fmt.Printf("Warning: failed to create PR summary for %s: %v\n", prID, err)
 			continue

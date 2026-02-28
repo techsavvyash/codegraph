@@ -1,10 +1,11 @@
 package generated
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/intelligence-go/contracts"
 )
 
@@ -284,6 +285,246 @@ func TestMarshalCitationProps_WithCitations(t *testing.T) {
 	}
 	if len(stmts) != 2 {
 		t.Errorf("expected 2 statement entries, got %d", len(stmts))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mock implementations for policy gate testing
+// ---------------------------------------------------------------------------
+
+type mockGenerator struct {
+	result *contracts.GenerationResult
+	err    error
+}
+
+func (m *mockGenerator) Generate(_ context.Context, _ *contracts.ContextBundle) (*contracts.GenerationResult, error) {
+	return m.result, m.err
+}
+
+type mockVerifier struct {
+	result *contracts.VerificationResult
+	err    error
+}
+
+func (m *mockVerifier) Verify(_ context.Context, _ *contracts.GenerationResult, _ models.ScopeContext) (*contracts.VerificationResult, error) {
+	return m.result, m.err
+}
+
+type mockPolicy struct {
+	decision PolicyDecision
+}
+
+func (m *mockPolicy) Evaluate(_ *contracts.GenerationResult, _ *contracts.VerificationResult) PolicyDecision {
+	return m.decision
+}
+
+// ---------------------------------------------------------------------------
+// Policy gate enforcement tests
+// ---------------------------------------------------------------------------
+
+func TestGenerateAndVerify_PolicyRejects(t *testing.T) {
+	gen := NewContextGenerator(nil) // nil client — storeDiagnostic gracefully skips
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Low quality output.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          false,
+			TotalStatements: 1,
+			CitedStatements: 0,
+			UnsupportedClaims: []int{0},
+			Errors:          []string{"low quality"},
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{
+			Allowed:          false,
+			Reason:           "below threshold",
+			PolicyViolations: []string{"citation_coverage < 0.8"},
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Template:  DocTypeDocstringSuggestion,
+		MaxTokens: 500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeDocstringSuggestion, "code_symbol", "func:a", "Test docstring")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when policy rejects")
+	}
+}
+
+func TestGenerateAndVerify_PolicyAccepts(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Well-cited output.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.95}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{
+			Allowed: true,
+			Reason:  "meets thresholds",
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Template:  DocTypeDocstringSuggestion,
+		MaxTokens: 500,
+	}
+
+	// With nil client, Store* will panic on MergeNode. We use recover to confirm
+	// that the accepted path was reached (i.e., policy did not reject).
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		gen.generateAndVerify(context.Background(), bundle, DocTypeDocstringSuggestion, "code_symbol", "func:a", "Test docstring")
+	}()
+
+	if !panicked {
+		t.Error("expected panic from nil client on accepted path — confirms policy accepted and tried to persist")
+	}
+}
+
+func TestGenerateAndVerify_VerifierFailsWithoutPolicy(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Unverified output.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.5}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:            false,
+			TotalStatements:   1,
+			CitedStatements:   0,
+			UnsupportedClaims: []int{0},
+			Errors:            []string{"verification failed"},
+		},
+	})
+	// No policy set — verifier failure alone should reject.
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Template:  DocTypeFlowSummary,
+		MaxTokens: 1000,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeFlowSummary, "flow", "func:a", "Test flow")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when verifier fails without policy")
+	}
+}
+
+func TestGenerateAndVerify_UncitedStatementsRejected(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Statement without citation.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: nil}, // No evidence refs — uncited
+			},
+			Model: "test-model",
+		},
+	})
+	// No verifier, no policy — citation validation should still reject.
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Template:  DocTypePRSummary,
+		MaxTokens: 500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when statements have no citations")
+	}
+}
+
+func TestGenerateAndVerify_PRSummaryDocType(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "PR summary with citation.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "pr:42", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{Allowed: true, Reason: "ok"},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "pr:42", NodeType: "PullRequest"}},
+		Template:  DocTypePRSummary,
+		MaxTokens: 1000,
+	}
+
+	// Should attempt StorePRSummary which panics with nil client — confirming PR summary
+	// is routed through the accepted path of generateAndVerify.
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:42", "PR summary")
+	}()
+
+	if !panicked {
+		t.Error("expected panic from nil client — confirms PR summary routes through generateAndVerify accepted path")
 	}
 }
 
