@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
@@ -148,6 +149,15 @@ func (fl *FlowLinker) LinkFlowsForDocument(ctx context.Context, docNodeKey strin
 }
 
 func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, flowName string, patterns []string) error {
+	// Build reasons from detected patterns.
+	reasons := make([]string, 0, len(patterns)+1)
+	reasons = append(reasons, "flow_step_reference")
+	for _, p := range patterns {
+		reasons = append(reasons, p)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
 	cypher := `
 		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})
 		WHERE chunk.scopeId = $scopeId OR chunk.scopeId = 'main'
@@ -159,15 +169,23 @@ func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, 
 		SET r.contextType = 'flow_aware_linking',
 		    r.flowName = $flowName,
 		    r.patterns = $patterns,
-		    r.scopeId = $scopeId
+		    r.scopeId = $scopeId,
+		    r.confidence = $confidence,
+		    r.reasons = $reasons,
+		    r.createdAt = $createdAt,
+		    r.model = $model
 		RETURN elementId(r) AS id
 	`
 	_, err := fl.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"chunkKey": chunkKey,
-		"flowKey":  flowKey,
-		"flowName": flowName,
-		"patterns": patterns,
-		"scopeId":  fl.scopeID,
+		"chunkKey":   chunkKey,
+		"flowKey":    flowKey,
+		"flowName":   flowName,
+		"patterns":   patterns,
+		"scopeId":    fl.scopeID,
+		"confidence": 0.7,
+		"reasons":    reasons,
+		"createdAt":  now,
+		"model":      "flow_aware_linking",
 	})
 	return err
 }

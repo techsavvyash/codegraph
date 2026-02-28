@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -42,6 +43,12 @@ func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 // SetScope sets the scope context for the document indexer.
 func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
 	di.scopeCtx = scope
+	if di.chunkLinker != nil {
+		di.chunkLinker.SetScope(scope.ScopeID)
+	}
+	if di.intelligentLinker != nil {
+		di.intelligentLinker.SetScope(scope.ScopeID)
+	}
 }
 
 // WithTextStore sets an optional TextIndexStore for pushing chunks to OpenSearch (or any BM25 backend).
@@ -63,6 +70,7 @@ func (di *DocumentIndexer) WithVectorStore(es search.EmbeddingService, vs search
 // EnableIntelligentLinking enables semantic analysis and intelligent linking
 func (di *DocumentIndexer) EnableIntelligentLinking(embeddingService search.EmbeddingService, vectorStore search.VectorStore) {
 	di.intelligentLinker = search.NewIntelligentDocumentLinker(di.client, embeddingService, vectorStore)
+	di.intelligentLinker.SetScope(di.scopeCtx.ScopeID)
 	di.useIntelligentLinking = true
 }
 
@@ -470,12 +478,21 @@ func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID st
 		}
 
 		// Create MENTIONS relationships to found symbols
+		now := time.Now().UTC().Format(time.RFC3339)
 		for _, record := range results {
 			recordMap := record.AsMap()
 			if symbolObj, ok := recordMap["s"]; ok {
 				if symbolNode, ok := symbolObj.(dbtype.Node); ok {
 					_, err = di.client.CreateRelationship(ctx, docID, symbolNode.ElementId, "MENTIONS",
-						map[string]any{"context": symbolRef, "scope": di.scopeCtx.Scope, "scopeId": di.scopeCtx.ScopeID})
+						map[string]any{
+							"context":    symbolRef,
+							"scope":      di.scopeCtx.Scope,
+							"scopeId":    di.scopeCtx.ScopeID,
+							"confidence": 0.5,
+							"reasons":    []string{"symbol_reference"},
+							"createdAt":  now,
+							"model":      "simple_symbol_extraction",
+						})
 					if err != nil {
 						continue // Skip failed relationships
 					}
