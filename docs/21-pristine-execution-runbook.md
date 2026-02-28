@@ -27,7 +27,7 @@ Related references:
 | 4 | P0-D: Enforce Policy Gate and Persist Rejections as Diagnostics | P0 | ✅ Done | PR summaries routed through generateAndVerify; policy gate unit tests added |
 | 5 | P1-A: Provenance Validator as Mandatory Write Gate | P1 | ✅ Done | Expanded ValidateMentionEdgeProps to require scopeId+model/strategy; added BuildMentionEdgeProps helper; fixed intelligent_linker, flow_linker, documents/indexer write sites |
 | 6 | P1-B: Flow Quality Controls (Noise Reduction) | P1 | ✅ Done | Replaced hardcoded Cypher name patterns with StructuralSeedFinder; priority-sorted seeds; wired budget from CLI --max-depth; removed dead SeedScorer code |
-| 7 | P1-C: CI Quality Gate as Blocking | P1 | ⬜ TODO | |
+| 7 | P1-C: CI Quality Gate as Blocking | P1 | ✅ Done | WriteGateReport + enforcement test + CI artifact upload |
 | 8 | P2-A: Scope Contract Hardening in CLI and Pipeline | P2 | ⬜ TODO | |
 
 ---
