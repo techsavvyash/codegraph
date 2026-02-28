@@ -1329,7 +1329,7 @@ func TestContextGenerator_StorePRSummary(t *testing.T) {
 	// Store the PR summary.
 	docID, err := gen.StorePRSummary(ctx, "200", "DB Refactor Summary",
 		"This PR refactors the database layer for better connection pooling.",
-		"test-model", []string{fileKey1, fileKey2})
+		"test-model", []string{fileKey1, fileKey2}, nil)
 	if err != nil {
 		t.Fatalf("StorePRSummary failed: %v", err)
 	}
@@ -1399,7 +1399,7 @@ func TestContextGenerator_ListGeneratedDocs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = gen.StorePRSummary(ctx, "300", "Test Summary", "content", "model", nil)
+	_, err = gen.StorePRSummary(ctx, "300", "Test Summary", "content", "model", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1573,7 +1573,7 @@ func TestContextGenerator_StoreFlowSummary(t *testing.T) {
 	gen.SetScope(models.DefaultScope())
 
 	docID, err := gen.StoreFlowSummary(ctx, flowKey, "Health Check Flow",
-		"Simple liveness probe endpoint.", "test-model")
+		"Simple liveness probe endpoint.", "test-model", nil)
 	if err != nil {
 		t.Fatalf("StoreFlowSummary failed: %v", err)
 	}

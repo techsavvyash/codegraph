@@ -1,9 +1,11 @@
 package generated
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/contracts"
 )
 
 func TestDocTypeConstants(t *testing.T) {
@@ -199,5 +201,120 @@ func TestGeneratedDocNodeKey_DifferentTypesDiffer(t *testing.T) {
 	k2 := models.GeneratedDocNodeKey(DocTypeFlowSummary, "pr:1")
 	if k1 == k2 {
 		t.Error("different doc types should produce different keys")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// marshalCitationProps tests
+// ---------------------------------------------------------------------------
+
+func TestMarshalCitationProps_NilGenResult(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	marshalCitationProps(props, nil)
+	if _, ok := props["citations"]; ok {
+		t.Error("nil genResult should not add citations")
+	}
+	if _, ok := props["statements"]; ok {
+		t.Error("nil genResult should not add statements")
+	}
+}
+
+func TestMarshalCitationProps_EmptyCitations(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	marshalCitationProps(props, &contracts.GenerationResult{
+		Content:   "test",
+		Citations: nil,
+	})
+	if _, ok := props["citations"]; ok {
+		t.Error("empty citations should not add citations prop")
+	}
+}
+
+func TestMarshalCitationProps_WithCitations(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	genResult := &contracts.GenerationResult{
+		Content: "Statement A.\nStatement B.",
+		Citations: []contracts.Citation{
+			{
+				StatementIndex: 0,
+				EvidenceRefs: []contracts.EvidenceRef{
+					{Kind: "citation", NodeKey: "func:a", Score: 0.95},
+				},
+			},
+			{
+				StatementIndex: 1,
+				EvidenceRefs: []contracts.EvidenceRef{
+					{Kind: "citation", NodeKey: "func:b", Score: 0.88},
+					{Kind: "graph_edge", NodeKey: "func:c", Score: 0.72},
+				},
+			},
+		},
+		Model: "test-model",
+	}
+
+	marshalCitationProps(props, genResult)
+
+	// Check citations is valid JSON
+	citationsRaw, ok := props["citations"].(string)
+	if !ok {
+		t.Fatal("citations prop should be a string")
+	}
+	var citations []contracts.Citation
+	if err := json.Unmarshal([]byte(citationsRaw), &citations); err != nil {
+		t.Fatalf("citations should be valid JSON: %v", err)
+	}
+	if len(citations) != 2 {
+		t.Errorf("expected 2 citations, got %d", len(citations))
+	}
+	if len(citations[0].EvidenceRefs) != 1 {
+		t.Errorf("expected 1 evidence ref for first citation, got %d", len(citations[0].EvidenceRefs))
+	}
+	if len(citations[1].EvidenceRefs) != 2 {
+		t.Errorf("expected 2 evidence refs for second citation, got %d", len(citations[1].EvidenceRefs))
+	}
+
+	// Check statements is valid JSON
+	stmtsRaw, ok := props["statements"].(string)
+	if !ok {
+		t.Fatal("statements prop should be a string")
+	}
+	var stmts []map[string]any
+	if err := json.Unmarshal([]byte(stmtsRaw), &stmts); err != nil {
+		t.Fatalf("statements should be valid JSON: %v", err)
+	}
+	if len(stmts) != 2 {
+		t.Errorf("expected 2 statement entries, got %d", len(stmts))
+	}
+}
+
+func TestGeneratedDocModel_WithCitations(t *testing.T) {
+	doc := models.GeneratedDoc{
+		Type:       DocTypePRSummary,
+		Title:      "PR #123 Summary",
+		Content:    "This PR adds feature X.",
+		Model:      "test-model",
+		SourceType: "pull_request",
+		SourceKey:  "pr:123",
+		Statements: `[{"index":0,"refs":2}]`,
+		Citations:  `[{"statementIndex":0,"evidenceRefs":[{"kind":"citation","nodeKey":"func:a"}]}]`,
+	}
+
+	if doc.Statements == "" {
+		t.Error("expected non-empty Statements")
+	}
+	if doc.Citations == "" {
+		t.Error("expected non-empty Citations")
+	}
+
+	// Verify Citations field is valid JSON
+	var citations []contracts.Citation
+	if err := json.Unmarshal([]byte(doc.Citations), &citations); err != nil {
+		t.Fatalf("Citations field should be valid JSON: %v", err)
+	}
+	if len(citations) != 1 {
+		t.Errorf("expected 1 citation, got %d", len(citations))
+	}
+	if citations[0].EvidenceRefs[0].NodeKey != "func:a" {
+		t.Errorf("expected nodeKey func:a, got %s", citations[0].EvidenceRefs[0].NodeKey)
 	}
 }
