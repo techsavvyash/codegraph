@@ -6,13 +6,17 @@ require (
 	github.com/context-maximiser/code-graph/libs/benchmarks-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/evals-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/generation-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/inference-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/intelligence-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/llm-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/schema-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/verification-go v0.0.0-00010101000000-000000000000
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
@@ -135,11 +139,15 @@ replace (
 	github.com/context-maximiser/code-graph/libs/benchmarks-go => ../../libs/benchmarks-go
 	github.com/context-maximiser/code-graph/libs/core-models-go => ../../libs/core-models-go
 	github.com/context-maximiser/code-graph/libs/evals-go => ../../libs/evals-go
+	github.com/context-maximiser/code-graph/libs/generation-go => ../../libs/generation-go
 	github.com/context-maximiser/code-graph/libs/indexer-go => ../../libs/indexer-go
+	github.com/context-maximiser/code-graph/libs/inference-go => ../../libs/inference-go
+	github.com/context-maximiser/code-graph/libs/intelligence-go => ../../libs/intelligence-go
 	github.com/context-maximiser/code-graph/libs/llm-go => ../../libs/llm-go
 	github.com/context-maximiser/code-graph/libs/neo4j-go => ../../libs/neo4j-go
 	github.com/context-maximiser/code-graph/libs/query-go => ../../libs/query-go
 	github.com/context-maximiser/code-graph/libs/schema-go => ../../libs/schema-go
 	github.com/context-maximiser/code-graph/libs/search-go => ../../libs/search-go
 	github.com/context-maximiser/code-graph/libs/text-index-client-go => ../../libs/text-index-client-go
+	github.com/context-maximiser/code-graph/libs/verification-go => ../../libs/verification-go
 )

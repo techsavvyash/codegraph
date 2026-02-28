@@ -3,8 +3,10 @@ package query
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/inference-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
@@ -26,16 +28,29 @@ type FlowSpineResult struct {
 
 // FlowSpineGenerator creates Flow spine nodes from API endpoints and call graphs.
 type FlowSpineGenerator struct {
-	client   *neo4j.Client
-	scopeCtx models.ScopeContext
+	client       *neo4j.Client
+	scopeCtx     models.ScopeContext
+	budget       inference.TraversalBudget
+	deduplicator *inference.FlowDeduplicator
+	seedFinder   *inference.StructuralSeedFinder
 }
 
-// NewFlowSpineGenerator creates a new generator.
+// NewFlowSpineGenerator creates a new generator with default traversal budget.
 func NewFlowSpineGenerator(client *neo4j.Client) *FlowSpineGenerator {
+	budget := inference.DefaultTraversalBudget
 	return &FlowSpineGenerator{
-		client:   client,
-		scopeCtx: models.DefaultScope(),
+		client:       client,
+		scopeCtx:     models.DefaultScope(),
+		budget:       budget,
+		deduplicator: inference.NewFlowDeduplicator(),
+		seedFinder:   inference.NewStructuralSeedFinder().WithBudget(budget),
 	}
+}
+
+// SetBudget overrides the traversal budget used for flow generation.
+func (g *FlowSpineGenerator) SetBudget(budget inference.TraversalBudget) {
+	g.budget = budget
+	g.seedFinder = inference.NewStructuralSeedFinder().WithBudget(budget)
 }
 
 // SetScope sets the scope context for flow generation.
@@ -46,6 +61,9 @@ func (g *FlowSpineGenerator) SetScope(scope models.ScopeContext) {
 // GenerateFromAPIEndpoints discovers API endpoints and builds flow spines by
 // traversing the call graph from each handler function up to maxDepth.
 func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDepth int) ([]FlowSpineResult, error) {
+	if maxDepth <= 0 {
+		maxDepth = g.budget.MaxDepth
+	}
 	if maxDepth <= 0 {
 		maxDepth = 2
 	}
@@ -109,6 +127,9 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 			}
 		}
 
+		// Deduplicate and filter steps through the traversal budget.
+		steps = g.deduplicateSteps(steps)
+
 		// Persist the Flow node and HAS_STEP edges.
 		if err := g.persistFlow(ctx, flowNodeKey, flowName, "api", routeKey, maxDepth, steps); err != nil {
 			fmt.Printf("Warning: failed to persist flow %s: %v\n", flowName, err)
@@ -123,22 +144,142 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 		})
 	}
 
+	if len(results) == 0 {
+		fallback, err := g.GenerateFromStructuralEntrypoints(ctx, maxDepth)
+		if err != nil {
+			return nil, err
+		}
+		return fallback, nil
+	}
+
+	return results, nil
+}
+
+// GenerateFromStructuralEntrypoints builds flows from framework-agnostic entrypoint
+// candidates when APIRoute nodes are unavailable. It uses the StructuralSeedFinder
+// to classify, score, and prioritize seeds instead of hardcoded name patterns.
+func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Context, maxDepth int) ([]FlowSpineResult, error) {
+	if maxDepth <= 0 {
+		maxDepth = 2
+	}
+
+	// Query candidate Function/Method nodes with caller counts and export status.
+	cypher := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+		WHERE (caller:Function OR caller:Method)
+		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		WITH fn, count(caller) AS incomingCalls
+		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
+		       coalesce(fn.isExported, false) AS isExported,
+		       incomingCalls`
+
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query structural entrypoints: %w", err)
+	}
+
+	// Build NodeInfo slice for the seed finder.
+	var nodes []inference.NodeInfo
+	for _, r := range records {
+		m := r.AsMap()
+		nodeKey := strVal(m, "nodeKey")
+		name := strVal(m, "name")
+		if nodeKey == "" || name == "" {
+			continue
+		}
+
+		nodeType := "Function"
+		if labels, ok := m["labels"].([]any); ok {
+			for _, l := range labels {
+				if s, ok := l.(string); ok && s == "Method" {
+					nodeType = "Method"
+					break
+				}
+			}
+		}
+
+		isExported := false
+		if v, ok := m["isExported"].(bool); ok {
+			isExported = v
+		}
+
+		callerCount := int64(0)
+		if v, ok := m["incomingCalls"].(int64); ok {
+			callerCount = v
+		}
+
+		nodes = append(nodes, inference.NodeInfo{
+			NodeKey:    nodeKey,
+			Name:       name,
+			NodeType:   nodeType,
+			IsExported: isExported,
+			HasCallers: callerCount > 0,
+		})
+	}
+
+	// Classify and score seeds using the StructuralSeedFinder.
+	seeds := g.seedFinder.ClassifySeeds(nodes)
+
+	// Sort by priority descending for deterministic, highest-quality-first ordering.
+	sort.Slice(seeds, func(i, j int) bool {
+		return seeds[i].Priority > seeds[j].Priority
+	})
+
+	// Cap to budget.MaxSteps to avoid generating too many flows.
+	if g.budget.MaxSteps > 0 && len(seeds) > g.budget.MaxSteps {
+		seeds = seeds[:g.budget.MaxSteps]
+	}
+
+	var results []FlowSpineResult
+	for _, seed := range seeds {
+		flowNodeKey := models.FlowNodeKey("entrypoint", seed.NodeKey)
+
+		steps := []FlowStep{{NodeKey: seed.NodeKey, Name: seed.Name, Label: seed.NodeType, Order: 0}}
+		callees, traceErr := g.traceCallees(ctx, seed.NodeKey, maxDepth, 1)
+		if traceErr == nil {
+			steps = append(steps, callees...)
+		}
+
+		// Deduplicate and filter steps through the traversal budget.
+		steps = g.deduplicateSteps(steps)
+
+		if err := g.persistFlow(ctx, flowNodeKey, seed.Name, "entrypoint", seed.NodeKey, maxDepth, steps); err != nil {
+			continue
+		}
+
+		results = append(results, FlowSpineResult{
+			FlowNodeKey: flowNodeKey,
+			FlowName:    seed.Name,
+			FlowType:    "entrypoint",
+			Steps:       steps,
+		})
+	}
+
 	return results, nil
 }
 
 // traceCallees recursively follows CALLS edges from a given function nodeKey.
+// It respects the budget's MaxFanout and MaxDepth, and filters blocked names.
 func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, remainingDepth, nextOrder int) ([]FlowStep, error) {
 	if remainingDepth <= 0 {
 		return nil, nil
 	}
 
-	cypher := `
+	fanout := g.budget.MaxFanout
+	if fanout <= 0 {
+		fanout = 10
+	}
+
+	cypher := fmt.Sprintf(`
 		MATCH (caller {nodeKey: $nodeKey})-[:CALLS]->(callee)
 		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		  AND (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
-		LIMIT 20`
+		LIMIT %d`, fanout)
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey, "scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
@@ -163,6 +304,14 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 					break
 				}
 			}
+		}
+
+		// Apply budget filters: skip blocked names and disallowed node types.
+		if g.budget.IsNameBlocked(calleeName) {
+			continue
+		}
+		if !g.budget.IsNodeAllowed(calleeLabel) {
+			continue
 		}
 
 		steps = append(steps, FlowStep{
@@ -325,4 +474,35 @@ func (g *FlowSpineGenerator) ListFlows(ctx context.Context, flowType string) ([]
 	}
 
 	return results, nil
+}
+
+// deduplicateSteps converts FlowSteps to inference.FlowStepInfo, runs the
+// deduplicator with the current budget, and converts back.
+func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep) []FlowStep {
+	if g.deduplicator == nil || len(steps) == 0 {
+		return steps
+	}
+
+	infos := make([]inference.FlowStepInfo, len(steps))
+	for i, s := range steps {
+		infos[i] = inference.FlowStepInfo{
+			NodeKey:  s.NodeKey,
+			Name:     s.Name,
+			NodeType: s.Label,
+			Order:    s.Order,
+		}
+	}
+
+	deduped := g.deduplicator.Deduplicate(infos, g.budget)
+
+	out := make([]FlowStep, len(deduped))
+	for i, d := range deduped {
+		out[i] = FlowStep{
+			NodeKey: d.NodeKey,
+			Name:    d.Name,
+			Label:   d.NodeType,
+			Order:   d.Order,
+		}
+	}
+	return out
 }
