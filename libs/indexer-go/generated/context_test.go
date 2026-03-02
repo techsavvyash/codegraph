@@ -336,11 +336,11 @@ func TestGenerateAndVerify_PolicyRejects(t *testing.T) {
 	})
 	gen.SetVerifier(&mockVerifier{
 		result: &contracts.VerificationResult{
-			Passed:          false,
-			TotalStatements: 1,
-			CitedStatements: 0,
+			Passed:            false,
+			TotalStatements:   1,
+			CitedStatements:   0,
 			UnsupportedClaims: []int{0},
-			Errors:          []string{"low quality"},
+			Errors:            []string{"low quality"},
 		},
 	})
 	gen.SetPolicy(&mockPolicy{
@@ -371,7 +371,7 @@ func TestGenerateAndVerify_PolicyAccepts(t *testing.T) {
 
 	gen.SetGenerator(&mockGenerator{
 		result: &contracts.GenerationResult{
-			Content: "Well-cited output.",
+			Content: "This docstring suggestion explains parameters, return behavior, and side effects with concrete evidence.",
 			Citations: []contracts.Citation{
 				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.95}}},
 			},
@@ -482,12 +482,61 @@ func TestGenerateAndVerify_UncitedStatementsRejected(t *testing.T) {
 	}
 }
 
+func TestGenerateAndVerify_LowInformationRejected(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "The pull request was successfully passed and is ready for the next steps.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "pr:1", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "pr:1", NodeType: "PullRequest"}},
+		Template:  DocTypePRSummary,
+		MaxTokens: 500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected low-information content to be rejected")
+	}
+}
+
+func TestLowInformationViolation(t *testing.T) {
+	if got := lowInformationViolation(DocTypePRSummary, ""); got == "" {
+		t.Fatal("expected empty content violation")
+	}
+
+	if got := lowInformationViolation(DocTypePRSummary, "The pull request was successfully passed and is ready for the next steps in development."); got == "" {
+		t.Fatal("expected generic-phrase violation")
+	}
+
+	if got := lowInformationViolation(DocTypeFlowSummary, "This flow summary describes handler dispatch, service calls, and persistence operations with concrete evidence references."); got != "" {
+		t.Fatalf("unexpected violation for strong content: %s", got)
+	}
+}
+
 func TestGenerateAndVerify_PRSummaryDocType(t *testing.T) {
 	gen := NewContextGenerator(nil)
 
 	gen.SetGenerator(&mockGenerator{
 		result: &contracts.GenerationResult{
-			Content: "PR summary with citation.",
+			Content: "This PR summary highlights indexed files, generated flows, verified evidence links, and scope-specific symbol changes to explain exactly what changed and why it matters.",
 			Citations: []contracts.Citation{
 				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "pr:42", Score: 0.9}}},
 			},

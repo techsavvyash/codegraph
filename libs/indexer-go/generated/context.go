@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -14,8 +15,8 @@ import (
 
 // GeneratedDocType constants for the different types of generated docs.
 const (
-	DocTypePRSummary          = "pr_summary"
-	DocTypeFlowSummary        = "flow_summary"
+	DocTypePRSummary           = "pr_summary"
+	DocTypeFlowSummary         = "flow_summary"
 	DocTypeDocstringSuggestion = "docstring_suggestion"
 )
 
@@ -372,6 +373,7 @@ func (g *ContextGenerator) GeneratePRSummaryForScope(ctx context.Context) (int, 
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypePRSummary, "pull_request", prNodeKey, title)
 			if err != nil {
+				g.storeGenerationFailureDiagnostic(ctx, DocTypePRSummary, "pull_request", prNodeKey, err)
 				fmt.Printf("Warning: evidence-backed PR summary generation failed for %s: %v\n", prID, err)
 				continue
 			}
@@ -439,6 +441,7 @@ func (g *ContextGenerator) GenerateDocstringSuggestionsForScope(ctx context.Cont
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypeDocstringSuggestion, "code_symbol", nk, title)
 			if err != nil {
+				g.storeGenerationFailureDiagnostic(ctx, DocTypeDocstringSuggestion, "code_symbol", nk, err)
 				fmt.Printf("Warning: evidence-backed docstring generation failed for %s: %v\n", name, err)
 				continue
 			}
@@ -507,6 +510,7 @@ func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (i
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypeFlowSummary, "flow", nk, title)
 			if err != nil {
+				g.storeGenerationFailureDiagnostic(ctx, DocTypeFlowSummary, "flow", nk, err)
 				fmt.Printf("Warning: evidence-backed flow summary generation failed for %s: %v\n", name, err)
 				continue
 			}
@@ -533,10 +537,11 @@ func (g *ContextGenerator) generateAndVerify(ctx context.Context, bundle *contra
 	if err != nil {
 		return false, fmt.Errorf("generation: %w", err)
 	}
+	var verResult *contracts.VerificationResult
 
 	// Run verifier if available.
 	if g.verifier != nil {
-		verResult, err := g.verifier.Verify(ctx, genResult, g.scopeCtx)
+		verResult, err = g.verifier.Verify(ctx, genResult, g.scopeCtx)
 		if err != nil {
 			return false, fmt.Errorf("verification: %w", err)
 		}
@@ -554,6 +559,11 @@ func (g *ContextGenerator) generateAndVerify(ctx context.Context, bundle *contra
 			g.storeDiagnostic(ctx, docType, sourceType, sourceKey, genResult, verResult, verResult.Errors)
 			return false, nil
 		}
+	}
+
+	if lowInfoViolation := lowInformationViolation(docType, genResult.Content); lowInfoViolation != "" {
+		g.storeDiagnostic(ctx, docType, sourceType, sourceKey, genResult, ensureVerificationResult(genResult, verResult), []string{lowInfoViolation})
+		return false, nil
 	}
 
 	// Validate that all statements have at least one citation before persisting.
@@ -597,8 +607,8 @@ func marshalCitationProps(docProps map[string]any, genResult *contracts.Generati
 
 	// Serialize individual statement texts extracted from citations index.
 	type statementEntry struct {
-		Index int    `json:"index"`
-		Refs  int    `json:"refs"`
+		Index int `json:"index"`
+		Refs  int `json:"refs"`
 	}
 	entries := make([]statementEntry, len(genResult.Citations))
 	for i, c := range genResult.Citations {
@@ -615,6 +625,19 @@ func (g *ContextGenerator) storeDiagnostic(ctx context.Context, docType, sourceT
 	if g.client == nil {
 		return
 	}
+	model := ""
+	content := ""
+	if genResult != nil {
+		model = genResult.Model
+		content = genResult.Content
+	}
+	unsupportedClaims := []int{}
+	if verResult != nil {
+		unsupportedClaims = verResult.UnsupportedClaims
+	}
+	if len(violations) == 0 {
+		violations = []string{"generation_rejected"}
+	}
 
 	diagKey := models.GenerationDiagnosticNodeKey(docType, sourceKey)
 	props := map[string]any{
@@ -622,10 +645,10 @@ func (g *ContextGenerator) storeDiagnostic(ctx context.Context, docType, sourceT
 		"type":              docType,
 		"sourceType":        sourceType,
 		"sourceKey":         sourceKey,
-		"model":             genResult.Model,
-		"content":           genResult.Content,
+		"model":             model,
+		"content":           content,
 		"rejectionReasons":  violations,
-		"unsupportedClaims": verResult.UnsupportedClaims,
+		"unsupportedClaims": unsupportedClaims,
 		"scope":             g.scopeCtx.Scope,
 		"scopeId":           g.scopeCtx.ScopeID,
 		"createdAt":         time.Now().UTC().Format(time.RFC3339),
@@ -636,4 +659,59 @@ func (g *ContextGenerator) storeDiagnostic(ctx context.Context, docType, sourceT
 	if err != nil {
 		fmt.Printf("Warning: failed to persist generation diagnostic for %s: %v\n", sourceKey, err)
 	}
+}
+
+func (g *ContextGenerator) storeGenerationFailureDiagnostic(ctx context.Context, docType, sourceType, sourceKey string, generationErr error) {
+	if generationErr == nil {
+		return
+	}
+	g.storeDiagnostic(ctx, docType, sourceType, sourceKey,
+		&contracts.GenerationResult{Model: "generation_error"},
+		&contracts.VerificationResult{Passed: false, Errors: []string{generationErr.Error()}},
+		[]string{fmt.Sprintf("generation_transport_error: %v", generationErr)})
+}
+
+func ensureVerificationResult(gen *contracts.GenerationResult, ver *contracts.VerificationResult) *contracts.VerificationResult {
+	if ver != nil {
+		return ver
+	}
+	total := len(gen.Citations)
+	return &contracts.VerificationResult{
+		Passed:          false,
+		TotalStatements: total,
+		CitedStatements: total,
+	}
+}
+
+func lowInformationViolation(docType, content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "low_information_content: empty_content"
+	}
+	wordCount := len(strings.Fields(trimmed))
+	minWords := 10
+	switch docType {
+	case DocTypePRSummary:
+		minWords = 24
+	case DocTypeFlowSummary:
+		minWords = 14
+	case DocTypeDocstringSuggestion:
+		minWords = 8
+	}
+	if wordCount < minWords {
+		return fmt.Sprintf("low_information_content: too_short (%d words < %d)", wordCount, minWords)
+	}
+
+	lower := strings.ToLower(trimmed)
+	for _, phrase := range []string{
+		"ready for the next steps",
+		"successfully passed",
+		"enhance the overall",
+		"critical issues identified",
+	} {
+		if strings.Contains(lower, phrase) {
+			return fmt.Sprintf("low_information_content: contains_generic_phrase(%q)", phrase)
+		}
+	}
+	return ""
 }

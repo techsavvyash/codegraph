@@ -8,21 +8,21 @@ import (
 type FlowSeedType string
 
 const (
-	SeedExportedRoot   FlowSeedType = "exported_root"    // Exported function with no callers
-	SeedEntrypoint     FlowSeedType = "entrypoint"       // Name patterns: main, init, handler, etc.
-	SeedHTTPHandler    FlowSeedType = "http_handler"     // Framework-detected HTTP handler
-	SeedMessageHandler FlowSeedType = "message_handler"  // Message consumer/worker
-	SeedTestEntry      FlowSeedType = "test_entry"       // Test function
+	SeedExportedRoot   FlowSeedType = "exported_root"   // Exported function with no callers
+	SeedEntrypoint     FlowSeedType = "entrypoint"      // Name patterns: main, init, handler, etc.
+	SeedHTTPHandler    FlowSeedType = "http_handler"    // Framework-detected HTTP handler
+	SeedMessageHandler FlowSeedType = "message_handler" // Message consumer/worker
+	SeedTestEntry      FlowSeedType = "test_entry"      // Test function
 )
 
 // FlowSeed represents a detected entry point for flow derivation.
 type FlowSeed struct {
-	NodeKey   string       `json:"nodeKey"`
-	Name      string       `json:"name"`
-	NodeType  string       `json:"nodeType"`
-	SeedType  FlowSeedType `json:"seedType"`
-	Priority  int          `json:"priority"`  // Higher = more likely to be a real entry point
-	Reasons   []string     `json:"reasons"`
+	NodeKey  string       `json:"nodeKey"`
+	Name     string       `json:"name"`
+	NodeType string       `json:"nodeType"`
+	SeedType FlowSeedType `json:"seedType"`
+	Priority int          `json:"priority"` // Higher = more likely to be a real entry point
+	Reasons  []string     `json:"reasons"`
 }
 
 // MinSeedScore is the minimum priority score required for a seed to be included.
@@ -68,14 +68,14 @@ func (f *StructuralSeedFinder) WithBudget(budget TraversalBudget) *StructuralSee
 
 // NodeInfo is the minimal information needed for seed detection.
 type NodeInfo struct {
-	NodeKey       string
-	Name          string
-	NodeType      string // "Function", "Method"
-	IsExported    bool
-	HasCallers    bool // Whether any other function calls this one
-	HasDocstring  bool
-	FilePath      string
-	Parameters    []string // Parameter type names, for signature analysis
+	NodeKey      string
+	Name         string
+	NodeType     string // "Function", "Method"
+	IsExported   bool
+	HasCallers   bool // Whether any other function calls this one
+	HasDocstring bool
+	FilePath     string
+	Parameters   []string // Parameter type names, for signature analysis
 }
 
 // ClassifySeeds determines which nodes are flow entry points using structural signals.
@@ -107,12 +107,34 @@ func (f *StructuralSeedFinder) ClassifySeeds(nodes []NodeInfo) []FlowSeed {
 
 // classifyNode determines if a single node is a flow seed.
 func (f *StructuralSeedFinder) classifyNode(n NodeInfo) *FlowSeed {
+	nameLower := strings.ToLower(n.Name)
+
+	// Test and benchmark functions are intentionally excluded from production
+	// flow seeds to keep generated flows domain-focused.
+	if isTestName(nameLower) || strings.HasSuffix(strings.ToLower(n.FilePath), "_test.go") {
+		return nil
+	}
+
 	// Use budget's blocked patterns to exclude utility/generic symbols.
 	if f.Budget != nil && f.Budget.IsNameBlocked(n.Name) {
 		return nil
 	}
 
-	nameLower := strings.ToLower(n.Name)
+	if isLowSignalEntrypointName(nameLower) &&
+		!isHTTPHandlerName(nameLower) &&
+		!isMessageHandlerName(nameLower) &&
+		!strings.Contains(nameLower, "api") &&
+		!strings.Contains(nameLower, "route") {
+		return nil
+	}
+
+	if isGenericNoiseEntrypoint(nameLower, n.FilePath) &&
+		!isHTTPHandlerName(nameLower) &&
+		!isMessageHandlerName(nameLower) &&
+		!strings.Contains(nameLower, "api") &&
+		!strings.Contains(nameLower, "route") {
+		return nil
+	}
 
 	// Signal 1: Exported function with no callers = likely entry point
 	if n.IsExported && !n.HasCallers {
@@ -158,18 +180,6 @@ func (f *StructuralSeedFinder) classifyNode(n NodeInfo) *FlowSeed {
 			SeedType: SeedEntrypoint,
 			Priority: 40,
 			Reasons:  []string{"strong_entrypoint_pattern", "no_callers"},
-		}
-	}
-
-	// Signal 3: Test functions are entry points too (for test flow derivation)
-	if isTestName(nameLower) && !n.HasCallers {
-		return &FlowSeed{
-			NodeKey:  n.NodeKey,
-			Name:     n.Name,
-			NodeType: n.NodeType,
-			SeedType: SeedTestEntry,
-			Priority: 20,
-			Reasons:  []string{"test_function"},
 		}
 	}
 
@@ -233,3 +243,29 @@ func isTestName(name string) bool {
 	return strings.HasPrefix(name, "test") || strings.HasPrefix(name, "bench")
 }
 
+func isLowSignalEntrypointName(name string) bool {
+	switch name {
+	case "execute", "start", "init", "do":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGenericNoiseEntrypoint(name, filePath string) bool {
+	if name == "main" {
+		// Allow canonical command entrypoints in main.go, suppress other generic main symbols.
+		return !(strings.HasSuffix(filePath, "/main.go") || strings.HasSuffix(filePath, "main.go"))
+	}
+	for _, exact := range []string{"run", "start", "execute", "newclient", "defaultconfig", "configfromenv", "newdriverwithcontext"} {
+		if name == exact {
+			return true
+		}
+	}
+	for _, prefix := range []string{"new", "get", "set"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}

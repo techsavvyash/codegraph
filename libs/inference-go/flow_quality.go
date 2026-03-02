@@ -22,9 +22,9 @@ type TraversalBudget struct {
 
 // DefaultTraversalBudget provides sensible defaults for flow traversal.
 var DefaultTraversalBudget = TraversalBudget{
-	MaxDepth:   5,
-	MaxFanout:  10,
-	MaxSteps:   50,
+	MaxDepth:  5,
+	MaxFanout: 10,
+	MaxSteps:  50,
 	AllowedNodeTypes: []string{
 		"Function", "Method", "APIRoute", "Service",
 	},
@@ -33,6 +33,10 @@ var DefaultTraversalBudget = TraversalBudget{
 		"string", "format", "sprintf",
 		"error", "panic", "fatal",
 		"close", "defer", "cleanup",
+		"test", "bench", "init",
+		"main", "run",
+		"newclient", "defaultconfig", "configfromenv",
+		"executequery", "executeread", "executewrite",
 		"get", "set", // too generic
 	},
 }

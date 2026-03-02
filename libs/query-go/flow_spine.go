@@ -168,12 +168,14 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+		  AND NOT fn.nodeKey CONTAINS 'github.com/golang/go/src'
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		WITH fn, count(caller) AS incomingCalls
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
-		       coalesce(fn.isExported, false) AS isExported,
+		       coalesce(fn.isExported, false) AS isExported, coalesce(fn.filePath, '') AS filePath,
 		       incomingCalls`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
@@ -217,6 +219,7 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 			NodeType:   nodeType,
 			IsExported: isExported,
 			HasCallers: callerCount > 0,
+			FilePath:   strVal(m, "filePath"),
 		})
 	}
 
@@ -245,6 +248,10 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 
 		// Deduplicate and filter steps through the traversal budget.
 		steps = g.deduplicateSteps(steps)
+		if len(steps) < 2 {
+			// Skip one-step entrypoint flows; they are usually generic noise.
+			continue
+		}
 
 		if err := g.persistFlow(ctx, flowNodeKey, seed.Name, "entrypoint", seed.NodeKey, maxDepth, steps); err != nil {
 			continue
@@ -278,7 +285,10 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		  AND (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
+		  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
+		  AND NOT callee.nodeKey CONTAINS 'github.com/golang/go/src'
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
+		ORDER BY callee.name ASC, callee.nodeKey ASC
 		LIMIT %d`, fanout)
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey, "scopeId": g.scopeCtx.ScopeID})
