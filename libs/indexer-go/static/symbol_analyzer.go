@@ -50,7 +50,9 @@ func (sa *SymbolAnalyzer) SetScope(scope models.ScopeContext) {
 	sa.scopeCtx = scope
 }
 
-// defaultFrameworkPatterns returns the built-in set of known HTTP framework symbols.
+// Deprecated: defaultFrameworkPatterns is superseded by APISurfaceDetector which
+// uses purely graph-structural signals. Kept as fallback for non-Go languages
+// where AST param extraction isn't yet implemented.
 func defaultFrameworkPatterns() []FrameworkPattern {
 	return []FrameworkPattern{
 		// ── Go standard library ──
@@ -135,6 +137,10 @@ type symbolMatch struct {
 	FunctionID  string // element ID of the containing Function/Method (if found)
 }
 
+// Deprecated: AnalyzeBySymbols is superseded by APISurfaceDetector.Detect() for
+// Go projects. Kept as fallback for non-Go languages where AST param extraction
+// isn't yet implemented.
+//
 // AnalyzeBySymbols queries the graph for references to known framework symbols,
 // extracts route paths from source lines, and creates APIRoute / SDKCall nodes.
 func (sa *SymbolAnalyzer) AnalyzeBySymbols(ctx context.Context) error {
@@ -168,7 +174,13 @@ func (sa *SymbolAnalyzer) AnalyzeBySymbols(ctx context.Context) error {
 	clientCount := 0
 
 	for _, m := range allMatches {
-		routePath := sa.extractRoutePathFromSource(m.FilePath, m.StartLine)
+		routePath, sourceMethod := sa.extractRouteInfoFromSource(m.FilePath, m.StartLine)
+
+		// If the source line contains an explicit method (Go 1.22+ ServeMux),
+		// use it to override the pattern's generic method.
+		if sourceMethod != "" && (m.Pattern.HTTPMethod == "" || m.Pattern.HTTPMethod == "ANY") {
+			m.Pattern.HTTPMethod = sourceMethod
+		}
 
 		switch m.Pattern.Type {
 		case "endpoint":
@@ -240,12 +252,15 @@ func (sa *SymbolAnalyzer) queryReferencesForPackage(ctx context.Context, pkg str
 	return matches, nil
 }
 
-// routePathRegex extracts the first string literal argument from a function call on a line.
-var routePathRegex = regexp.MustCompile(`[(\s,]["'` + "`" + `](/[^"'` + "`" + `]*)["'` + "`" + `]`)
+// routePathRegex extracts the first route path from a string literal in a function call.
+// Handles both "/path" and "METHOD /path" (Go 1.22+ ServeMux) patterns.
+// Group 1 = HTTP method (optional), Group 2 = path.
+var routePathRegex = regexp.MustCompile(`[(\s,]["'` + "`" + `]((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+)?(/[^"'` + "`" + `]*)["'` + "`" + `]`)
 
-// extractRoutePathFromSource reads the source line at startLine and tries to
-// extract a route path string literal (e.g., "/api/users").
-func (sa *SymbolAnalyzer) extractRoutePathFromSource(filePath string, startLine int) string {
+// extractRouteInfoFromSource reads the source line at startLine and tries to
+// extract a route path and optional HTTP method from a string literal.
+// Returns (path, method) where method may be empty.
+func (sa *SymbolAnalyzer) extractRouteInfoFromSource(filePath string, startLine int) (string, string) {
 	fullPath := filePath
 	if !filepath.IsAbs(filePath) {
 		fullPath = filepath.Join(sa.projectPath, filePath)
@@ -253,20 +268,27 @@ func (sa *SymbolAnalyzer) extractRoutePathFromSource(filePath string, startLine 
 
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 
 	lines := strings.Split(string(content), "\n")
 	if startLine <= 0 || startLine > len(lines) {
-		return ""
+		return "", ""
 	}
 
 	line := lines[startLine-1]
 	match := routePathRegex.FindStringSubmatch(line)
-	if len(match) > 1 {
-		return match[1]
+	if len(match) > 2 {
+		method := strings.TrimSpace(match[1])
+		return match[2], method
 	}
-	return ""
+	return "", ""
+}
+
+// extractRoutePathFromSource is a convenience wrapper that returns just the path.
+func (sa *SymbolAnalyzer) extractRoutePathFromSource(filePath string, startLine int) string {
+	path, _ := sa.extractRouteInfoFromSource(filePath, startLine)
+	return path
 }
 
 // createEndpointNode creates an APIRoute node and EXPOSES_API relationship.

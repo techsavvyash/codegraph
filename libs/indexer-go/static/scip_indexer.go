@@ -191,20 +191,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	// Step 9: Symbol-based API analysis
-	if si.timer != nil {
-		si.timer.Start("API analysis")
-	}
-	fmt.Println("Analyzing API patterns via SCIP symbol matching...")
-	symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
-	symAnalyzer.SetScope(si.scopeCtx)
-	if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
-		fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
-	}
-	if si.timer != nil {
-		si.timer.Stop(0, "")
-	}
-
-	// Step 10: Build call graph (Go only, requires AST for function body ranges)
+	// Step 10: Build call graph (Go only, requires AST for function body ranges).
+	// Must run before API analysis so that Function/Method nodes have correct
+	// startLine/endLine body ranges for findContainingFunction lookups.
 	if si.timer != nil {
 		si.timer.Start("Call graph")
 	}
@@ -221,6 +210,40 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(0, "")
 	}
 
+	// Step 10b: API analysis (depends on body ranges from call graph step above)
+	if si.timer != nil {
+		si.timer.Start("API analysis")
+	}
+	if si.language == LanguageGo {
+		// Structural API surface detection — zero framework catalogs.
+		fmt.Println("Detecting API surface via graph-structural signals...")
+		modulePath := readModulePath(projectPath)
+		apiDetector := NewAPISurfaceDetector(si.client, modulePath)
+		apiDetector.SetScope(si.scopeCtx)
+		if err := apiDetector.Detect(ctx); err != nil {
+			fmt.Printf("Warning: structural API surface detection failed: %v\n", err)
+		}
+	} else {
+		// Fallback: framework-pattern-based detection for non-Go languages.
+		fmt.Println("Analyzing API patterns via SCIP symbol matching...")
+		symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
+		symAnalyzer.SetScope(si.scopeCtx)
+		if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
+			fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+		}
+	}
+	if si.timer != nil {
+		si.timer.Stop(0, "")
+	}
+
+	// Step 10a: Detect semantic edges (message consumers, scheduled functions)
+	fmt.Println("Detecting semantic edges...")
+	sed := NewSemanticEdgeDetector(si.client)
+	sed.SetScope(si.scopeCtx)
+	if err := sed.DetectSemanticEdges(ctx); err != nil {
+		fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
+	}
+
 	// Step 10b: Populate secondary stores (Qdrant + OpenSearch)
 	if !si.skipSecondaryStores && si.embeddingService != nil && si.vectorStore != nil {
 		if si.timer != nil {
@@ -234,7 +257,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 	}
 
-	// Step 11: Generate context for PR overlays (creates PullRequest node + PR summary)
+	// Step 11: Create PullRequest node for PR overlays (generated-doc creation
+	// is handled exclusively by pipeline Stage 6 — GenerateContextDocs).
 	if si.scopeCtx.Scope == models.ScopePR && si.client != nil {
 		ctxGen := generated.NewContextGenerator(si.client)
 		ctxGen.SetScope(si.scopeCtx)
@@ -246,33 +270,6 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName),
 			"", "", "", ""); err != nil {
 			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
-		} else {
-			// Store a basic PR summary with indexed file list (use nodeKeys, not element IDs).
-			fileKeys := make([]string, 0, len(fileNodes))
-			for filePath := range fileNodes {
-				fileKeys = append(fileKeys, models.FileNodeKey(filePath))
-			}
-			summary := fmt.Sprintf("Indexed %d files and %d symbols for service %s",
-				len(fileNodes), len(symbolDefs), si.serviceName)
-			if _, err := ctxGen.StorePRSummary(ctx, prID,
-				fmt.Sprintf("Indexing summary for %s", si.serviceName),
-				summary, "scip-indexer", fileKeys); err != nil {
-				fmt.Printf("Warning: failed to store PR summary: %v\n", err)
-			}
-
-			// Generate docstring suggestions for changed exported symbols without docs.
-			if n, err := ctxGen.GenerateDocstringSuggestionsForScope(ctx); err != nil {
-				fmt.Printf("Warning: docstring suggestion generation failed: %v\n", err)
-			} else if n > 0 {
-				fmt.Printf("Generated %d docstring suggestions\n", n)
-			}
-
-			// Generate flow summaries for any Flow nodes in this scope.
-			if n, err := ctxGen.GenerateFlowSummariesForScope(ctx); err != nil {
-				fmt.Printf("Warning: flow summary generation failed: %v\n", err)
-			} else if n > 0 {
-				fmt.Printf("Generated %d flow summaries\n", n)
-			}
 		}
 	}
 
@@ -702,6 +699,7 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		props["isExported"] = true
 		props["complexity"] = 1
 		props["docstring"] = symbolInfo.Documentation
+		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
 	case "Class":
 		props["fqn"] = symbolInfo.Symbol.String()
 		props["accessModifier"] = "public"
@@ -1175,6 +1173,38 @@ func (si *SCIPIndexer) SetTextStore(store textindex.TextIndexStore) {
 // GetLanguage returns the language this indexer is configured for
 func (si *SCIPIndexer) GetLanguage() Language {
 	return si.language
+}
+
+// isTestFunction determines if a function is a test function based on its name
+// and file path. Supports Go, Python, TypeScript/JavaScript test conventions.
+func isTestFunction(name, filePath string) bool {
+	nameLower := strings.ToLower(name)
+	filePathLower := strings.ToLower(filePath)
+
+	// Name-based detection
+	if strings.HasPrefix(nameLower, "test") || strings.HasPrefix(nameLower, "bench") {
+		return true
+	}
+
+	// File-based detection: Go
+	if strings.HasSuffix(filePathLower, "_test.go") {
+		return true
+	}
+	// File-based detection: Python
+	if strings.HasSuffix(filePathLower, "_test.py") || strings.HasSuffix(filePathLower, "test_.py") ||
+		strings.Contains(filePathLower, "/tests/") || strings.Contains(filePathLower, "/test/") {
+		if strings.HasPrefix(nameLower, "test") {
+			return true
+		}
+	}
+	// File-based detection: TypeScript/JavaScript
+	if strings.HasSuffix(filePathLower, ".test.ts") || strings.HasSuffix(filePathLower, ".spec.ts") ||
+		strings.HasSuffix(filePathLower, ".test.js") || strings.HasSuffix(filePathLower, ".spec.js") ||
+		strings.HasSuffix(filePathLower, ".test.tsx") || strings.HasSuffix(filePathLower, ".spec.tsx") {
+		return true
+	}
+
+	return false
 }
 
 // calculateByteOffsets calculates the start and end byte positions for a code location
