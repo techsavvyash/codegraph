@@ -5,6 +5,7 @@ go 1.24.3
 require (
 	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
 	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
@@ -15,6 +16,8 @@ require (
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/context-maximiser/code-graph/libs/inference-go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/context-maximiser/code-graph/libs/intelligence-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -36,7 +39,10 @@ require (
 replace (
 	github.com/context-maximiser/code-graph/libs/core-models-go => ../../libs/core-models-go
 	github.com/context-maximiser/code-graph/libs/indexer-go => ../../libs/indexer-go
+	github.com/context-maximiser/code-graph/libs/inference-go => ../../libs/inference-go
+	github.com/context-maximiser/code-graph/libs/intelligence-go => ../../libs/intelligence-go
 	github.com/context-maximiser/code-graph/libs/neo4j-go => ../../libs/neo4j-go
+	github.com/context-maximiser/code-graph/libs/query-go => ../../libs/query-go
 	github.com/context-maximiser/code-graph/libs/search-go => ../../libs/search-go
 	github.com/context-maximiser/code-graph/libs/text-index-client-go => ../../libs/text-index-client-go
 )

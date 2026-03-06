@@ -3,6 +3,7 @@ package generated
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -361,15 +362,9 @@ func (g *ContextGenerator) GeneratePRSummaryForScope(ctx context.Context) (int, 
 
 		if g.generator != nil {
 			prNodeKey, _ := m["nodeKey"].(string)
-			bundle := &contracts.ContextBundle{
-				Anchors: []contracts.RetrievalCandidate{
-					{NodeKey: prNodeKey, NodeType: "PullRequest", Metadata: map[string]any{"prId": prID, "title": prTitle}},
-				},
-				Template:  DocTypePRSummary,
-				MaxTokens: 1000,
-				Scope:     g.scopeCtx.Scope,
-				ScopeID:   g.scopeCtx.ScopeID,
-			}
+			bundle := g.buildBundle(ctx,
+				contracts.RetrievalCandidate{NodeKey: prNodeKey, NodeType: "PullRequest", Metadata: map[string]any{"prId": prID, "title": prTitle}},
+				DocTypePRSummary, 1000, 24, 12)
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypePRSummary, "pull_request", prNodeKey, title)
 			if err != nil {
@@ -403,10 +398,25 @@ func (g *ContextGenerator) GenerateDocstringSuggestionsForScope(ctx context.Cont
 		WHERE (n:Function OR n:Method)
 		  AND n.scopeId = $scopeId
 		  AND n.isExported = true
+		  AND (n.filePath IS NULL OR (NOT n.filePath CONTAINS '/vendor/' AND NOT n.filePath ENDS WITH '_test.go'))
 		  AND (n.docstring IS NULL OR n.docstring = '')
+		OPTIONAL MATCH (n)<-[:CALLS]-(caller)
+		WHERE (caller:Function OR caller:Method)
+		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		OPTIONAL MATCH (route:APIRoute)<-[:EXPOSES_API]-(n)
+		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
+		WITH n, count(DISTINCT caller) AS callerCount, count(DISTINCT route) AS apiExposureCount,
+		     CASE
+		       WHEN toLower(coalesce(n.name, '')) CONTAINS 'handler' OR toLower(coalesce(n.name, '')) CONTAINS 'controller' THEN 18
+		       WHEN toLower(coalesce(n.name, '')) CONTAINS 'service' THEN 12
+		       ELSE 0
+		     END AS nameSignal
 		RETURN n.nodeKey AS nodeKey, n.name AS name, n.signature AS signature,
-		       labels(n)[0] AS nodeType
-		LIMIT 50
+		       labels(n)[0] AS nodeType,
+		       callerCount, apiExposureCount,
+		       (callerCount * 2) + (apiExposureCount * 15) + nameSignal AS relevanceScore
+		ORDER BY relevanceScore DESC, n.name ASC
+		LIMIT 30
 	`
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
 		"scopeId": g.scopeCtx.ScopeID,
@@ -429,15 +439,9 @@ func (g *ContextGenerator) GenerateDocstringSuggestionsForScope(ctx context.Cont
 		title := fmt.Sprintf("Docstring suggestion for %s", name)
 
 		if g.generator != nil {
-			bundle := &contracts.ContextBundle{
-				Anchors: []contracts.RetrievalCandidate{
-					{NodeKey: nk, NodeType: nodeType, Metadata: map[string]any{"name": name, "signature": sig}},
-				},
-				Template:  DocTypeDocstringSuggestion,
-				MaxTokens: 500,
-				Scope:     g.scopeCtx.Scope,
-				ScopeID:   g.scopeCtx.ScopeID,
-			}
+			bundle := g.buildBundle(ctx,
+				contracts.RetrievalCandidate{NodeKey: nk, NodeType: nodeType, Metadata: map[string]any{"name": name, "signature": sig}},
+				DocTypeDocstringSuggestion, 500, 16, 8)
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypeDocstringSuggestion, "code_symbol", nk, title)
 			if err != nil {
@@ -473,9 +477,16 @@ func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (i
 		  AND NOT EXISTS {
 		    MATCH (:GeneratedDoc {type: $docType, sourceKey: f.nodeKey})
 		  }
+		OPTIONAL MATCH (f)-[:HAS_STEP]->(step)
+		WHERE step:Function OR step:Method OR step:APIRoute
+		WITH f, count(step) AS stepCount,
+		     CASE WHEN toLower(coalesce(f.name, '')) CONTAINS '/api/' OR toLower(coalesce(f.name, '')) CONTAINS 'http' THEN 25 ELSE 0 END AS apiSignal
 		RETURN f.nodeKey AS nodeKey, f.name AS name, f.flowType AS flowType,
-		       f.entrypoint AS entrypoint
-		LIMIT 50
+		       f.entrypoint AS entrypoint,
+		       stepCount,
+		       (stepCount * 3) + apiSignal AS relevanceScore
+		ORDER BY relevanceScore DESC, f.name ASC
+		LIMIT 30
 	`
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
 		"scopeId": g.scopeCtx.ScopeID,
@@ -498,15 +509,9 @@ func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (i
 		title := fmt.Sprintf("Flow summary: %s", name)
 
 		if g.generator != nil {
-			bundle := &contracts.ContextBundle{
-				Anchors: []contracts.RetrievalCandidate{
-					{NodeKey: nk, NodeType: "Flow", Metadata: map[string]any{"name": name, "flowType": flowType}},
-				},
-				Template:  DocTypeFlowSummary,
-				MaxTokens: 1000,
-				Scope:     g.scopeCtx.Scope,
-				ScopeID:   g.scopeCtx.ScopeID,
-			}
+			bundle := g.buildBundle(ctx,
+				contracts.RetrievalCandidate{NodeKey: nk, NodeType: "Flow", Metadata: map[string]any{"name": name, "flowType": flowType}},
+				DocTypeFlowSummary, 1000, 20, 12)
 
 			ok, err := g.generateAndVerify(ctx, bundle, DocTypeFlowSummary, "flow", nk, title)
 			if err != nil {
@@ -533,8 +538,17 @@ func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (i
 // generateAndVerify runs the generation + verification + policy gate pipeline.
 // Returns true if content was persisted as GeneratedDoc, false if rejected (persisted as diagnostic).
 func (g *ContextGenerator) generateAndVerify(ctx context.Context, bundle *contracts.ContextBundle, docType, sourceType, sourceKey, title string) (bool, error) {
+	if insufficiency := insufficientEvidenceViolation(docType, bundle); insufficiency != "" {
+		g.storeDiagnostic(ctx, docType, sourceType, sourceKey, nil, nil, []string{insufficiency})
+		return false, nil
+	}
+
 	genResult, err := g.generator.Generate(ctx, bundle)
 	if err != nil {
+		if genResult != nil {
+			g.storeDiagnostic(ctx, docType, sourceType, sourceKey, genResult, ensureVerificationResult(genResult, nil), generationViolationsFromError(err))
+			return false, nil
+		}
 		return false, fmt.Errorf("generation: %w", err)
 	}
 	var verResult *contracts.VerificationResult
@@ -568,7 +582,7 @@ func (g *ContextGenerator) generateAndVerify(ctx context.Context, bundle *contra
 
 	// Validate that all statements have at least one citation before persisting.
 	if uncited := generation.ValidateGenerationResult(genResult); len(uncited) > 0 {
-		violations := []string{fmt.Sprintf("%d/%d statements have no citations", len(uncited), len(genResult.Citations))}
+		violations := []string{fmt.Sprintf("citation_key_missing: %d/%d statements have no citations", len(uncited), len(genResult.Citations))}
 		g.storeDiagnostic(ctx, docType, sourceType, sourceKey, genResult,
 			&contracts.VerificationResult{
 				TotalStatements:   len(genResult.Citations),
@@ -638,20 +652,23 @@ func (g *ContextGenerator) storeDiagnostic(ctx context.Context, docType, sourceT
 	if len(violations) == 0 {
 		violations = []string{"generation_rejected"}
 	}
+	rawViolations := append([]string(nil), violations...)
+	normalizedViolations := normalizeViolations(violations)
 
 	diagKey := models.GenerationDiagnosticNodeKey(docType, sourceKey)
 	props := map[string]any{
-		"nodeKey":           diagKey,
-		"type":              docType,
-		"sourceType":        sourceType,
-		"sourceKey":         sourceKey,
-		"model":             model,
-		"content":           content,
-		"rejectionReasons":  violations,
-		"unsupportedClaims": unsupportedClaims,
-		"scope":             g.scopeCtx.Scope,
-		"scopeId":           g.scopeCtx.ScopeID,
-		"createdAt":         time.Now().UTC().Format(time.RFC3339),
+		"nodeKey":             diagKey,
+		"type":                docType,
+		"sourceType":          sourceType,
+		"sourceKey":           sourceKey,
+		"model":               model,
+		"content":             content,
+		"rejectionReasons":    normalizedViolations,
+		"rawRejectionReasons": rawViolations,
+		"unsupportedClaims":   unsupportedClaims,
+		"scope":               g.scopeCtx.Scope,
+		"scopeId":             g.scopeCtx.ScopeID,
+		"createdAt":           time.Now().UTC().Format(time.RFC3339),
 	}
 
 	_, err := g.client.MergeNode(ctx, []string{"GenerationDiagnostic"},
@@ -668,7 +685,167 @@ func (g *ContextGenerator) storeGenerationFailureDiagnostic(ctx context.Context,
 	g.storeDiagnostic(ctx, docType, sourceType, sourceKey,
 		&contracts.GenerationResult{Model: "generation_error"},
 		&contracts.VerificationResult{Passed: false, Errors: []string{generationErr.Error()}},
-		[]string{fmt.Sprintf("generation_transport_error: %v", generationErr)})
+		generationViolationsFromError(generationErr))
+}
+
+func (g *ContextGenerator) buildBundle(ctx context.Context, anchor contracts.RetrievalCandidate, template string, maxTokens, expansionLimit, inferenceLimit int) *contracts.ContextBundle {
+	bundle := &contracts.ContextBundle{
+		Anchors:   []contracts.RetrievalCandidate{anchor},
+		Template:  template,
+		MaxTokens: maxTokens,
+		Scope:     g.scopeCtx.Scope,
+		ScopeID:   g.scopeCtx.ScopeID,
+	}
+
+	if g.client == nil {
+		return bundle
+	}
+	bundle.Expansions = g.loadRelatedEvidence(ctx, anchor.NodeKey, expansionLimit)
+	bundle.Inferences = g.loadInferredEvidence(ctx, anchor.NodeKey, inferenceLimit)
+	return bundle
+}
+
+func (g *ContextGenerator) loadRelatedEvidence(ctx context.Context, sourceKey string, limit int) []contracts.RetrievalCandidate {
+	if limit <= 0 {
+		return nil
+	}
+	cypher := `
+		MATCH (src {nodeKey: $sourceKey})
+		WHERE src.scopeId = $scopeId OR src.scopeId = 'main'
+		OPTIONAL MATCH (src)-[r]-(nbr)
+		WHERE nbr.nodeKey IS NOT NULL
+		  AND nbr.nodeKey <> $sourceKey
+		  AND (nbr.scopeId = $scopeId OR nbr.scopeId = 'main')
+		  AND (nbr:File OR nbr:Function OR nbr:Method OR nbr:Flow OR nbr:APIRoute OR nbr:DocumentChunk OR nbr:Service OR nbr:PullRequest)
+		WITH nbr, count(r) AS edgeWeight
+		RETURN nbr.nodeKey AS nodeKey,
+		       labels(nbr)[0] AS nodeType,
+		       coalesce(nbr.name, nbr.title, nbr.path, nbr.nodeKey) AS name,
+		       edgeWeight,
+		       coalesce(nbr.filePath, '') AS filePath
+		ORDER BY edgeWeight DESC, name ASC
+		LIMIT $limit
+	`
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"sourceKey": sourceKey,
+		"scopeId":   g.scopeCtx.ScopeID,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil
+	}
+
+	candidates := make([]contracts.RetrievalCandidate, 0, len(records))
+	for _, record := range records {
+		m := record.AsMap()
+		nodeKey, _ := m["nodeKey"].(string)
+		if nodeKey == "" {
+			continue
+		}
+		nodeType, _ := m["nodeType"].(string)
+		name, _ := m["name"].(string)
+		filePath, _ := m["filePath"].(string)
+		score := 0.0
+		if edgeWeight, ok := m["edgeWeight"].(int64); ok {
+			score = float64(edgeWeight)
+		}
+		candidates = append(candidates, contracts.RetrievalCandidate{
+			NodeKey:  nodeKey,
+			NodeType: nodeType,
+			Scope:    g.scopeCtx.Scope,
+			ScopeID:  g.scopeCtx.ScopeID,
+			Score:    score,
+			Source:   "graph",
+			Metadata: map[string]any{"name": name, "filePath": filePath},
+		})
+	}
+	return candidates
+}
+
+func (g *ContextGenerator) loadInferredEvidence(ctx context.Context, sourceKey string, limit int) []contracts.InferenceResult {
+	if limit <= 0 {
+		return nil
+	}
+	cypher := `
+		MATCH (src {nodeKey: $sourceKey})-[r]->(target)
+		WHERE target.nodeKey IS NOT NULL
+		  AND (src.scopeId = $scopeId OR src.scopeId = 'main')
+		  AND (target.scopeId = $scopeId OR target.scopeId = 'main')
+		RETURN src.nodeKey AS sourceKey, target.nodeKey AS targetKey, type(r) AS relationType
+		ORDER BY relationType ASC, target.nodeKey ASC
+		LIMIT $limit
+	`
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"sourceKey": sourceKey,
+		"scopeId":   g.scopeCtx.ScopeID,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil
+	}
+	results := make([]contracts.InferenceResult, 0, len(records))
+	for _, record := range records {
+		m := record.AsMap()
+		source, _ := m["sourceKey"].(string)
+		target, _ := m["targetKey"].(string)
+		relation, _ := m["relationType"].(string)
+		if source == "" || target == "" || relation == "" {
+			continue
+		}
+		results = append(results, contracts.InferenceResult{
+			SourceKey:    source,
+			TargetKey:    target,
+			RelationType: relation,
+			Confidence:   0.75,
+			Strategy:     "graph_relation_seed",
+			Reasons:      []string{fmt.Sprintf("derived_from_%s", strings.ToLower(relation))},
+			EvidenceRefs: []contracts.EvidenceRef{{Kind: "graph_edge", NodeKey: target}},
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+	return results
+}
+
+func insufficientEvidenceViolation(docType string, bundle *contracts.ContextBundle) string {
+	if bundle == nil {
+		return "insufficient_evidence_bundle: missing_bundle"
+	}
+	minAnchors := 1
+	minExpansions := 2
+	minEvidence := 4
+	switch docType {
+	case DocTypePRSummary:
+		minExpansions = 4
+		minEvidence = 7
+	case DocTypeFlowSummary:
+		minExpansions = 3
+		minEvidence = 6
+	case DocTypeDocstringSuggestion:
+		minExpansions = 2
+		minEvidence = 4
+	}
+	if len(bundle.Anchors) < minAnchors {
+		return fmt.Sprintf("insufficient_evidence_bundle: anchors(%d<%d)", len(bundle.Anchors), minAnchors)
+	}
+	if len(bundle.Expansions) < minExpansions {
+		return fmt.Sprintf("insufficient_evidence_bundle: expansions(%d<%d)", len(bundle.Expansions), minExpansions)
+	}
+
+	evidence := make(map[string]struct{})
+	for _, anchor := range bundle.Anchors {
+		evidence[anchor.NodeKey] = struct{}{}
+	}
+	for _, expansion := range bundle.Expansions {
+		evidence[expansion.NodeKey] = struct{}{}
+	}
+	for _, inference := range bundle.Inferences {
+		evidence[inference.SourceKey] = struct{}{}
+		evidence[inference.TargetKey] = struct{}{}
+	}
+	if len(evidence) < minEvidence {
+		return fmt.Sprintf("insufficient_evidence_bundle: evidence_nodes(%d<%d)", len(evidence), minEvidence)
+	}
+	return ""
 }
 
 func ensureVerificationResult(gen *contracts.GenerationResult, ver *contracts.VerificationResult) *contracts.VerificationResult {
@@ -714,4 +891,63 @@ func lowInformationViolation(docType, content string) string {
 		}
 	}
 	return ""
+}
+
+func generationViolationsFromError(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var citationErr *generation.CitationValidationError
+	if errors.As(err, &citationErr) {
+		violations := make([]string, 0, len(citationErr.Errors))
+		for _, statementErr := range citationErr.Errors {
+			violations = append(violations,
+				fmt.Sprintf("citation_key_missing: statement_%d missing_refs=%s", statementErr.StatementIndex, strings.Join(statementErr.MissingRefs, ",")))
+		}
+		if len(violations) > 0 {
+			return violations
+		}
+	}
+
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "parsing response"):
+		return []string{fmt.Sprintf("format_error: %v", err)}
+	case strings.Contains(msg, "llm completion"):
+		return []string{fmt.Sprintf("generation_transport_error: %v", err)}
+	default:
+		return []string{fmt.Sprintf("generation_error: %v", err)}
+	}
+}
+
+func normalizeViolations(violations []string) []string {
+	normalized := make([]string, 0, len(violations))
+	for _, violation := range violations {
+		if violation == "" {
+			continue
+		}
+		lower := strings.ToLower(violation)
+		code := "policy_violation"
+		switch {
+		case strings.Contains(lower, "insufficient_evidence_bundle"):
+			code = "insufficient_evidence"
+		case strings.Contains(lower, "low_information_content") || strings.Contains(lower, "content too short") || strings.Contains(lower, "generic phrase"):
+			code = "low_information"
+		case strings.Contains(lower, "citation_key_missing") || strings.Contains(lower, "citation coverage") || strings.Contains(lower, "no citations"):
+			code = "citation_key_missing"
+		case strings.Contains(lower, "unsupported claim rate") || strings.Contains(lower, "verification did not pass"):
+			code = "verification_failure"
+		case strings.Contains(lower, "format_error"):
+			code = "format_error"
+		case strings.Contains(lower, "generation_transport_error"):
+			code = "generation_transport_error"
+		case strings.Contains(lower, "generation_error"):
+			code = "generation_error"
+		}
+		normalized = append(normalized, fmt.Sprintf("%s: %s", code, violation))
+	}
+	if len(normalized) == 0 {
+		return []string{"policy_violation: generation_rejected"}
+	}
+	return normalized
 }

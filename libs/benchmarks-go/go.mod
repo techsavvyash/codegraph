@@ -5,7 +5,11 @@ go 1.24.3
 require (
 	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000
 )
+
+require github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
@@ -28,8 +32,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000 // indirect
-	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000 // indirect
-	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v24.0.4+incompatible // indirect
@@ -119,6 +121,7 @@ replace (
 	github.com/context-maximiser/code-graph/libs/core-models-go => ../core-models-go
 	github.com/context-maximiser/code-graph/libs/indexer-go => ../indexer-go
 	github.com/context-maximiser/code-graph/libs/neo4j-go => ../neo4j-go
+	github.com/context-maximiser/code-graph/libs/query-go => ../query-go
 	github.com/context-maximiser/code-graph/libs/search-go => ../search-go
 	github.com/context-maximiser/code-graph/libs/text-index-client-go => ../text-index-client-go
 )

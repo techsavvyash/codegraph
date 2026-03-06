@@ -128,13 +128,13 @@ Review for:
 ```cypher
 MATCH (d:GenerationDiagnostic {scopeId:'pr-audit-<id>'})
 RETURN count(d) AS total,
-       count(CASE WHEN d.docType IS NULL OR d.docType='' THEN 1 END) AS missingDocType,
-       count(CASE WHEN d.reason IS NULL OR d.reason='' THEN 1 END) AS missingReason;
+       count(CASE WHEN d.type IS NULL OR d.type='' THEN 1 END) AS missingType,
+       count(CASE WHEN d.rejectionReasons IS NULL OR size(coalesce(d.rejectionReasons,[]))=0 THEN 1 END) AS missingRejectionReasons;
 ```
 
 ```cypher
 MATCH (d:GenerationDiagnostic {scopeId:'pr-audit-<id>'})
-RETURN d.docType, d.sourceKey, d.reason, d.unsupportedClaims
+RETURN d.type, d.sourceKey, d.rejectionReasons, d.rawRejectionReasons, d.unsupportedClaims
 LIMIT 25;
 ```
 

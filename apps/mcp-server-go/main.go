@@ -12,6 +12,7 @@ import (
 
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	"github.com/context-maximiser/code-graph/libs/query-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
 	"github.com/joho/godotenv"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -492,6 +493,67 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			Name:        "codegraph_get_entry_points",
+			Description: "List structurally-detected entry points (API handlers, interface implementations, topological roots, high-centrality functions) across all 4 tiers. Use this to discover the important starting points in a codebase.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"tier": map[string]interface{}{
+						"type":        "number",
+						"description": "Filter to a specific tier (1=API-exposed, 2=interface implementations, 3=topological roots, 4=high centrality). Omit for all tiers.",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of results to return (default: 50)",
+						"default":     50,
+					},
+				},
+			},
+		},
+		{
+			Name:        "codegraph_generate_flows",
+			Description: "Generate flow spines from entry points — call chain documentation showing how a request flows through the codebase. Each flow traces from an entry point through its call graph.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"max_depth": map[string]interface{}{
+						"type":        "number",
+						"description": "How deep to trace call chains (default: 5)",
+						"default":     5,
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of flows to generate (default: 20)",
+						"default":     20,
+					},
+				},
+			},
+		},
+		{
+			Name:        "codegraph_trace_call_graph",
+			Description: "Traverse the call graph from a specific function, showing what it calls (downstream) or what calls it (upstream). Returns a tree-formatted call chain with file locations.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"function_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the function to trace from",
+					},
+					"direction": map[string]interface{}{
+						"type":        "string",
+						"description": "Traversal direction: 'downstream' (callees), 'upstream' (callers), or 'both' (default: 'downstream')",
+						"default":     "downstream",
+					},
+					"max_depth": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum traversal depth (default: 3)",
+						"default":     3,
+					},
+				},
+				"required": []string{"function_name"},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -547,6 +609,12 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleCrossServiceCallsTool(ctx, toolCall.Arguments)
 	case "codegraph_service_architecture":
 		response = s.handleServiceArchitectureTool(ctx, toolCall.Arguments)
+	case "codegraph_get_entry_points":
+		response = s.handleGetEntryPointsTool(ctx, toolCall.Arguments)
+	case "codegraph_generate_flows":
+		response = s.handleGenerateFlowsTool(ctx, toolCall.Arguments)
+	case "codegraph_trace_call_graph":
+		response = s.handleTraceCallGraphTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -2222,6 +2290,350 @@ func (s *CodeGraphMCPServer) handleServiceArchitectureTool(ctx context.Context, 
 			}
 		}
 		output.WriteString("```\n")
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleGetEntryPointsTool lists structurally-detected entry points across 4 tiers.
+func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	limit := 50
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	tierFilter := 0
+	if t, ok := args["tier"].(float64); ok && t >= 1 && t <= 4 {
+		tierFilter = int(t)
+	}
+
+	type entryPoint struct {
+		Name            string
+		FilePath        string
+		Tier            int
+		TierLabel       string
+		DetectionSource string
+	}
+
+	seen := make(map[string]bool)
+	var entries []entryPoint
+
+	// Tier 1: API-exposed functions
+	if tierFilter == 0 || tierFilter == 1 {
+		cypher := `
+			MATCH (fn)-[:EXPOSES_API]->(r:APIRoute)
+			WHERE (fn:Function OR fn:Method)
+			  AND coalesce(fn.isTestFunction, false) = false
+			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			       r.detectionSource AS detectionSource, r.protocol AS protocol
+			ORDER BY fn.name`
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+		if err == nil {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				source := getStringFromRecord(m, "detectionSource")
+				if source == "" {
+					source = getStringFromRecord(m, "protocol")
+				}
+				entries = append(entries, entryPoint{
+					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					Tier: 1, TierLabel: "API-exposed", DetectionSource: source,
+				})
+			}
+		}
+	}
+
+	// Tier 2: Interface implementations with no callers
+	if tierFilter == 0 || tierFilter == 2 {
+		cypher := `
+			MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+			WHERE (fn:Function OR fn:Method)
+			  AND coalesce(fn.isTestFunction, false) = false
+			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+			WHERE caller:Function OR caller:Method
+			WITH fn, iface, count(caller) AS callerCount
+			WHERE callerCount = 0
+			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			       iface.name AS ifaceName
+			ORDER BY fn.name`
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+		if err == nil {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				entries = append(entries, entryPoint{
+					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					Tier: 2, TierLabel: "Interface impl", DetectionSource: "implements " + getStringFromRecord(m, "ifaceName"),
+				})
+			}
+		}
+	}
+
+	// Tier 3: Topological roots (exported, no callers, has callees)
+	if tierFilter == 0 || tierFilter == 3 {
+		cypher := `
+			MATCH (fn)
+			WHERE (fn:Function OR fn:Method)
+			  AND coalesce(fn.isExported, false) = true
+			  AND coalesce(fn.isTestFunction, false) = false
+			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+			WHERE caller:Function OR caller:Method
+			WITH fn, count(caller) AS callerCount
+			WHERE callerCount = 0
+			OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+			WHERE callee:Function OR callee:Method
+			WITH fn, count(callee) AS calleeCount
+			WHERE calleeCount > 0
+			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			       calleeCount
+			ORDER BY calleeCount DESC`
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+		if err == nil {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				calleeCount := getIntFromRecord(m, "calleeCount")
+				entries = append(entries, entryPoint{
+					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					Tier: 3, TierLabel: "Topological root", DetectionSource: fmt.Sprintf("exported, %d callees", calleeCount),
+				})
+			}
+		}
+	}
+
+	// Tier 4: High centrality (functions with many callers AND callees)
+	if tierFilter == 0 || tierFilter == 4 {
+		cypher := `
+			MATCH (fn)
+			WHERE (fn:Function OR fn:Method)
+			  AND coalesce(fn.isTestFunction, false) = false
+			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+			WHERE caller:Function OR caller:Method
+			WITH fn, count(DISTINCT caller) AS inDeg
+			WHERE inDeg >= 3
+			OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+			WHERE callee:Function OR callee:Method
+			WITH fn, inDeg, count(DISTINCT callee) AS outDeg
+			WHERE outDeg >= 2
+			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			       inDeg, outDeg, inDeg + outDeg AS centrality
+			ORDER BY centrality DESC`
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+		if err == nil {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				inDeg := getIntFromRecord(m, "inDeg")
+				outDeg := getIntFromRecord(m, "outDeg")
+				entries = append(entries, entryPoint{
+					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					Tier: 4, TierLabel: "High centrality", DetectionSource: fmt.Sprintf("%d callers, %d callees", inDeg, outDeg),
+				})
+			}
+		}
+	}
+
+	if len(entries) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "No entry points found in the graph."}},
+		}
+	}
+
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Entry Points (%d found)\n\n", len(entries)))
+	output.WriteString("| Name | File | Tier | Detection Source |\n")
+	output.WriteString("|------|------|------|------------------|\n")
+	for _, e := range entries {
+		file := e.FilePath
+		if file != "" {
+			file = filepath.Base(file)
+		}
+		output.WriteString(fmt.Sprintf("| %s | %s | T%d: %s | %s |\n",
+			e.Name, file, e.Tier, e.TierLabel, e.DetectionSource))
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleGenerateFlowsTool generates flow spines from entry points.
+func (s *CodeGraphMCPServer) handleGenerateFlowsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	maxDepth := 5
+	if d, ok := args["max_depth"].(float64); ok && d > 0 {
+		maxDepth = int(d)
+	}
+
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	gen := query.NewFlowSpineGenerator(s.client)
+	flows, err := gen.GenerateFlows(ctx, maxDepth)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error generating flows: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	if len(flows) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "No flows generated. Ensure the codebase has been indexed with call graph data."}},
+		}
+	}
+
+	if len(flows) > limit {
+		flows = flows[:limit]
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Generated Flows (%d)\n\n", len(flows)))
+
+	for i, flow := range flows {
+		output.WriteString(fmt.Sprintf("### %d. %s\n", i+1, flow.FlowName))
+		output.WriteString(fmt.Sprintf("- **Type**: %s\n", flow.FlowType))
+		output.WriteString(fmt.Sprintf("- **Steps** (%d):\n", len(flow.Steps)))
+		for _, step := range flow.Steps {
+			indent := strings.Repeat("  ", step.Order)
+			output.WriteString(fmt.Sprintf("%s%d. `%s` (%s)\n", indent, step.Order+1, step.Name, step.Label))
+		}
+		output.WriteString("\n")
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleTraceCallGraphTool traverses the call graph from a specific function.
+func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	functionName, ok := args["function_name"].(string)
+	if !ok || functionName == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: function_name parameter is required"}},
+			IsError: true,
+		}
+	}
+
+	direction := "downstream"
+	if d, ok := args["direction"].(string); ok && (d == "upstream" || d == "both") {
+		direction = d
+	}
+
+	maxDepth := 3
+	if d, ok := args["max_depth"].(float64); ok && d > 0 {
+		maxDepth = int(d)
+	}
+	if maxDepth > 10 {
+		maxDepth = 10
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Call Graph for `%s`\n\n", functionName))
+
+	// Downstream: what does this function call?
+	if direction == "downstream" || direction == "both" {
+		output.WriteString("### Downstream (callees)\n\n")
+		cypher := fmt.Sprintf(`
+			MATCH (root)
+			WHERE (root:Function OR root:Method) AND root.name CONTAINS $name
+			WITH root LIMIT 1
+			MATCH path = (root)-[:CALLS*1..%d]->(callee)
+			WHERE callee:Function OR callee:Method
+			WITH root, callee, length(path) AS depth,
+			     [n IN nodes(path) | n.name] AS chain,
+			     callee.filePath AS filePath
+			RETURN DISTINCT callee.name AS name, filePath, depth, chain
+			ORDER BY depth, callee.name
+			LIMIT 100`, maxDepth)
+
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"name": functionName})
+		if err != nil {
+			output.WriteString(fmt.Sprintf("Error: %v\n\n", err))
+		} else if len(records) == 0 {
+			output.WriteString("No downstream calls found.\n\n")
+		} else {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				file := getStringFromRecord(m, "filePath")
+				depth := getIntFromRecord(m, "depth")
+
+				indent := strings.Repeat("  ", depth)
+				if file != "" {
+					file = filepath.Base(file)
+					output.WriteString(fmt.Sprintf("%s→ `%s` (%s)\n", indent, name, file))
+				} else {
+					output.WriteString(fmt.Sprintf("%s→ `%s`\n", indent, name))
+				}
+			}
+			output.WriteString("\n")
+		}
+	}
+
+	// Upstream: what calls this function?
+	if direction == "upstream" || direction == "both" {
+		output.WriteString("### Upstream (callers)\n\n")
+		cypher := fmt.Sprintf(`
+			MATCH (target)
+			WHERE (target:Function OR target:Method) AND target.name CONTAINS $name
+			WITH target LIMIT 1
+			MATCH path = (caller)-[:CALLS*1..%d]->(target)
+			WHERE caller:Function OR caller:Method
+			WITH target, caller, length(path) AS depth,
+			     [n IN nodes(path) | n.name] AS chain,
+			     caller.filePath AS filePath
+			RETURN DISTINCT caller.name AS name, filePath, depth, chain
+			ORDER BY depth, caller.name
+			LIMIT 100`, maxDepth)
+
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"name": functionName})
+		if err != nil {
+			output.WriteString(fmt.Sprintf("Error: %v\n\n", err))
+		} else if len(records) == 0 {
+			output.WriteString("No upstream callers found.\n\n")
+		} else {
+			for _, r := range records {
+				m := r.AsMap()
+				name := getStringFromRecord(m, "name")
+				file := getStringFromRecord(m, "filePath")
+				depth := getIntFromRecord(m, "depth")
+
+				indent := strings.Repeat("  ", depth)
+				if file != "" {
+					file = filepath.Base(file)
+					output.WriteString(fmt.Sprintf("%s← `%s` (%s)\n", indent, name, file))
+				} else {
+					output.WriteString(fmt.Sprintf("%s← `%s`\n", indent, name))
+				}
+			}
+			output.WriteString("\n")
+		}
 	}
 
 	return ToolCallResponse{

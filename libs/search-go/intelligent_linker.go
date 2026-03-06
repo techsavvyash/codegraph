@@ -59,11 +59,11 @@ type CodeMatch struct {
 
 // LinkingResult contains the results of intelligent document linking
 type LinkingResult struct {
-	DocumentID    string      `json:"documentId"`
-	DirectMatches []CodeMatch `json:"directMatches"`
-	SemanticMatches []CodeMatch `json:"semanticMatches"`
+	DocumentID       string      `json:"documentId"`
+	DirectMatches    []CodeMatch `json:"directMatches"`
+	SemanticMatches  []CodeMatch `json:"semanticMatches"`
 	CallGraphMatches []CodeMatch `json:"callGraphMatches"`
-	CreatedLinks  int         `json:"createdLinks"`
+	CreatedLinks     int         `json:"createdLinks"`
 }
 
 // LinkDocumentToCode performs intelligent linking between a document and code
@@ -437,20 +437,30 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 	now := time.Now().UTC().Format(time.RFC3339)
 	var edgeMaps []map[string]any
 	for _, match := range filtered {
-		props := map[string]any{
-			"targetKey":      match.NodeKey,
-			"confidence":     match.Confidence,
-			"reasons":        match.MatchReasons,
-			"callGraphDepth": match.CallGraphDepth,
-			"model":          "intelligent_linking",
-			"createdAt":      now,
-			"scopeId":        idl.scopeID,
-		}
-		if err := provenance.ValidateMentionEdgeProps(props); err != nil {
+		prov, err := provenance.BuildMentionEdgeProps(
+			match.Confidence,
+			match.MatchReasons,
+			"intelligent_linking",
+			now,
+			idl.scopeID,
+			[]string{documentID, match.NodeKey},
+		)
+		if err != nil {
 			log.Printf("Warning: skipping MENTIONS edge to %s: provenance validation failed: %v", match.NodeKey, err)
 			continue
 		}
-		edgeMaps = append(edgeMaps, props)
+		edgeMaps = append(edgeMaps, map[string]any{
+			"targetKey":      match.NodeKey,
+			"confidence":     prov["confidence"],
+			"reasons":        prov["reasons"],
+			"callGraphDepth": match.CallGraphDepth,
+			"model":          prov["model"],
+			"strategy":       prov["strategy"],
+			"createdAt":      prov["createdAt"],
+			"scope":          prov["scope"],
+			"scopeId":        prov["scopeId"],
+			"evidenceRefs":   prov["evidenceRefs"],
+		})
 	}
 	if len(edgeMaps) == 0 {
 		return 0, nil
@@ -473,6 +483,9 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 		    r.reasons = edge.reasons,
 		    r.contextType = 'intelligent_linking',
 		    r.callGraphDepth = edge.callGraphDepth,
+		    r.strategy = edge.strategy,
+		    r.evidenceRefs = edge.evidenceRefs,
+		    r.scope = edge.scope,
 		    r.model = edge.model,
 		    r.createdAt = edge.createdAt,
 		    r.scopeId = edge.scopeId
@@ -673,10 +686,10 @@ func getStringValue(m map[string]any, key string) string {
 func contains(s, substr string) bool {
 	return len(substr) > 0 && len(s) >= len(substr) &&
 		(s == substr ||
-		 (len(s) > len(substr) &&
-		  (s[:len(substr)] == substr ||
-		   s[len(s)-len(substr):] == substr ||
-		   findSubstring(s, substr))))
+			(len(s) > len(substr) &&
+				(s[:len(substr)] == substr ||
+					s[len(s)-len(substr):] == substr ||
+					findSubstring(s, substr))))
 }
 
 func findSubstring(s, substr string) bool {

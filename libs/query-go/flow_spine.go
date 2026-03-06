@@ -28,22 +28,26 @@ type FlowSpineResult struct {
 
 // FlowSpineGenerator creates Flow spine nodes from API endpoints and call graphs.
 type FlowSpineGenerator struct {
-	client       *neo4j.Client
-	scopeCtx     models.ScopeContext
-	budget       inference.TraversalBudget
-	deduplicator *inference.FlowDeduplicator
-	seedFinder   *inference.StructuralSeedFinder
+	client          *neo4j.Client
+	scopeCtx        models.ScopeContext
+	budget          inference.TraversalBudget
+	deduplicator    *inference.FlowDeduplicator
+	seedFinder      *inference.StructuralSeedFinder
+	graphSeedFinder *inference.GraphSeedFinder
 }
 
 // NewFlowSpineGenerator creates a new generator with default traversal budget.
 func NewFlowSpineGenerator(client *neo4j.Client) *FlowSpineGenerator {
 	budget := inference.DefaultTraversalBudget
+	gsf := inference.NewGraphSeedFinder(client)
+	gsf.SetBudget(budget)
 	return &FlowSpineGenerator{
-		client:       client,
-		scopeCtx:     models.DefaultScope(),
-		budget:       budget,
-		deduplicator: inference.NewFlowDeduplicator(),
-		seedFinder:   inference.NewStructuralSeedFinder().WithBudget(budget),
+		client:          client,
+		scopeCtx:        models.DefaultScope(),
+		budget:          budget,
+		deduplicator:    inference.NewFlowDeduplicator(),
+		seedFinder:      inference.NewStructuralSeedFinder().WithBudget(budget),
+		graphSeedFinder: gsf,
 	}
 }
 
@@ -51,11 +55,77 @@ func NewFlowSpineGenerator(client *neo4j.Client) *FlowSpineGenerator {
 func (g *FlowSpineGenerator) SetBudget(budget inference.TraversalBudget) {
 	g.budget = budget
 	g.seedFinder = inference.NewStructuralSeedFinder().WithBudget(budget)
+	g.graphSeedFinder.SetBudget(budget)
 }
 
 // SetScope sets the scope context for flow generation.
 func (g *FlowSpineGenerator) SetScope(scope models.ScopeContext) {
 	g.scopeCtx = scope
+	g.graphSeedFinder.SetScope(scope)
+}
+
+// GenerateFlows uses the graph-structural seed finder to discover entry points
+// and build flow spines. Falls back to the heuristic-based approach if no
+// graph-structural seeds are found.
+func (g *FlowSpineGenerator) GenerateFlows(ctx context.Context, maxDepth int) ([]FlowSpineResult, error) {
+	if maxDepth <= 0 {
+		maxDepth = g.budget.MaxDepth
+	}
+	if maxDepth <= 0 {
+		maxDepth = 2
+	}
+
+	// Try graph-structural seed detection first.
+	seeds, err := g.graphSeedFinder.FindSeeds(ctx)
+	if err != nil {
+		fmt.Printf("Warning: graph seed finder failed, falling back to heuristic: %v\n", err)
+		return g.GenerateFromAPIEndpoints(ctx, maxDepth)
+	}
+
+	if len(seeds) == 0 {
+		// No graph-structural seeds found; fall back to heuristic path.
+		return g.GenerateFromAPIEndpoints(ctx, maxDepth)
+	}
+
+	// Sort seeds by priority descending.
+	sort.Slice(seeds, func(i, j int) bool {
+		return seeds[i].Priority > seeds[j].Priority
+	})
+
+	var results []FlowSpineResult
+	for _, seed := range seeds {
+		flowNodeKey := models.FlowNodeKey(string(seed.SeedType), seed.NodeKey)
+		flowType := string(seed.SeedType)
+
+		steps := []FlowStep{{NodeKey: seed.NodeKey, Name: seed.Name, Label: seed.NodeType, Order: 0}}
+		callees, traceErr := g.traceCallees(ctx, seed.NodeKey, maxDepth, 1)
+		if traceErr == nil {
+			steps = append(steps, callees...)
+		}
+
+		steps = g.deduplicateSteps(steps)
+		if len(steps) < 2 {
+			continue
+		}
+
+		if err := g.persistFlow(ctx, flowNodeKey, seed.Name, flowType, seed.NodeKey, maxDepth, steps); err != nil {
+			continue
+		}
+
+		results = append(results, FlowSpineResult{
+			FlowNodeKey: flowNodeKey,
+			FlowName:    seed.Name,
+			FlowType:    flowType,
+			Steps:       steps,
+		})
+	}
+
+	// If graph seeds produced no multi-step flows, fall back.
+	if len(results) == 0 {
+		return g.GenerateFromAPIEndpoints(ctx, maxDepth)
+	}
+
+	return results, nil
 }
 
 // GenerateFromAPIEndpoints discovers API endpoints and builds flow spines by
@@ -173,10 +243,18 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
-		WITH fn, count(caller) AS incomingCalls
+		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+		WHERE (callee:Function OR callee:Method)
+		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
+		OPTIONAL MATCH (fn)-[:EXPOSES_API]->(route:APIRoute)
+		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
+		WITH fn,
+		     count(DISTINCT caller) AS incomingCalls,
+		     count(DISTINCT callee) AS outgoingCalls,
+		     count(DISTINCT route) AS apiLinks
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.isExported, false) AS isExported, coalesce(fn.filePath, '') AS filePath,
-		       incomingCalls`
+		       incomingCalls, outgoingCalls, apiLinks`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
@@ -213,13 +291,26 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 			callerCount = v
 		}
 
+		outgoingCount := int64(0)
+		if v, ok := m["outgoingCalls"].(int64); ok {
+			outgoingCount = v
+		}
+
+		apiLinks := int64(0)
+		if v, ok := m["apiLinks"].(int64); ok {
+			apiLinks = v
+		}
+
 		nodes = append(nodes, inference.NodeInfo{
-			NodeKey:    nodeKey,
-			Name:       name,
-			NodeType:   nodeType,
-			IsExported: isExported,
-			HasCallers: callerCount > 0,
-			FilePath:   strVal(m, "filePath"),
+			NodeKey:       nodeKey,
+			Name:          name,
+			NodeType:      nodeType,
+			IsExported:    isExported,
+			HasCallers:    callerCount > 0,
+			IncomingCalls: callerCount,
+			OutgoingCalls: outgoingCount,
+			APILinked:     apiLinks > 0,
+			FilePath:      strVal(m, "filePath"),
 		})
 	}
 
@@ -484,6 +575,132 @@ func (g *FlowSpineGenerator) ListFlows(ctx context.Context, flowType string) ([]
 	}
 
 	return results, nil
+}
+
+// GenerateCrossServiceFlows discovers cross-service call boundaries and
+// creates Flow nodes with flowType "cross_service". Steps are annotated with
+// their owning service name.
+func (g *FlowSpineGenerator) GenerateCrossServiceFlows(ctx context.Context, maxDepth int) ([]FlowSpineResult, error) {
+	if maxDepth <= 0 {
+		maxDepth = g.budget.MaxDepth
+	}
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+
+	// Find direct cross-service call boundaries.
+	cypher := `
+		MATCH (s1:Service)-[:CONTAINS*2..3]->(caller)-[:CALLS]->(callee)<-[:CONTAINS*2..3]-(s2:Service)
+		WHERE s1 <> s2
+		  AND (caller:Function OR caller:Method)
+		  AND (callee:Function OR callee:Method)
+		  AND (s1.scopeId = $scopeId OR s1.scopeId = 'main')
+		  AND (s2.scopeId = $scopeId OR s2.scopeId = 'main')
+		RETURN caller.nodeKey AS callerKey, caller.name AS callerName, labels(caller) AS callerLabels,
+		       s1.name AS callerService,
+		       callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels,
+		       s2.name AS calleeService
+	`
+	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": g.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cross-service query failed: %w", err)
+	}
+
+	// Also find API-mediated cross-service calls.
+	apiCypher := `
+		MATCH (caller)-[:CALLS_API]->(route:APIRoute)<-[:EXPOSES_API]-(handler)
+		MATCH (s1:Service)-[:CONTAINS*2..3]->(caller)
+		MATCH (s2:Service)-[:CONTAINS*2..3]->(handler)
+		WHERE s1 <> s2
+		  AND (s1.scopeId = $scopeId OR s1.scopeId = 'main')
+		  AND (s2.scopeId = $scopeId OR s2.scopeId = 'main')
+		RETURN caller.nodeKey AS callerKey, caller.name AS callerName, labels(caller) AS callerLabels,
+		       s1.name AS callerService,
+		       handler.nodeKey AS calleeKey, handler.name AS calleeName, labels(handler) AS calleeLabels,
+		       s2.name AS calleeService
+	`
+	apiRecords, err := g.client.ExecuteQuery(ctx, apiCypher, map[string]any{
+		"scopeId": g.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		fmt.Printf("Warning: API cross-service query failed: %v\n", err)
+	} else {
+		records = append(records, apiRecords...)
+	}
+
+	// Deduplicate by caller->callee pair and build flows.
+	type boundary struct {
+		callerKey, callerName, callerLabel, callerService string
+		calleeKey, calleeName, calleeLabel, calleeService string
+	}
+	seen := make(map[string]bool)
+	var boundaries []boundary
+	for _, r := range records {
+		m := r.AsMap()
+		ck := strVal(m, "callerKey")
+		dk := strVal(m, "calleeKey")
+		pair := ck + "->" + dk
+		if seen[pair] || ck == "" || dk == "" {
+			continue
+		}
+		seen[pair] = true
+		boundaries = append(boundaries, boundary{
+			callerKey:     ck,
+			callerName:    strVal(m, "callerName"),
+			callerLabel:   extractLabel(m, "callerLabels"),
+			callerService: strVal(m, "callerService"),
+			calleeKey:     dk,
+			calleeName:    strVal(m, "calleeName"),
+			calleeLabel:   extractLabel(m, "calleeLabels"),
+			calleeService: strVal(m, "calleeService"),
+		})
+	}
+
+	var results []FlowSpineResult
+	for _, b := range boundaries {
+		flowName := fmt.Sprintf("%s → %s: %s calls %s", b.callerService, b.calleeService, b.callerName, b.calleeName)
+		flowNodeKey := models.FlowNodeKey("cross_service", b.callerKey+"->"+b.calleeKey)
+
+		steps := []FlowStep{
+			{NodeKey: b.callerKey, Name: b.callerName, Label: b.callerLabel, Order: 0},
+			{NodeKey: b.calleeKey, Name: b.calleeName, Label: b.calleeLabel, Order: 1},
+		}
+
+		// Trace callees from the boundary callee.
+		deeper, err := g.traceCallees(ctx, b.calleeKey, maxDepth-1, 2)
+		if err == nil {
+			steps = append(steps, deeper...)
+		}
+
+		steps = g.deduplicateSteps(steps)
+
+		if err := g.persistFlow(ctx, flowNodeKey, flowName, "cross_service", b.callerKey, maxDepth, steps); err != nil {
+			continue
+		}
+
+		results = append(results, FlowSpineResult{
+			FlowNodeKey: flowNodeKey,
+			FlowName:    flowName,
+			FlowType:    "cross_service",
+			Steps:       steps,
+		})
+	}
+
+	return results, nil
+}
+
+// extractLabel extracts "Function" or "Method" from a labels array at the given key.
+func extractLabel(m map[string]any, key string) string {
+	if labels, ok := m[key].([]any); ok {
+		for _, l := range labels {
+			if s, ok := l.(string); ok && s == "Method" {
+				return "Method"
+			}
+		}
+	}
+	return "Function"
 }
 
 // deduplicateSteps converts FlowSteps to inference.FlowStepInfo, runs the

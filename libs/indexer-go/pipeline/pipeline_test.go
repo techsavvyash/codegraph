@@ -228,11 +228,15 @@ func TestDefaultStages_FirstIsRequired(t *testing.T) {
 
 func TestDefaultStages_OptionalFlags(t *testing.T) {
 	stages := DefaultStages()
-	// IngestCode is required; all others are optional.
+	// IngestCode and GenerateContextDocs are required; others are optional.
+	requiredStages := map[StageName]bool{
+		StageIngestCode:          true,
+		StageGenerateContextDocs: true,
+	}
 	for i, stage := range stages {
-		if i == 0 {
+		if requiredStages[stage.Name()] {
 			if stage.Optional() {
-				t.Errorf("stage 0 (%s) should be required", stage.Name())
+				t.Errorf("stage %d (%s) should be required", i, stage.Name())
 			}
 		} else {
 			if !stage.Optional() {
@@ -354,5 +358,47 @@ func TestSummary_Empty(t *testing.T) {
 	s := Summary(nil)
 	if s == "" {
 		t.Error("summary of nil should still produce output")
+	}
+}
+
+func TestGenerateContextDocsStage_NilGeneratorFails(t *testing.T) {
+	stage := &GenerateContextDocsStage{}
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+	// Generator is nil — Run should return an error.
+	_, err := stage.Run(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when Generator is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "generator is required") {
+		t.Errorf("error should mention generator requirement, got: %v", err)
+	}
+}
+
+func TestGenerateContextDocsStage_NotOptional(t *testing.T) {
+	stage := &GenerateContextDocsStage{}
+	if stage.Optional() {
+		t.Error("GenerateContextDocsStage must not be optional")
+	}
+}
+
+func TestPipeline_Stage6AbortsPipeline(t *testing.T) {
+	s1 := &fakeStage{name: "PreStage", items: 1}
+	// Simulate Stage 6 as non-optional with a failure.
+	s6 := &fakeStage{name: StageGenerateContextDocs, optional: false, err: errors.New("generator is required but was nil")}
+	s7 := &fakeStage{name: "PostStage", items: 1}
+
+	p := New(s1, s6, s7)
+	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
+	results := p.Run(context.Background(), cfg)
+
+	// Pipeline should abort at Stage 6 — PostStage must not run.
+	if s7.ran {
+		t.Error("PostStage should not run after non-optional Stage 6 failure")
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results (aborted at Stage 6), got %d", len(results))
+	}
+	if results[1].Err == nil {
+		t.Error("Stage 6 result should contain an error")
 	}
 }

@@ -2,14 +2,16 @@ version: '3.8'
 
 services:
   neo4j:
-    image: neo4j:5.15-community
+    image: neo4j:5.26-community
     container_name: code-graph-neo4j
     ports:
       - "7474:7474"  # HTTP
       - "7687:7687"  # Bolt
     environment:
       - NEO4J_AUTH=neo4j/password123
-      - NEO4J_PLUGINS=["apoc","apoc-extended"]
+      # GDS plugin is installed manually: download neo4j-graph-data-science-2.13.2.jar
+      # to ./plugins/ and it will be mounted into the container. See scripts/setup-gds.sh.
+      - NEO4J_PLUGINS=[]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
       - NEO4J_dbms_security_allow__csv__import__from__file__urls=true
@@ -30,7 +32,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
       - neo4j_import:/var/lib/neo4j/import
-      - neo4j_plugins:/plugins
+      - ./plugins:/plugins
     healthcheck:
       test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password123", "RETURN 1"]
       interval: 30s
@@ -73,7 +75,7 @@ services:
 
   # Optional: Add a web interface for Neo4j browser
   neo4j-browser:
-    image: neo4j:5.15-community
+    image: neo4j:5.26-community
     container_name: code-graph-browser
     ports:
       - "7475:7474"

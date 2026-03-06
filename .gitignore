@@ -38,3 +38,4 @@ test-results/
 # Debug / scratch
 coverage.out
 integration.test
+plugins/

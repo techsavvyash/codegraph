@@ -198,27 +198,31 @@ func TestValidateDocProps_EmptyValues(t *testing.T) {
 
 func TestValidateMentionEdgeProps_Valid(t *testing.T) {
 	props := map[string]any{
-		"confidence": 0.8,
-		"reasons":    []string{"backtick_reference"},
-		"createdAt":  "2025-01-01T00:00:00Z",
-		"model":      "backtick_extraction",
-		"scopeId":    "main",
+		"confidence":   0.8,
+		"reasons":      []string{"backtick_reference"},
+		"createdAt":    "2025-01-01T00:00:00Z",
+		"strategy":     "backtick_extraction",
+		"scope":        "main",
+		"scopeId":      "main",
+		"evidenceRefs": []string{"doc:chunk:1", "func:main"},
 	}
 	if err := ValidateMentionEdgeProps(props); err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}
 }
 
-func TestValidateMentionEdgeProps_ValidWithStrategy(t *testing.T) {
+func TestValidateMentionEdgeProps_MissingStrategy(t *testing.T) {
 	props := map[string]any{
-		"confidence": 0.8,
-		"reasons":    []string{"backtick_reference"},
-		"createdAt":  "2025-01-01T00:00:00Z",
-		"strategy":   "backtick_extraction",
-		"scopeId":    "main",
+		"confidence":   0.8,
+		"reasons":      []string{"backtick_reference"},
+		"createdAt":    "2025-01-01T00:00:00Z",
+		"scope":        "main",
+		"scopeId":      "main",
+		"evidenceRefs": []string{"doc:chunk:1"},
 	}
-	if err := ValidateMentionEdgeProps(props); err != nil {
-		t.Errorf("expected nil with strategy instead of model, got %v", err)
+	err := ValidateMentionEdgeProps(props)
+	if err == nil {
+		t.Fatal("expected validation error when strategy is missing")
 	}
 }
 
@@ -229,7 +233,7 @@ func TestValidateMentionEdgeProps_Missing(t *testing.T) {
 		t.Fatal("expected error for empty props")
 	}
 	errs := err.(ValidationErrors)
-	// confidence, reasons, createdAt, model, scopeId = 5
+	// confidence, reasons, createdAt, strategy, scope, scopeId, evidenceRefs = 7
 	if len(errs) < 5 {
 		t.Errorf("expected at least 5 errors, got %d: %v", len(errs), errs)
 	}
@@ -237,10 +241,12 @@ func TestValidateMentionEdgeProps_Missing(t *testing.T) {
 
 func TestValidateMentionEdgeProps_MissingScopeId(t *testing.T) {
 	props := map[string]any{
-		"confidence": 0.8,
-		"reasons":    []string{"test"},
-		"createdAt":  "2025-01-01T00:00:00Z",
-		"model":      "test",
+		"confidence":   0.8,
+		"reasons":      []string{"test"},
+		"createdAt":    "2025-01-01T00:00:00Z",
+		"strategy":     "test",
+		"scope":        "pr",
+		"evidenceRefs": []string{"doc:1", "func:2"},
 	}
 	err := ValidateMentionEdgeProps(props)
 	if err == nil {
@@ -252,11 +258,13 @@ func TestValidateMentionEdgeProps_MissingScopeId(t *testing.T) {
 
 func TestValidateMentionEdgeProps_BadConfidence(t *testing.T) {
 	props := map[string]any{
-		"confidence": 1.5,
-		"reasons":    []string{"test"},
-		"createdAt":  "2025-01-01T00:00:00Z",
-		"model":      "test",
-		"scopeId":    "main",
+		"confidence":   1.5,
+		"reasons":      []string{"test"},
+		"createdAt":    "2025-01-01T00:00:00Z",
+		"strategy":     "test",
+		"scope":        "main",
+		"scopeId":      "main",
+		"evidenceRefs": []string{"doc:1"},
 	}
 	err := ValidateMentionEdgeProps(props)
 	if err == nil {
@@ -267,32 +275,73 @@ func TestValidateMentionEdgeProps_BadConfidence(t *testing.T) {
 // --- BuildMentionEdgeProps tests ---
 
 func TestBuildMentionEdgeProps_Valid(t *testing.T) {
-	props, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "intelligent_linking", "2025-01-01T00:00:00Z", "pr-audit")
+	props, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "intelligent_linking", "2025-01-01T00:00:00Z", "pr-audit", []string{"doc:chunk:1", "func:2"})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 	if props["confidence"] != 0.85 {
 		t.Errorf("confidence = %v, want 0.85", props["confidence"])
 	}
-	if props["model"] != "intelligent_linking" {
-		t.Errorf("model = %v, want intelligent_linking", props["model"])
+	if props["strategy"] != "intelligent_linking" {
+		t.Errorf("strategy = %v, want intelligent_linking", props["strategy"])
 	}
 	if props["scopeId"] != "pr-audit" {
 		t.Errorf("scopeId = %v, want pr-audit", props["scopeId"])
 	}
+	if props["scope"] != "pr" {
+		t.Errorf("scope = %v, want pr", props["scope"])
+	}
 }
 
 func TestBuildMentionEdgeProps_EmptyStrategy(t *testing.T) {
-	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "", "2025-01-01T00:00:00Z", "main")
+	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "", "2025-01-01T00:00:00Z", "main", []string{"doc:1"})
 	if err == nil {
 		t.Fatal("expected error for empty strategy")
 	}
 }
 
 func TestBuildMentionEdgeProps_EmptyScopeId(t *testing.T) {
-	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "test", "2025-01-01T00:00:00Z", "")
+	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "test", "2025-01-01T00:00:00Z", "", []string{"doc:1"})
 	if err == nil {
 		t.Fatal("expected error for empty scopeId")
+	}
+}
+
+func TestBuildMentionEdgeProps_InvalidConfidence(t *testing.T) {
+	_, err := BuildMentionEdgeProps(1.5, []string{"backtick"}, "test", "2025-01-01T00:00:00Z", "main", []string{"doc:1"})
+	if err == nil {
+		t.Fatal("expected error for confidence > 1")
+	}
+
+	_, err = BuildMentionEdgeProps(-0.1, []string{"backtick"}, "test", "2025-01-01T00:00:00Z", "main", []string{"doc:1"})
+	if err == nil {
+		t.Fatal("expected error for negative confidence")
+	}
+}
+
+func TestBuildMentionEdgeProps_EmptyReasons(t *testing.T) {
+	_, err := BuildMentionEdgeProps(0.85, nil, "test", "2025-01-01T00:00:00Z", "main", []string{"doc:1"})
+	if err == nil {
+		t.Fatal("expected error for nil reasons")
+	}
+
+	_, err = BuildMentionEdgeProps(0.85, []string{}, "test", "2025-01-01T00:00:00Z", "main", []string{"doc:1"})
+	if err == nil {
+		t.Fatal("expected error for empty reasons slice")
+	}
+}
+
+func TestBuildMentionEdgeProps_EmptyCreatedAt(t *testing.T) {
+	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "test", "", "main", []string{"doc:1"})
+	if err == nil {
+		t.Fatal("expected error for empty createdAt")
+	}
+}
+
+func TestBuildMentionEdgeProps_EmptyEvidenceRefs(t *testing.T) {
+	_, err := BuildMentionEdgeProps(0.85, []string{"backtick"}, "test", "2025-01-01T00:00:00Z", "main", nil)
+	if err == nil {
+		t.Fatal("expected error for empty evidence refs")
 	}
 }
 

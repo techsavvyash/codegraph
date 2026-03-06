@@ -121,7 +121,8 @@ func ValidateDocProps(props map[string]any) error {
 }
 
 // ValidateMentionEdgeProps checks that a MENTIONS edge property map has all
-// mandatory provenance fields (confidence, reasons, createdAt, model/strategy, scopeId).
+// mandatory provenance fields (scope, scopeId, confidence, reasons, createdAt,
+// strategy, evidenceRefs).
 func ValidateMentionEdgeProps(props map[string]any) error {
 	var errs ValidationErrors
 
@@ -149,11 +150,12 @@ func ValidateMentionEdgeProps(props map[string]any) error {
 		}
 	}
 
-	// Accept either "model" or "strategy" (unified field).
-	hasModel := hasNonEmptyString(props, "model")
-	hasStrategy := hasNonEmptyString(props, "strategy")
-	if !hasModel && !hasStrategy {
-		errs = append(errs, ValidationError{Field: "model", Message: "must be present (or strategy)"})
+	if !hasNonEmptyString(props, "strategy") {
+		errs = append(errs, ValidationError{Field: "strategy", Message: "must be present"})
+	}
+
+	if !hasNonEmptyString(props, "scope") {
+		errs = append(errs, ValidationError{Field: "scope", Message: "must be present"})
 	}
 
 	// scopeId must be present and non-empty.
@@ -161,10 +163,38 @@ func ValidateMentionEdgeProps(props map[string]any) error {
 		errs = append(errs, ValidationError{Field: "scopeId", Message: "must be present"})
 	}
 
+	v, ok := props["evidenceRefs"]
+	if !ok {
+		errs = append(errs, ValidationError{Field: "evidenceRefs", Message: "must be present"})
+	} else {
+		switch refs := v.(type) {
+		case []string:
+			if len(refs) == 0 {
+				errs = append(errs, ValidationError{Field: "evidenceRefs", Message: "must not be empty"})
+			}
+		case []any:
+			if len(refs) == 0 {
+				errs = append(errs, ValidationError{Field: "evidenceRefs", Message: "must not be empty"})
+			}
+		default:
+			errs = append(errs, ValidationError{Field: "evidenceRefs", Message: "must be a list"})
+		}
+	}
+
 	if len(errs) > 0 {
 		return errs
 	}
 	return nil
+}
+
+func scopeFromScopeID(scopeID string) string {
+	if scopeID == "" || scopeID == "main" {
+		return "main"
+	}
+	if strings.HasPrefix(scopeID, "pr-") {
+		return "pr"
+	}
+	return "main"
 }
 
 // hasNonEmptyString returns true if props[key] is a non-empty string.
@@ -179,13 +209,16 @@ func hasNonEmptyString(props map[string]any, key string) bool {
 
 // BuildMentionEdgeProps constructs a validated MENTIONS edge property map.
 // Returns an error if any required field is missing or invalid.
-func BuildMentionEdgeProps(confidence float64, reasons []string, strategy, createdAt, scopeId string) (map[string]any, error) {
+func BuildMentionEdgeProps(confidence float64, reasons []string, strategy, createdAt, scopeId string, evidenceRefs []string) (map[string]any, error) {
 	props := map[string]any{
-		"confidence": confidence,
-		"reasons":    reasons,
-		"model":      strategy,
-		"createdAt":  createdAt,
-		"scopeId":    scopeId,
+		"confidence":   confidence,
+		"reasons":      reasons,
+		"strategy":     strategy,
+		"model":        strategy, // retained for backward compatibility with existing readers
+		"createdAt":    createdAt,
+		"scope":        scopeFromScopeID(scopeId),
+		"scopeId":      scopeId,
+		"evidenceRefs": evidenceRefs,
 	}
 	if err := ValidateMentionEdgeProps(props); err != nil {
 		return nil, err

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/contracts"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
@@ -18,6 +20,7 @@ type StageName string
 
 const (
 	StageIngestCode              StageName = "IngestCode"
+	StageComputeGraphMetrics     StageName = "ComputeGraphMetrics"
 	StageInferServiceDeps        StageName = "InferServiceDependencies"
 	StageGenerateFlowSpines      StageName = "GenerateFlowSpines"
 	StageIngestDocuments         StageName = "IngestDocuments"
@@ -45,6 +48,14 @@ type Stage interface {
 	Optional() bool
 }
 
+// PipelineTimer records phase timings during a pipeline run.
+// Implemented by benchmarks.PhaseTimer.
+type PipelineTimer interface {
+	Start(name string)
+	Stop(items int, detail string)
+	AddResult(name string, duration time.Duration, items int, detail string)
+}
+
 // PipelineConfig carries all dependencies and parameters through the pipeline.
 type PipelineConfig struct {
 	Client           *neo4j.Client
@@ -60,6 +71,10 @@ type PipelineConfig struct {
 	VectorStore      search.VectorStore
 	TextStore        textindex.TextIndexStore
 	DocPaths         []string // Paths to local docs (optional).
+	Timer            PipelineTimer // Optional phase timer for benchmarking.
+	Generator        contracts.Generator       // Optional: evidence-backed generation.
+	Verifier         contracts.Verifier        // Optional: citation verification.
+	Policy           generated.PolicyEvaluator // Optional: persistence policy gate.
 }
 
 // Pipeline orchestrates the 7-stage enrichment pipeline.
@@ -72,10 +87,11 @@ func New(stages ...Stage) *Pipeline {
 	return &Pipeline{stages: stages}
 }
 
-// DefaultStages returns the 7 stages in canonical order.
+// DefaultStages returns the 8 stages in canonical order.
 func DefaultStages() []Stage {
 	return []Stage{
 		&IngestCodeStage{},
+		&ComputeGraphMetricsStage{},
 		&InferServiceDepsStage{},
 		&GenerateFlowSpinesStage{},
 		&IngestDocumentsStage{},
@@ -91,11 +107,18 @@ func (p *Pipeline) Run(ctx context.Context, cfg *PipelineConfig) []StageResult {
 	results := make([]StageResult, 0, len(p.stages))
 
 	for _, stage := range p.stages {
+		if cfg.Timer != nil {
+			cfg.Timer.Start(string(stage.Name()))
+		}
 		start := time.Now()
 		log.Printf("[pipeline] Running stage: %s", stage.Name())
 
 		items, err := stage.Run(ctx, cfg)
 		dur := time.Since(start)
+
+		if cfg.Timer != nil {
+			cfg.Timer.Stop(items, "")
+		}
 
 		result := StageResult{
 			Name:     stage.Name(),
@@ -131,12 +154,14 @@ type StageTier struct {
 
 // DefaultTiers returns the default parallel execution tiers.
 // Tier 0: IngestCode (required, must run first)
-// Tier 1: InferServiceDeps, GenerateFlowSpines, IngestDocuments (independent)
-// Tier 2: LinkDocumentChunks, GenerateContextDocs (depend on tier 1)
-// Tier 3: RefreshRetrievalIndexes (final)
+// Tier 1: ComputeGraphMetrics (depends on ingested call graph)
+// Tier 2: InferServiceDeps, GenerateFlowSpines, IngestDocuments (independent)
+// Tier 3: LinkDocumentChunks, GenerateContextDocs (depend on tier 2)
+// Tier 4: RefreshRetrievalIndexes (final)
 func DefaultTiers() []StageTier {
 	return []StageTier{
 		{Stages: []Stage{&IngestCodeStage{}}},
+		{Stages: []Stage{&ComputeGraphMetricsStage{}}},
 		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}, &IngestDocumentsStage{}}},
 		{Stages: []Stage{&LinkDocumentChunksStage{}, &GenerateContextDocsStage{}}},
 		{Stages: []Stage{&RefreshRetrievalIndexesStage{}}},
@@ -189,8 +214,11 @@ func (p *Pipeline) RunParallel(ctx context.Context, cfg *PipelineConfig, tiers [
 
 		wg.Wait()
 
-		// Check for non-optional failures in this tier.
+		// Record tier results into the timer and check for failures.
 		for _, result := range tierResults {
+			if cfg.Timer != nil {
+				cfg.Timer.AddResult(string(result.Name), result.Duration, result.Items, "")
+			}
 			allResults = append(allResults, result)
 			if result.Err != nil && !result.Skipped {
 				return allResults // Abort on non-optional failure.

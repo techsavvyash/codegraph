@@ -28,6 +28,10 @@ type FlowSeed struct {
 // MinSeedScore is the minimum priority score required for a seed to be included.
 const MinSeedScore = 30
 
+// Deprecated: StructuralSeedFinder uses name-based heuristics for seed detection.
+// Use GraphSeedFinder instead, which uses purely graph-structural signals.
+// StructuralSeedFinder is retained as a fallback when graph metrics are unavailable.
+//
 // StructuralSeedFinder detects flow entry points from structural signals alone,
 // independent of any framework detector. Framework detectors can boost priority
 // as optional precision add-ons.
@@ -68,14 +72,17 @@ func (f *StructuralSeedFinder) WithBudget(budget TraversalBudget) *StructuralSee
 
 // NodeInfo is the minimal information needed for seed detection.
 type NodeInfo struct {
-	NodeKey      string
-	Name         string
-	NodeType     string // "Function", "Method"
-	IsExported   bool
-	HasCallers   bool // Whether any other function calls this one
-	HasDocstring bool
-	FilePath     string
-	Parameters   []string // Parameter type names, for signature analysis
+	NodeKey       string
+	Name          string
+	NodeType      string // "Function", "Method"
+	IsExported    bool
+	HasCallers    bool // Whether any other function calls this one
+	IncomingCalls int64
+	OutgoingCalls int64
+	APILinked     bool
+	HasDocstring  bool
+	FilePath      string
+	Parameters    []string // Parameter type names, for signature analysis
 }
 
 // ClassifySeeds determines which nodes are flow entry points using structural signals.
@@ -143,13 +150,30 @@ func (f *StructuralSeedFinder) classifyNode(n NodeInfo) *FlowSeed {
 			Name:     n.Name,
 			NodeType: n.NodeType,
 			SeedType: SeedExportedRoot,
-			Priority: 50,
+			Priority: 48,
 			Reasons:  []string{"exported", "no_callers"},
+		}
+
+		if n.APILinked {
+			seed.Priority += 28
+			seed.Reasons = append(seed.Reasons, "api_linked")
+		}
+		if n.OutgoingCalls > 0 {
+			seed.Priority += minInt(int(n.OutgoingCalls), 8)
+			seed.Reasons = append(seed.Reasons, "has_downstream_calls")
+		}
+		if hasBusinessFileSignal(n.FilePath) {
+			seed.Priority += 8
+			seed.Reasons = append(seed.Reasons, "business_path_signal")
+		}
+		if hasUtilityPathSignal(n.FilePath) {
+			seed.Priority -= 12
+			seed.Reasons = append(seed.Reasons, "utility_path_penalty")
 		}
 
 		// Boost if name suggests entry point
 		if isEntrypointName(nameLower) {
-			seed.Priority += 20
+			seed.Priority += 8
 			seed.SeedType = SeedEntrypoint
 			seed.Reasons = append(seed.Reasons, "entrypoint_name_pattern")
 		}
@@ -173,12 +197,19 @@ func (f *StructuralSeedFinder) classifyNode(n NodeInfo) *FlowSeed {
 
 	// Signal 2: Non-exported but matches strong entry point patterns and has no callers
 	if !n.HasCallers && isStrongEntrypointName(nameLower) {
+		priority := 40
+		if n.APILinked {
+			priority += 15
+		}
+		if hasUtilityPathSignal(n.FilePath) {
+			priority -= 8
+		}
 		return &FlowSeed{
 			NodeKey:  n.NodeKey,
 			Name:     n.Name,
 			NodeType: n.NodeType,
 			SeedType: SeedEntrypoint,
-			Priority: 40,
+			Priority: priority,
 			Reasons:  []string{"strong_entrypoint_pattern", "no_callers"},
 		}
 	}
@@ -268,4 +299,31 @@ func isGenericNoiseEntrypoint(name, filePath string) bool {
 		}
 	}
 	return false
+}
+
+func hasBusinessFileSignal(filePath string) bool {
+	lower := strings.ToLower(filePath)
+	for _, token := range []string{"/api/", "/handler", "/service", "/workflow", "/domain", "/usecase"} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUtilityPathSignal(filePath string) bool {
+	lower := strings.ToLower(filePath)
+	for _, token := range []string{"/internal/", "/util", "/utils", "/vendor/", "/generated/"} {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

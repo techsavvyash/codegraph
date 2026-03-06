@@ -352,9 +352,15 @@ func TestGenerateAndVerify_PolicyRejects(t *testing.T) {
 	})
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
-		Template:  DocTypeDocstringSuggestion,
-		MaxTokens: 500,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeDocstringSuggestion,
+		MaxTokens:  500,
 	}
 
 	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeDocstringSuggestion, "code_symbol", "func:a", "Test docstring")
@@ -393,9 +399,15 @@ func TestGenerateAndVerify_PolicyAccepts(t *testing.T) {
 	})
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
-		Template:  DocTypeDocstringSuggestion,
-		MaxTokens: 500,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeDocstringSuggestion,
+		MaxTokens:  500,
 	}
 
 	// With nil client, Store* will panic on MergeNode. We use recover to confirm
@@ -439,9 +451,15 @@ func TestGenerateAndVerify_VerifierFailsWithoutPolicy(t *testing.T) {
 	// No policy set — verifier failure alone should reject.
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
-		Template:  DocTypeFlowSummary,
-		MaxTokens: 1000,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "api:get/users", NodeType: "APIRoute"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeFlowSummary,
+		MaxTokens:  1000,
 	}
 
 	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeFlowSummary, "flow", "func:a", "Test flow")
@@ -468,9 +486,16 @@ func TestGenerateAndVerify_UncitedStatementsRejected(t *testing.T) {
 	// No verifier, no policy — citation validation should still reject.
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
-		Template:  DocTypePRSummary,
-		MaxTokens: 500,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "file:a"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  500,
 	}
 
 	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
@@ -503,9 +528,16 @@ func TestGenerateAndVerify_LowInformationRejected(t *testing.T) {
 	})
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "pr:1", NodeType: "PullRequest"}},
-		Template:  DocTypePRSummary,
-		MaxTokens: 500,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "pr:1", NodeType: "PullRequest"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "pr:1", TargetKey: "file:a"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  500,
 	}
 
 	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
@@ -555,9 +587,18 @@ func TestGenerateAndVerify_PRSummaryDocType(t *testing.T) {
 	})
 
 	bundle := &contracts.ContextBundle{
-		Anchors:   []contracts.RetrievalCandidate{{NodeKey: "pr:42", NodeType: "PullRequest"}},
-		Template:  DocTypePRSummary,
-		MaxTokens: 1000,
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "pr:42", NodeType: "PullRequest"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "func:c", NodeType: "Function"},
+			{NodeKey: "doc:1", NodeType: "Document"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "pr:42", TargetKey: "service:billing"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  1000,
 	}
 
 	// Should attempt StorePRSummary which panics with nil client — confirming PR summary

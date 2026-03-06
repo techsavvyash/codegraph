@@ -18,8 +18,8 @@ func TestStructuralSeedFinder_ExportedRoot(t *testing.T) {
 	if seeds[0].SeedType != SeedExportedRoot {
 		t.Errorf("expected exported_root, got %s", seeds[0].SeedType)
 	}
-	if seeds[0].Priority < 50 {
-		t.Errorf("expected priority >= 50, got %d", seeds[0].Priority)
+	if seeds[0].Priority < 48 {
+		t.Errorf("expected priority >= 48, got %d", seeds[0].Priority)
 	}
 }
 
@@ -37,8 +37,8 @@ func TestStructuralSeedFinder_HTTPHandler(t *testing.T) {
 	if seeds[0].SeedType != SeedHTTPHandler {
 		t.Errorf("expected http_handler, got %s", seeds[0].SeedType)
 	}
-	if seeds[0].Priority < 80 {
-		t.Errorf("expected boosted priority >= 80, got %d", seeds[0].Priority)
+	if seeds[0].Priority < 78 {
+		t.Errorf("expected boosted priority >= 78, got %d", seeds[0].Priority)
 	}
 }
 

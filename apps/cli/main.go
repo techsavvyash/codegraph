@@ -481,19 +481,14 @@ var indexPipelineCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		scopeCtx := models.DefaultScope()
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
-		if scopeFlag == "pr" {
-			prID := scopeIDFlag
-			if prID == "" {
-				return fmt.Errorf("--scope-id is required when --scope=pr")
-			}
-			if strings.HasPrefix(prID, "pr-") {
-				prID = prID[3:]
-			}
-			scopeCtx = models.NewPRScope(prID)
-			fmt.Printf("Pipeline running in PR scope: pr-%s\n", prID)
+		scopeCtx, err := models.ParseScopeFlags(scopeFlag, scopeIDFlag)
+		if err != nil {
+			return fmt.Errorf("invalid scope flags: %w", err)
+		}
+		if scopeCtx.Scope == models.ScopePR {
+			fmt.Printf("Pipeline running in PR scope: %s\n", scopeCtx.ScopeID)
 		}
 
 		tenantID, _ := cmd.Flags().GetString("tenant-id")
@@ -531,7 +526,9 @@ var indexPipelineCmd = &cobra.Command{
 		}
 
 		// Wire generation + verification + policy for Stage 6.
-		wireGenerationDeps(cmd, cfg, client)
+		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
+			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+		}
 
 		parallel, _ := cmd.Flags().GetBool("parallel")
 
@@ -625,19 +622,14 @@ Example:
 		}
 		defer client.Close(context.Background())
 
-		scopeCtx := models.DefaultScope()
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
-		if scopeFlag == "pr" {
-			prID := scopeIDFlag
-			if prID == "" {
-				return fmt.Errorf("--scope-id is required when --scope=pr")
-			}
-			if strings.HasPrefix(prID, "pr-") {
-				prID = prID[3:]
-			}
-			scopeCtx = models.NewPRScope(prID)
-			fmt.Printf("Replay running in PR scope: pr-%s\n", prID)
+		scopeCtx, err := models.ParseScopeFlags(scopeFlag, scopeIDFlag)
+		if err != nil {
+			return fmt.Errorf("invalid scope flags: %w", err)
+		}
+		if scopeCtx.Scope == models.ScopePR {
+			fmt.Printf("Replay running in PR scope: %s\n", scopeCtx.ScopeID)
 		}
 
 		tenantID, _ := cmd.Flags().GetString("tenant-id")
@@ -674,7 +666,9 @@ Example:
 		}
 
 		// Wire generation + verification + policy for Stage 6.
-		wireGenerationDeps(cmd, cfg, client)
+		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
+			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+		}
 
 		stageNames := make([]string, len(selected))
 		for i, s := range selected {
@@ -1227,7 +1221,7 @@ var queryFlowsCmd = &cobra.Command{
 
 		gen := query.NewFlowSpineGenerator(client)
 		if scopeID != "" {
-			gen.SetScope(models.NewPRScope(scopeID))
+			gen.SetScope(models.NewPRScope(models.NormalizePRID(scopeID)))
 		}
 		if maxDepth > 0 {
 			budget := inference.DefaultTraversalBudget
@@ -3259,14 +3253,13 @@ func createOpenSearchStoreRequired() (*textindex.OpenSearchStore, error) {
 	return store, nil
 }
 
-// wireGenerationDeps attempts to create and wire a Generator, Verifier, and
+// wireGenerationDeps creates and wires a Generator, Verifier, and
 // PolicyEvaluator into the PipelineConfig for evidence-backed Stage 6 output.
-// Falls back gracefully: if no LLM provider is available, Stage 6 uses auto-stub.
-func wireGenerationDeps(cmd *cobra.Command, cfg *pipeline.PipelineConfig, client *neo4j.Client) {
+// Returns an error if the LLM provider is not available.
+func wireGenerationDeps(cmd *cobra.Command, cfg *pipeline.PipelineConfig, client *neo4j.Client) error {
 	provider, err := createLLMProvider(cmd)
 	if err != nil {
-		fmt.Printf("Note: LLM provider not available, Stage 6 will use auto-stub fallback: %v\n", err)
-		return
+		return fmt.Errorf("LLM provider is required for Stage 6: %w", err)
 	}
 
 	llmClient := &llmClientAdapter{provider: provider.Provider}
@@ -3282,6 +3275,7 @@ func wireGenerationDeps(cmd *cobra.Command, cfg *pipeline.PipelineConfig, client
 	cfg.Policy = &policyGateAdapter{gate: gate}
 
 	fmt.Println("🧪 Evidence-backed generation wired (generator + verifier + policy gate)")
+	return nil
 }
 
 // createEmbeddingServiceFromFlags parses embedding flags and returns the service.

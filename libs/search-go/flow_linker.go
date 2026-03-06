@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/provenance"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
@@ -158,6 +159,19 @@ func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, 
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Validate provenance fields before writing.
+	props, err := provenance.BuildMentionEdgeProps(
+		0.7,
+		reasons,
+		"flow_aware_linking",
+		now,
+		fl.scopeID,
+		[]string{chunkKey, flowKey},
+	)
+	if err != nil {
+		return fmt.Errorf("flow mention provenance validation failed: %w", err)
+	}
+
 	cypher := `
 		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})
 		WHERE chunk.scopeId = $scopeId OR chunk.scopeId = 'main'
@@ -169,23 +183,29 @@ func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, 
 		SET r.contextType = 'flow_aware_linking',
 		    r.flowName = $flowName,
 		    r.patterns = $patterns,
+		    r.scope = $scope,
 		    r.scopeId = $scopeId,
 		    r.confidence = $confidence,
 		    r.reasons = $reasons,
+		    r.strategy = $strategy,
+		    r.evidenceRefs = $evidenceRefs,
 		    r.createdAt = $createdAt,
 		    r.model = $model
 		RETURN elementId(r) AS id
 	`
-	_, err := fl.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"chunkKey":   chunkKey,
-		"flowKey":    flowKey,
-		"flowName":   flowName,
-		"patterns":   patterns,
-		"scopeId":    fl.scopeID,
-		"confidence": 0.7,
-		"reasons":    reasons,
-		"createdAt":  now,
-		"model":      "flow_aware_linking",
+	_, err = fl.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"chunkKey":     chunkKey,
+		"flowKey":      flowKey,
+		"flowName":     flowName,
+		"patterns":     patterns,
+		"scope":        props["scope"],
+		"scopeId":      fl.scopeID,
+		"confidence":   props["confidence"],
+		"reasons":      props["reasons"],
+		"strategy":     props["strategy"],
+		"evidenceRefs": props["evidenceRefs"],
+		"createdAt":    props["createdAt"],
+		"model":        props["model"],
 	})
 	return err
 }

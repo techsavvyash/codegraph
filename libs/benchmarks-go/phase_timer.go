@@ -19,9 +19,11 @@ type PhaseResult struct {
 
 // PhaseTimer provides reusable phase-level timing with item counts.
 type PhaseTimer struct {
-	results []PhaseResult
-	current string
-	start   time.Time
+	results   []PhaseResult
+	current   string
+	start     time.Time
+	wallStart time.Time
+	wallStop  time.Time
 }
 
 // NewPhaseTimer creates a new PhaseTimer.
@@ -63,6 +65,29 @@ func (pt *PhaseTimer) AddResult(name string, duration time.Duration, items int, 
 		Detail:     detail,
 		IsSubPhase: strings.HasPrefix(name, "  "),
 	})
+}
+
+// StartWall begins wall-clock timing (captures real elapsed time including parallel work).
+func (pt *PhaseTimer) StartWall() { pt.wallStart = time.Now() }
+
+// StopWall ends wall-clock timing.
+func (pt *PhaseTimer) StopWall() { pt.wallStop = time.Now() }
+
+// WallDuration returns the wall-clock elapsed time between StartWall and StopWall.
+// Returns zero if wall timing was not used.
+func (pt *PhaseTimer) WallDuration() time.Duration {
+	if pt.wallStart.IsZero() || pt.wallStop.IsZero() {
+		return 0
+	}
+	return pt.wallStop.Sub(pt.wallStart)
+}
+
+// Reset clears all results and wall-clock state for reuse.
+func (pt *PhaseTimer) Reset() {
+	pt.results = nil
+	pt.current = ""
+	pt.wallStart = time.Time{}
+	pt.wallStop = time.Time{}
 }
 
 // Results returns all recorded phase results.
@@ -124,7 +149,10 @@ func (pt *PhaseTimer) PrintTable(w io.Writer) {
 	}
 
 	fmt.Fprintln(w, strings.Repeat("\u2500", 82))
-	fmt.Fprintf(w, "%-4s %-30s %12s\n", "", "TOTAL", formatDuration(total))
+	fmt.Fprintf(w, "%-4s %-30s %12s\n", "", "TOTAL (summed)", formatDuration(total))
+	if wall := pt.WallDuration(); wall > 0 {
+		fmt.Fprintf(w, "%-4s %-30s %12s\n", "", "WALL CLOCK", formatDuration(wall))
+	}
 	fmt.Fprintln(w)
 }
 
@@ -156,14 +184,20 @@ func (pt *PhaseTimer) PrintJSON(w io.Writer) error {
 		}
 	}
 
+	wallMs := float64(pt.WallDuration().Milliseconds())
+
 	output := struct {
-		Phases   []jsonResult `json:"phases"`
-		TotalMs  float64      `json:"total_ms"`
-		TotalStr string       `json:"total"`
+		Phases     []jsonResult `json:"phases"`
+		TotalMs    float64      `json:"total_ms"`
+		TotalStr   string       `json:"total"`
+		WallMs     float64      `json:"wall_ms,omitempty"`
+		WallStr    string       `json:"wall,omitempty"`
 	}{
 		Phases:   results,
 		TotalMs:  float64(total.Milliseconds()),
 		TotalStr: formatDuration(total),
+		WallMs:   wallMs,
+		WallStr:  formatDuration(pt.WallDuration()),
 	}
 
 	enc := json.NewEncoder(w)
