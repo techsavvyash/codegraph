@@ -1,6 +1,6 @@
 # Architecture Overview
 
-CodeGraph is a Neo4j-based code intelligence platform that builds a **Code Property Graph (CPG)** from source code. It supports multi-language indexing via SCIP, document intelligence, hybrid search, and LLM-powered generation — all exposed through an MCP (Model Context Protocol) server for AI-assisted development.
+CodeGraph is a Neo4j-based code intelligence platform that builds a **Code Property Graph (CPG)** from source code. It supports multi-language indexing via SCIP, document intelligence, hybrid search, and LLM-powered generation — all exposed through an MCP (Model Context Protocol) server for AI-assisted development. Queries support **service-scoped filtering** via `scope_id` and `service_name` parameters to constrain results to specific services.
 
 ## System Architecture
 

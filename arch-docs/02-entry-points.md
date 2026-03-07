@@ -1,6 +1,6 @@
 # Entry Points
 
-CodeGraph detects entry points through 4 structural tiers, from most to least specific. Higher tiers represent stronger structural signals.
+CodeGraph detects entry points through 4 structural tiers, from most to least specific. Higher tiers represent stronger structural signals. Entry points can now be **scoped by service** using the `service_name` parameter.
 
 ```mermaid
 graph TD
@@ -22,42 +22,147 @@ graph TD
     T3 --> T4
 ```
 
-## Tier 1: API-Exposed (30 detected)
+## Per-Service Entry Points (Tier 1)
 
-Functions directly linked to API routes via `EXPOSES_API` edges. These are the primary public surface of the codebase.
+Entry points can be queried per-service using `service_name` filtering. Below are the key services and their entry points.
+
+### MCP Server (`apps/mcp-server-go`) — 20 entry points
+
+The MCP server exposes tool handlers as its primary entry points. Each handler corresponds to one of the 20 MCP tools.
 
 | Function | File | Detection Source |
 |----------|------|------------------|
-| `AddResult` | phase_timer.go | external_params+cross_pkg |
-| `AdvancedFullTextSearch` | fulltext_search.go | external_params |
-| `AnalyzeBySymbols` | symbol_analyzer.go | external_params |
+| `handleSearchTool` | main.go | external_params |
+| `handleGetSourceTool` | main.go | external_params |
+| `handleFindReferencesTool` | main.go | external_params |
+| `handleAnalyzeFunctionTool` | main.go | external_params |
+| `handleHybridSearchTool` | main.go | external_params |
+| `handleGenerateFlowsTool` | main.go | external_params |
+| `handleGetEntryPointsTool` | main.go | external_params |
+| `handleIndexDocumentsTool` | main.go | external_params |
+| `handleSearchDocsTool` | main.go | external_params |
+| `handleSearchByCommentTool` | main.go | external_params |
+| `handleLinkDocsToCodeTool` | main.go | external_params |
+| `handleIntelligentLinkTool` | main.go | external_params |
+| `handleListServicesTool` | main.go | external_params |
+| `handleServiceAPIEndpointsTool` | main.go | external_params |
+| `handleServiceAPICallsTool` | main.go | external_params |
+| `handleCrossServiceCallsTool` | main.go | external_params |
+| `createEmbeddingServiceFromFlags` | main.go | external_params |
+| `createLLMProvider` | main.go | external_params |
+| `filterFlowsToWorkspace` | main.go | external_params |
+| `findRelatedCodeForDocument` | main.go | external_params |
+
+### Indexer (`libs/indexer-go`) — 20 entry points
+
+| Function | File | Detection Source |
+|----------|------|------------------|
+| `AnalyzeBySymbols` | static/symbol_analyzer.go | external_params |
+| `BuildCallGraph` | static/call_graph_scip.go | external_params |
+| `ComputeDegreeProperties` | static/call_graph_scip.go | external_params |
+| `CreateFileDeletedTombstones` | static/tombstone.go | external_params |
+| `CreateSymbolRemovedTombstones` | static/tombstone.go | external_params |
+| `Detect` (API surface) | static/api_surface.go | external_params |
+| `DetectMessageConsumers` | static/semantic_edges.go | external_params |
+| `DetectScheduledFunctions` | static/semantic_edges.go | external_params |
+| `DetectSemanticEdges` | static/semantic_edges.go | external_params |
+| `EnableIntelligentLinking` | documents/indexer.go | external_params |
+| `ExtractCallsFromFunction` | static/call_graph.go | external_params |
+| `ExtractDataFlows` | static/call_graph.go | external_params |
+| `FetchDocument` | documents/confluence.go | external_params |
+| `GenerateDocstringSuggestionsForScope` | generated/context.go | external_params+cross_pkg |
+| `GenerateFlowSummariesForScope` | generated/context.go | external_params+cross_pkg |
+| `GeneratePRSummaryForScope` | generated/context.go | external_params+cross_pkg |
+| `GetDocumentStats` | documents/indexer.go | external_params |
+| `IndexDirectory` | documents/indexer.go | external_params+cross_pkg |
+| `IndexDocument` | documents/indexer.go | external_params |
+| `CreatePullRequestNode` | generated/context.go | external_params |
+
+### Query Engine (`libs/query-go`) — 20 entry points
+
+| Function | File | Detection Source |
+|----------|------|------------------|
 | `AnalyzeComplexity` | advanced.go | external_params |
 | `AnalyzeDependencies` | advanced.go | external_params |
+| `AnalyzeImpact` | advanced.go | external_params |
+| `BuildCallGraph` | advanced.go | external_params |
+| `CreateServiceEdge` | service_deps.go | external_params |
+| `FilterCandidates` | overlay.go | external_params+cross_pkg |
+| `FindImplementations` | lsp.go | external_params |
+| `FindReferences` | lsp.go | external_params |
+| `GenerateCrossServiceFlows` | flow_spine.go | external_params |
+| `GenerateFlows` | flow_spine.go | external_params |
+| `GenerateFromAPIEndpoints` | flow_spine.go | external_params |
+| `GenerateFromStructuralEntrypoints` | flow_spine.go | external_params |
+| `GetCompletion` | lsp.go | external_params |
+| `GetDependencies` | service_deps.go | external_params |
+| `GetFlow` | flow_spine.go | external_params |
+| `GetHover` | lsp.go | external_params |
+| `GoToDefinition` | lsp.go | external_params |
+| `InferServiceDependencies` | service_deps.go | external_params |
+| `ListFlows` | flow_spine.go | external_params |
+| `NewAdvancedQueryService` | advanced.go | external_params |
+
+### Search (`libs/search-go`) — 20 entry points
+
+| Function | File | Detection Source |
+|----------|------|------------------|
+| `AdvancedFullTextSearch` | fulltext_search.go | external_params |
 | `AnalyzeDocument` | semantic_analyzer.go | external_params |
 | `AnalyzeForCodeMapping` | semantic_analyzer.go | external_params+cross_pkg |
-| `AnalyzeImpact` | advanced.go | external_params |
-| `AnalyzeSourceContribution` | metrics.go | external_params+cross_pkg |
-| `Apply` | client.go | cross_pkg |
-| `ApplyTombstone` | store.go | external_params |
-| `BatchCreateNodes` | client.go | external_params |
-| `BatchCreateRelationships` | client.go | external_params |
-| `BatchMergeNodes` | client.go | external_params |
 | `BatchUpdateEmbeddings` | vector_search.go | external_params |
-| `Build` | builder.go | external_params+cross_pkg |
-| `BuildCallGraph` | call_graph_scip.go | external_params |
-| `BuildEvidenceRefs` | scorer.go | external_params+cross_pkg |
-| `BuildPrompt` | generator.go | external_params+cross_pkg |
-| `CheckReady` | client.go | cross_pkg |
-| `ClassifySeeds` | flow_seeds.go | cross_pkg |
-| `Clone` | manager.go | cross_pkg |
-| `Close` | client.go | external_params+cross_pkg |
-| `Complete` | adapters.go | external_params |
-| `ComputeAblation` | ablation.go | cross_pkg |
-| `ComputeDegreeProperties` | call_graph_scip.go | external_params |
-| `ComputeFlowQuality` | flow_quality.go | cross_pkg |
-| `ComputeLatencyStats` | latency.go | external_params+cross_pkg |
 | `CreateCommentEmbeddingIndex` | comment_embedding_service.go | external_params |
-| `CreateFileDeletedTombstones` | tombstone.go | external_params |
+| `CreateFullTextIndexes` | fulltext_search.go | external_params+cross_pkg |
+| `CreateIndex` | qdrant_vector_store.go | external_params |
+| `CreateVectorIndexes` | vector_search.go | external_params |
+| `DeleteVectors` | qdrant_vector_store.go | external_params |
+| `DropFullTextIndex` | fulltext_search.go | external_params |
+| `DropVectorIndex` | vector_search.go | external_params |
+| `ExtractAndEmbedDocstrings` | comment_embedding_service.go | external_params |
+| `ExtractAndSummarizeSubgraph` | code_summarizer.go | external_params+cross_pkg |
+| `FullTextSearch` | fulltext_search.go | external_params |
+| `GenerateBatchEmbeddings` | embedding_service.go | external_params |
+| `GenerateEmbedding` | embedding_service.go | external_params |
+| `GenerateSemanticEmbedding` | semantic_analyzer.go | external_params+cross_pkg |
+| `GenerateText` | llm_service.go | external_params |
+| `GenerateTextWithSystemPrompt` | llm_service.go | external_params |
+| `GetFeatureImplementations` | feature_linker.go | external_params |
+
+### Inference (`libs/inference-go`) — 20 entry points
+
+| Function | File | Detection Source |
+|----------|------|------------------|
+| `BuildEvidenceRefs` | scorer.go | external_params+cross_pkg |
+| `ClassifySeeds` | flow_seeds.go | cross_pkg |
+| `ComputeFlowQuality` | flow_quality.go | cross_pkg |
+| `Deduplicate` | flow_quality.go | cross_pkg |
+| `DetectBoundaries` | cross_service.go | external_params |
+| `Extract` | features.go | external_params+cross_pkg |
+| `ExtractWithLexical` | features.go | external_params+cross_pkg |
+| `FindSeeds` | graph_seeds.go | external_params |
+| `Infer` | scorer.go | external_params+cross_pkg |
+| `IsNameBlocked` | flow_quality.go | cross_pkg |
+| `NewCrossServiceDetector` | cross_service.go | external_params+cross_pkg |
+| `NewGraphSeedFinder` | graph_seeds.go | external_params |
+| `NewLinkInferrer` | scorer.go | cross_pkg |
+| `NewScorer` | scorer.go | cross_pkg |
+| `Score` | scorer.go | cross_pkg |
+| `SetScope` | cross_service.go | cross_pkg |
+| `SetScope` | graph_seeds.go | cross_pkg |
+| `WithFrameworkBoosters` | flow_seeds.go | external_params+cross_pkg |
+| `computeLexicalOverlap` | features.go | cross_pkg |
+| `computeStructuralSupport` | features.go | cross_pkg |
+
+### Intelligence (`libs/intelligence-go`) — 6 entry points
+
+| Function | File | Detection Source |
+|----------|------|------------------|
+| `Execute` | rollout/rollout.go | external_params |
+| `ExecutePlan` | replay/replay.go | external_params |
+| `MustValidate` | provenance/provenance.go | external_params |
+| `Plan` | replay/replay.go | external_params |
+| `Validate` | provenance/provenance.go | external_params |
+| `BuildMentionEdgeProps` | provenance/provenance.go | T4: 7 callers, 2 callees |
 
 ### Detection Sources
 

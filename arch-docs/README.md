@@ -16,12 +16,13 @@
 
 ## How This Was Generated
 
-These documents were generated using CodeGraph's own MCP tools:
+These documents were generated using CodeGraph's own MCP tools (with service-scoped filtering):
 
-- **`codegraph_get_entry_points`** — Discovers entry points across 4 structural tiers
-- **`codegraph_generate_flows`** — Generates flow spines from entry points through call chains
-- **`codegraph_trace_call_graph`** — Traces upstream/downstream call graphs from specific functions
+- **`codegraph_get_entry_points`** — Discovers entry points across 4 structural tiers (supports `scope_id`, `service_name`)
+- **`codegraph_generate_flows`** — Generates flow spines from entry points through call chains (supports `scope_id`, `service_name`)
+- **`codegraph_trace_call_graph`** — Traces upstream/downstream call graphs from specific functions (supports `scope_id`, `service_name`)
 - **`codegraph_service_architecture`** — Maps services and their dependencies
+- **`codegraph_list_services`** — Lists all indexed services with metadata
 
 ## Regenerating
 

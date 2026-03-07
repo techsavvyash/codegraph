@@ -126,6 +126,8 @@ List structurally-detected entry points across 4 tiers.
 |-----------|------|:--------:|:-------:|-------------|
 | `tier` | number | no | all | Filter by tier (1-4) |
 | `limit` | number | no | 50 | Max results |
+| `scope_id` | string | no | main | Scope ID to query |
+| `service_name` | string | no | — | Service name filter to constrain discovery |
 
 **Tiers:**
 1. **API-exposed** — Functions with `EXPOSES_API` edges
@@ -140,6 +142,8 @@ Generate flow spines — call chain documentation from entry points.
 |-----------|------|:--------:|:-------:|-------------|
 | `max_depth` | number | no | 5 | Call chain depth |
 | `limit` | number | no | 20 | Max flows |
+| `scope_id` | string | no | main | Scope ID to query |
+| `service_name` | string | no | — | Service name filter to constrain generation |
 
 ### `codegraph_trace_call_graph`
 Traverse the call graph upstream or downstream from a function.
@@ -149,6 +153,8 @@ Traverse the call graph upstream or downstream from a function.
 | `function_name` | string | yes | — | Function to trace from |
 | `direction` | string | no | downstream | `downstream`, `upstream`, or `both` |
 | `max_depth` | number | no | 3 | Traversal depth (max 10) |
+| `scope_id` | string | no | main | Scope ID to query |
+| `service_name` | string | no | — | Service name filter to constrain traversal |
 
 ---
 

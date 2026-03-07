@@ -4,7 +4,7 @@ Deep call graph traces for the most architecturally significant functions, gener
 
 ## MCP Server Dispatch — `handleToolCall`
 
-The central dispatch function in the MCP server routes JSON-RPC tool calls to 17 handler functions (plus the 3 new intelligence tools).
+The central dispatch function in the MCP server routes JSON-RPC tool calls to 20 handler functions. The structural intelligence tools (`get_entry_points`, `generate_flows`, `trace_call_graph`) now support `scope_id` and `service_name` parameters for scoped queries.
 
 ```mermaid
 graph TD
@@ -27,11 +27,16 @@ graph TD
     HTC --> H15[handleServiceAPICallsTool]
     HTC --> H16[handleCrossServiceCallsTool]
     HTC --> H17[handleServiceArchitectureTool]
+    HTC --> H18[handleGetEntryPointsTool]
+    HTC --> H19[handleGenerateFlowsTool]
+    HTC --> H20[handleTraceCallGraphTool]
     HTC --> SE[sendError]
     HTC --> SR[sendResponse]
 
     H7 --> DLP[detectLanguageFromPath]
     H7 --> FRC[findRelatedCodeForDocument]
+
+    H19 --> FFW[filterFlowsToWorkspace]
 
     H4 --> GS[getStringFromRecord]
     H4 --> GI[getIntFromRecord]
@@ -44,10 +49,48 @@ graph TD
 |----------|----------|---------|
 | **Search** | `handleSearchTool`, `handleHybridSearchTool`, `handleVectorSearchTool` | Code entity search |
 | **Source** | `handleGetSourceTool`, `handleAnalyzeFunctionTool`, `handleFindReferencesTool` | Code inspection |
+| **Structural** | `handleGetEntryPointsTool`, `handleGenerateFlowsTool`, `handleTraceCallGraphTool` | Entry points, flows, call graphs (supports `scope_id` + `service_name`) |
 | **Documents** | `handleIndexDocumentsTool`, `handleSearchDocsTool`, `handleSearchByCommentTool` | Document intelligence |
 | **Linking** | `handleLinkDocsToCodeTool`, `handleIntelligentLinkTool` | Doc ↔ code relationships |
 | **Architecture** | `handleListServicesTool`, `handleServiceDependenciesTool`, `handleServiceArchitectureTool` | Service topology |
 | **API** | `handleServiceAPIEndpointsTool`, `handleServiceAPICallsTool`, `handleCrossServiceCallsTool` | API surface |
+
+---
+
+## Flow Spine Generation — `GenerateFlows`
+
+The core flow generation function that traces call chains from entry points. Now supports service-scoped filtering via `SetServiceFilter` and `SetServicePrefix`.
+
+```mermaid
+graph TD
+    GF[GenerateFlows]
+    GF --> GFAPI[GenerateFromAPIEndpoints]
+    GF --> GFSE[GenerateFromStructuralEntrypoints]
+    GF --> DDS[deduplicateSteps]
+    GF --> FGSBS[filterGraphSeedsByService]
+    GF --> PF[persistFlow]
+    GF --> TC[traceCallees]
+
+    TC --> HSC[hasServiceConstraints]
+    TC --> SCC[serviceConstraintClause]
+    TC --> WSSP[withScopeAndServiceParams]
+    TC --> SV[strVal]
+
+    subgraph "Service Scoping (NEW)"
+        FGSBS
+        HSC
+        SCC
+        WSSP
+    end
+```
+
+### Service scoping flow
+
+When `service_name` is provided:
+1. `filterGraphSeedsByService` prunes graph seeds to those owned by matching services
+2. `serviceConstraintClause` injects Cypher WHERE clauses restricting traversal to functions within the service's `CONTAINS` subtree
+3. `withScopeAndServiceParams` injects `$scopeId`, `$serviceNames`, and `$servicePrefix` into query parameters
+4. During indexing, `GenerateFlowSpinesStage` auto-sets `SetServicePrefix` to the indexed service name
 
 ---
 
