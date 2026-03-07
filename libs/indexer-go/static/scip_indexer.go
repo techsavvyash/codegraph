@@ -205,6 +205,20 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
 			fmt.Printf("Warning: call graph construction failed: %v\n", err)
 		}
+	} else {
+		fmt.Println("Building call graph from SCIP references (language-agnostic)...")
+		cgBuilder := NewGenericCallGraphBuilder(si.client)
+		cgBuilder.SetScope(si.scopeCtx)
+		cgBuilder.SetServiceName(si.serviceName)
+		// Use the NPM package name or service name for target filtering.
+		pkgName := si.extractNPMPackageName(projectPath)
+		if pkgName == "" {
+			pkgName = si.serviceName
+		}
+		cgBuilder.SetPackageName(pkgName)
+		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
+			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+		}
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")
