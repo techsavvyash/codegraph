@@ -34,6 +34,8 @@ type FlowSpineGenerator struct {
 	deduplicator    *inference.FlowDeduplicator
 	seedFinder      *inference.StructuralSeedFinder
 	graphSeedFinder *inference.GraphSeedFinder
+	serviceNames    []string
+	servicePrefix   string
 }
 
 // NewFlowSpineGenerator creates a new generator with default traversal budget.
@@ -64,6 +66,100 @@ func (g *FlowSpineGenerator) SetScope(scope models.ScopeContext) {
 	g.graphSeedFinder.SetScope(scope)
 }
 
+// SetServiceFilter restricts flow generation to functions owned by these
+// Service names. If empty, no service-name filtering is applied.
+func (g *FlowSpineGenerator) SetServiceFilter(serviceNames []string) {
+	g.serviceNames = append([]string{}, serviceNames...)
+}
+
+// SetServicePrefix restricts flow generation to Service nodes whose name starts
+// with this prefix (useful for polyglot sub-services such as "svc/path").
+func (g *FlowSpineGenerator) SetServicePrefix(prefix string) {
+	g.servicePrefix = prefix
+}
+
+func (g *FlowSpineGenerator) hasServiceConstraints() bool {
+	return len(g.serviceNames) > 0 || g.servicePrefix != ""
+}
+
+func (g *FlowSpineGenerator) withScopeAndServiceParams(params map[string]any) map[string]any {
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["scopeId"] = g.scopeCtx.ScopeID
+	params["serviceNames"] = g.serviceNames
+	params["servicePrefix"] = g.servicePrefix
+	return params
+}
+
+func serviceConstraintClause(nodeVar string) string {
+	return fmt.Sprintf(`
+                  AND (size($serviceNames) = 0 OR EXISTS {
+                        MATCH (svc:Service)-[:CONTAINS*1..3]->(%s)
+                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
+                          AND svc.name IN $serviceNames
+                  })
+                  AND ($servicePrefix = '' OR EXISTS {
+                        MATCH (svc2:Service)-[:CONTAINS*1..3]->(%s)
+                        WHERE (svc2.scopeId = $scopeId OR svc2.scopeId = 'main')
+                          AND svc2.name STARTS WITH $servicePrefix
+                  })`, nodeVar, nodeVar)
+}
+
+func (g *FlowSpineGenerator) filterGraphSeedsByService(ctx context.Context, seeds []inference.GraphSeed) ([]inference.GraphSeed, error) {
+	if !g.hasServiceConstraints() || len(seeds) == 0 {
+		return seeds, nil
+	}
+
+	nodeKeys := make([]string, 0, len(seeds))
+	for _, s := range seeds {
+		if s.NodeKey != "" {
+			nodeKeys = append(nodeKeys, s.NodeKey)
+		}
+	}
+	if len(nodeKeys) == 0 {
+		return nil, nil
+	}
+
+	cypher := `
+                UNWIND $nodeKeys AS nk
+                MATCH (fn {nodeKey: nk})
+                WHERE (fn:Function OR fn:Method)
+                  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+                  AND (size($serviceNames) = 0 OR EXISTS {
+                        MATCH (svc:Service)-[:CONTAINS*1..3]->(fn)
+                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
+                          AND svc.name IN $serviceNames
+                  })
+                  AND ($servicePrefix = '' OR EXISTS {
+                        MATCH (svc2:Service)-[:CONTAINS*1..3]->(fn)
+                        WHERE (svc2.scopeId = $scopeId OR svc2.scopeId = 'main')
+                          AND svc2.name STARTS WITH $servicePrefix
+                  })
+                RETURN DISTINCT nk AS nodeKey`
+
+	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKeys": nodeKeys}))
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make(map[string]bool, len(records))
+	for _, r := range records {
+		if nk := strVal(r.AsMap(), "nodeKey"); nk != "" {
+			allowed[nk] = true
+		}
+	}
+
+	filtered := make([]inference.GraphSeed, 0, len(seeds))
+	for _, s := range seeds {
+		if allowed[s.NodeKey] {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return filtered, nil
+}
+
 // GenerateFlows uses the graph-structural seed finder to discover entry points
 // and build flow spines. Falls back to the heuristic-based approach if no
 // graph-structural seeds are found.
@@ -80,6 +176,12 @@ func (g *FlowSpineGenerator) GenerateFlows(ctx context.Context, maxDepth int) ([
 	if err != nil {
 		fmt.Printf("Warning: graph seed finder failed, falling back to heuristic: %v\n", err)
 		return g.GenerateFromAPIEndpoints(ctx, maxDepth)
+	}
+
+	seeds, err = g.filterGraphSeedsByService(ctx, seeds)
+	if err != nil {
+		fmt.Printf("Warning: service filtering of graph seeds failed, continuing without graph seeds: %v\n", err)
+		seeds = nil
 	}
 
 	if len(seeds) == 0 {
@@ -139,16 +241,17 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 	}
 
 	// Find API endpoints and their handler functions.
-	cypher := `
-		MATCH (route:APIRoute)
-		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
-		OPTIONAL MATCH (route)<-[:EXPOSES_API]-(handler)
-		WHERE handler:Function OR handler:Method
-		RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
+	cypher := fmt.Sprintf(`
+		MATCH (route:APIRoute)<-[:EXPOSES_API]-(handler)
+		WHERE (route.scopeId = $scopeId OR route.scopeId = 'main')
+                  AND (handler:Function OR handler:Method)
+                  AND (handler.scopeId = $scopeId OR handler.scopeId = 'main')
+                  %s
+                RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
 		       handler.nodeKey AS handlerKey, handler.name AS handlerName,
-		       labels(handler) AS handlerLabels`
+                       labels(handler) AS handlerLabels`, serviceConstraintClause("handler"))
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
+	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(nil))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query API endpoints: %w", err)
 	}
@@ -240,11 +343,12 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  AND NOT fn.nodeKey CONTAINS 'github.com/golang/go/src'
+                  ` + serviceConstraintClause("fn") + `
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
-		WHERE (caller:Function OR caller:Method)
-		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+                WHERE (caller:Function OR caller:Method)
+                  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
-		WHERE (callee:Function OR callee:Method)
+                WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		OPTIONAL MATCH (fn)-[:EXPOSES_API]->(route:APIRoute)
 		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
@@ -256,7 +360,7 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 		       coalesce(fn.isExported, false) AS isExported, coalesce(fn.filePath, '') AS filePath,
 		       incomingCalls, outgoingCalls, apiLinks`
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
+	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(nil))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query structural entrypoints: %w", err)
 	}
@@ -378,11 +482,12 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
 		  AND NOT callee.nodeKey CONTAINS 'github.com/golang/go/src'
+                  %s
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
 		ORDER BY callee.name ASC, callee.nodeKey ASC
-		LIMIT %d`, fanout)
+                LIMIT %d`, serviceConstraintClause("callee"), fanout)
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKey": nodeKey, "scopeId": g.scopeCtx.ScopeID})
+	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKey": nodeKey}))
 	if err != nil {
 		return nil, err
 	}

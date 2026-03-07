@@ -75,6 +75,11 @@ func (s *GenerateFlowSpinesStage) Optional() bool  { return true }
 func (s *GenerateFlowSpinesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
 	gen := query.NewFlowSpineGenerator(cfg.Client)
 	gen.SetScope(cfg.ScopeCtx)
+	if cfg.ServiceName != "" {
+		// Polyglot indexing creates sub-services as "{service}/{subpath}".
+		// Prefix filtering keeps flow generation confined to the currently indexed project.
+		gen.SetServicePrefix(cfg.ServiceName)
+	}
 
 	results, err := gen.GenerateFlows(ctx, 3)
 	if err != nil {

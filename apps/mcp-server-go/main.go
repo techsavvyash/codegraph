@@ -8,8 +8,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/query-go"
@@ -69,6 +71,7 @@ type CodeGraphMCPServer struct {
 	embeddingService search.EmbeddingService
 	docIndexer       *documents.DocumentIndexer
 	commentSearch    *search.CommentEmbeddingService
+	workspaceRoot    string
 }
 
 func main() {
@@ -123,6 +126,11 @@ func main() {
 	docIndexer := documents.NewDocumentIndexer(client)
 	commentSearch := search.NewCommentEmbeddingService(client, embeddingService)
 
+	workspaceRoot, err := os.Getwd()
+	if err != nil {
+		workspaceRoot = "."
+	}
+
 	server := &CodeGraphMCPServer{
 		client:           client,
 		queryBuilder:     neo4j.NewQueryBuilder(client),
@@ -131,6 +139,7 @@ func main() {
 		embeddingService: embeddingService,
 		docIndexer:       docIndexer,
 		commentSearch:    commentSearch,
+		workspaceRoot:    workspaceRoot,
 	}
 
 	// Start MCP server
@@ -139,7 +148,7 @@ func main() {
 
 func (s *CodeGraphMCPServer) run() {
 	scanner := bufio.NewScanner(os.Stdin)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -508,6 +517,15 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"description": "Maximum number of results to return (default: 50)",
 						"default":     50,
 					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service name filter to constrain entry point discovery",
+					},
 				},
 			},
 		},
@@ -526,6 +544,15 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"type":        "number",
 						"description": "Maximum number of flows to generate (default: 20)",
 						"default":     20,
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service name filter to constrain flow generation",
 					},
 				},
 			},
@@ -549,6 +576,15 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"type":        "number",
 						"description": "Maximum traversal depth (default: 3)",
 						"default":     3,
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service name filter to constrain traversal",
 					},
 				},
 				"required": []string{"function_name"},
@@ -2304,12 +2340,16 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 		limit = int(l)
 	}
 
+	scopeCtx := parseScopeContextArg(args)
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+
 	tierFilter := 0
 	if t, ok := args["tier"].(float64); ok && t >= 1 && t <= 4 {
 		tierFilter = int(t)
 	}
 
 	type entryPoint struct {
+		NodeKey         string
 		Name            string
 		FilePath        string
 		Tier            int
@@ -2317,33 +2357,43 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 		DetectionSource string
 	}
 
+	params := map[string]any{"scopeId": scopeCtx.ScopeID, "serviceNames": serviceNames}
 	seen := make(map[string]bool)
 	var entries []entryPoint
 
 	// Tier 1: API-exposed functions
 	if tierFilter == 0 || tierFilter == 1 {
-		cypher := `
+		cypher := fmt.Sprintf(`
 			MATCH (fn)-[:EXPOSES_API]->(r:APIRoute)
 			WHERE (fn:Function OR fn:Method)
+			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+			  AND (r.scopeId = $scopeId OR r.scopeId = 'main')
 			  AND coalesce(fn.isTestFunction, false) = false
-			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+			  %s
+			RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, coalesce(fn.filePath, '') AS filePath,
 			       r.detectionSource AS detectionSource, r.protocol AS protocol
-			ORDER BY fn.name`
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+			ORDER BY fn.name`, serviceFilterClause("fn"))
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
 		if err == nil {
 			for _, r := range records {
 				m := r.AsMap()
+				nodeKey := getStringFromRecord(m, "nodeKey")
 				name := getStringFromRecord(m, "name")
-				if name == "" || seen[name] {
+				filePath := getStringFromRecord(m, "filePath")
+				if nodeKey == "" || name == "" || seen[nodeKey] {
 					continue
 				}
-				seen[name] = true
+				if filePath != "" && !s.fileInWorkspace(filePath) {
+					continue
+				}
+				seen[nodeKey] = true
 				source := getStringFromRecord(m, "detectionSource")
 				if source == "" {
 					source = getStringFromRecord(m, "protocol")
 				}
 				entries = append(entries, entryPoint{
-					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					NodeKey: nodeKey, Name: name, FilePath: filePath,
 					Tier: 1, TierLabel: "API-exposed", DetectionSource: source,
 				})
 			}
@@ -2352,28 +2402,37 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 
 	// Tier 2: Interface implementations with no callers
 	if tierFilter == 0 || tierFilter == 2 {
-		cypher := `
+		cypher := fmt.Sprintf(`
 			MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
 			WHERE (fn:Function OR fn:Method)
+			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 			  AND coalesce(fn.isTestFunction, false) = false
+			  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+			  %s
 			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 			WHERE caller:Function OR caller:Method
+			  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 			WITH fn, iface, count(caller) AS callerCount
 			WHERE callerCount = 0
-			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, coalesce(fn.filePath, '') AS filePath,
 			       iface.name AS ifaceName
-			ORDER BY fn.name`
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+			ORDER BY fn.name`, serviceFilterClause("fn"))
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
 		if err == nil {
 			for _, r := range records {
 				m := r.AsMap()
+				nodeKey := getStringFromRecord(m, "nodeKey")
 				name := getStringFromRecord(m, "name")
-				if name == "" || seen[name] {
+				filePath := getStringFromRecord(m, "filePath")
+				if nodeKey == "" || name == "" || seen[nodeKey] {
 					continue
 				}
-				seen[name] = true
+				if filePath != "" && !s.fileInWorkspace(filePath) {
+					continue
+				}
+				seen[nodeKey] = true
 				entries = append(entries, entryPoint{
-					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					NodeKey: nodeKey, Name: name, FilePath: filePath,
 					Tier: 2, TierLabel: "Interface impl", DetectionSource: "implements " + getStringFromRecord(m, "ifaceName"),
 				})
 			}
@@ -2382,34 +2441,44 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 
 	// Tier 3: Topological roots (exported, no callers, has callees)
 	if tierFilter == 0 || tierFilter == 3 {
-		cypher := `
+		cypher := fmt.Sprintf(`
 			MATCH (fn)
 			WHERE (fn:Function OR fn:Method)
+			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 			  AND coalesce(fn.isExported, false) = true
 			  AND coalesce(fn.isTestFunction, false) = false
+			  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+			  %s
 			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 			WHERE caller:Function OR caller:Method
+			  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 			WITH fn, count(caller) AS callerCount
 			WHERE callerCount = 0
 			OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 			WHERE callee:Function OR callee:Method
+			  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 			WITH fn, count(callee) AS calleeCount
 			WHERE calleeCount > 0
-			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, coalesce(fn.filePath, '') AS filePath,
 			       calleeCount
-			ORDER BY calleeCount DESC`
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+			ORDER BY calleeCount DESC`, serviceFilterClause("fn"))
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
 		if err == nil {
 			for _, r := range records {
 				m := r.AsMap()
+				nodeKey := getStringFromRecord(m, "nodeKey")
 				name := getStringFromRecord(m, "name")
-				if name == "" || seen[name] {
+				filePath := getStringFromRecord(m, "filePath")
+				if nodeKey == "" || name == "" || seen[nodeKey] {
 					continue
 				}
-				seen[name] = true
+				if filePath != "" && !s.fileInWorkspace(filePath) {
+					continue
+				}
+				seen[nodeKey] = true
 				calleeCount := getIntFromRecord(m, "calleeCount")
 				entries = append(entries, entryPoint{
-					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					NodeKey: nodeKey, Name: name, FilePath: filePath,
 					Tier: 3, TierLabel: "Topological root", DetectionSource: fmt.Sprintf("exported, %d callees", calleeCount),
 				})
 			}
@@ -2418,34 +2487,44 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 
 	// Tier 4: High centrality (functions with many callers AND callees)
 	if tierFilter == 0 || tierFilter == 4 {
-		cypher := `
+		cypher := fmt.Sprintf(`
 			MATCH (fn)
 			WHERE (fn:Function OR fn:Method)
+			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 			  AND coalesce(fn.isTestFunction, false) = false
+			  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+			  %s
 			OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 			WHERE caller:Function OR caller:Method
+			  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 			WITH fn, count(DISTINCT caller) AS inDeg
 			WHERE inDeg >= 3
 			OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 			WHERE callee:Function OR callee:Method
+			  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 			WITH fn, inDeg, count(DISTINCT callee) AS outDeg
 			WHERE outDeg >= 2
-			RETURN DISTINCT fn.name AS name, coalesce(fn.filePath, '') AS filePath,
+			RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, coalesce(fn.filePath, '') AS filePath,
 			       inDeg, outDeg, inDeg + outDeg AS centrality
-			ORDER BY centrality DESC`
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{})
+			ORDER BY centrality DESC`, serviceFilterClause("fn"))
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
 		if err == nil {
 			for _, r := range records {
 				m := r.AsMap()
+				nodeKey := getStringFromRecord(m, "nodeKey")
 				name := getStringFromRecord(m, "name")
-				if name == "" || seen[name] {
+				filePath := getStringFromRecord(m, "filePath")
+				if nodeKey == "" || name == "" || seen[nodeKey] {
 					continue
 				}
-				seen[name] = true
+				if filePath != "" && !s.fileInWorkspace(filePath) {
+					continue
+				}
+				seen[nodeKey] = true
 				inDeg := getIntFromRecord(m, "inDeg")
 				outDeg := getIntFromRecord(m, "outDeg")
 				entries = append(entries, entryPoint{
-					Name: name, FilePath: getStringFromRecord(m, "filePath"),
+					NodeKey: nodeKey, Name: name, FilePath: filePath,
 					Tier: 4, TierLabel: "High centrality", DetectionSource: fmt.Sprintf("%d callers, %d callees", inDeg, outDeg),
 				})
 			}
@@ -2462,15 +2541,25 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 		entries = entries[:limit]
 	}
 
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Tier != entries[j].Tier {
+			return entries[i].Tier < entries[j].Tier
+		}
+		if entries[i].Name != entries[j].Name {
+			return entries[i].Name < entries[j].Name
+		}
+		return entries[i].FilePath < entries[j].FilePath
+	})
+
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Entry Points (%d found)\n\n", len(entries)))
+	if len(serviceNames) > 0 {
+		output.WriteString(fmt.Sprintf("_Workspace service filter:_ `%s`\n\n", strings.Join(serviceNames, "`, `")))
+	}
 	output.WriteString("| Name | File | Tier | Detection Source |\n")
 	output.WriteString("|------|------|------|------------------|\n")
 	for _, e := range entries {
 		file := e.FilePath
-		if file != "" {
-			file = filepath.Base(file)
-		}
 		output.WriteString(fmt.Sprintf("| %s | %s | T%d: %s | %s |\n",
 			e.Name, file, e.Tier, e.TierLabel, e.DetectionSource))
 	}
@@ -2492,7 +2581,12 @@ func (s *CodeGraphMCPServer) handleGenerateFlowsTool(ctx context.Context, args m
 		limit = int(l)
 	}
 
+	scopeCtx := parseScopeContextArg(args)
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+
 	gen := query.NewFlowSpineGenerator(s.client)
+	gen.SetScope(scopeCtx)
+	gen.SetServiceFilter(serviceNames)
 	flows, err := gen.GenerateFlows(ctx, maxDepth)
 	if err != nil {
 		return ToolCallResponse{
@@ -2507,12 +2601,22 @@ func (s *CodeGraphMCPServer) handleGenerateFlowsTool(ctx context.Context, args m
 		}
 	}
 
+	flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
+	if len(flows) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "No workspace-scoped flows generated. Try indexing this repository again with `index pipeline`."}},
+		}
+	}
+
 	if len(flows) > limit {
 		flows = flows[:limit]
 	}
 
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Generated Flows (%d)\n\n", len(flows)))
+	if len(serviceNames) > 0 {
+		output.WriteString(fmt.Sprintf("_Workspace service filter:_ `%s`\n\n", strings.Join(serviceNames, "`, `")))
+	}
 
 	for i, flow := range flows {
 		output.WriteString(fmt.Sprintf("### %d. %s\n", i+1, flow.FlowName))
@@ -2553,44 +2657,146 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 		maxDepth = 10
 	}
 
+	scopeCtx := parseScopeContextArg(args)
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+
+	type functionCandidate struct {
+		NodeKey   string
+		Name      string
+		FilePath  string
+		Exact     bool
+		Workspace bool
+	}
+
+	candidateCypher := fmt.Sprintf(`
+                MATCH (root)
+                WHERE (root:Function OR root:Method)
+                  AND (root.scopeId = $scopeId OR root.scopeId = 'main')
+                  AND coalesce(root.isTestFunction, false) = false
+                  AND (root.filePath IS NULL OR NOT root.filePath ENDS WITH '_test.go')
+                  AND toLower(root.name) CONTAINS toLower($name)
+                  %s
+                RETURN DISTINCT root.nodeKey AS nodeKey, root.name AS name,
+                       coalesce(root.filePath, '') AS filePath,
+                       CASE WHEN toLower(root.name) = toLower($name) THEN true ELSE false END AS exact
+                ORDER BY exact DESC, root.name ASC
+                LIMIT 50`, serviceFilterClause("root"))
+
+	records, err := s.client.ExecuteQuery(ctx, candidateCypher, map[string]any{
+		"scopeId":      scopeCtx.ScopeID,
+		"name":         functionName,
+		"serviceNames": serviceNames,
+	})
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error tracing call graph: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var candidates []functionCandidate
+	for _, r := range records {
+		m := r.AsMap()
+		c := functionCandidate{
+			NodeKey:  getStringFromRecord(m, "nodeKey"),
+			Name:     getStringFromRecord(m, "name"),
+			FilePath: getStringFromRecord(m, "filePath"),
+			Exact:    getBoolFromRecord(m, "exact"),
+		}
+		if c.NodeKey == "" || c.Name == "" {
+			continue
+		}
+		if c.FilePath != "" && !s.fileInWorkspace(c.FilePath) {
+			continue
+		}
+		c.Workspace = c.FilePath == "" || s.fileInWorkspace(c.FilePath)
+		candidates = append(candidates, c)
+	}
+
+	if len(candidates) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No function found matching '%s' in the current workspace scope.", functionName)}},
+			IsError: true,
+		}
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Exact != candidates[j].Exact {
+			return candidates[i].Exact
+		}
+		if candidates[i].Workspace != candidates[j].Workspace {
+			return candidates[i].Workspace
+		}
+		iDepth := strings.Count(candidates[i].FilePath, "/")
+		jDepth := strings.Count(candidates[j].FilePath, "/")
+		if iDepth != jDepth {
+			return iDepth > jDepth
+		}
+		if candidates[i].FilePath != candidates[j].FilePath {
+			return candidates[i].FilePath < candidates[j].FilePath
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+
+	root := candidates[0]
+
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Call Graph for `%s`\n\n", functionName))
+	if root.FilePath != "" {
+		output.WriteString(fmt.Sprintf("Selected root: `%s` (%s)\n\n", root.Name, root.FilePath))
+	}
+	if len(serviceNames) > 0 {
+		output.WriteString(fmt.Sprintf("_Workspace service filter:_ `%s`\n\n", strings.Join(serviceNames, "`, `")))
+	}
 
 	// Downstream: what does this function call?
 	if direction == "downstream" || direction == "both" {
 		output.WriteString("### Downstream (callees)\n\n")
 		cypher := fmt.Sprintf(`
-			MATCH (root)
-			WHERE (root:Function OR root:Method) AND root.name CONTAINS $name
-			WITH root LIMIT 1
+			MATCH (root {nodeKey: $rootKey})
 			MATCH path = (root)-[:CALLS*1..%d]->(callee)
-			WHERE callee:Function OR callee:Method
+			WHERE (callee:Function OR callee:Method)
+			  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
+			  AND coalesce(callee.isTestFunction, false) = false
+			  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
+			  %s
 			WITH root, callee, length(path) AS depth,
-			     [n IN nodes(path) | n.name] AS chain,
+			     callee.nodeKey AS nodeKey,
 			     callee.filePath AS filePath
-			RETURN DISTINCT callee.name AS name, filePath, depth, chain
+			RETURN DISTINCT nodeKey, callee.name AS name, filePath, depth
 			ORDER BY depth, callee.name
-			LIMIT 100`, maxDepth)
+			LIMIT 100`, maxDepth, serviceFilterClause("callee"))
 
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"name": functionName})
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{
+			"rootKey":      root.NodeKey,
+			"scopeId":      scopeCtx.ScopeID,
+			"serviceNames": serviceNames,
+		})
 		if err != nil {
 			output.WriteString(fmt.Sprintf("Error: %v\n\n", err))
 		} else if len(records) == 0 {
 			output.WriteString("No downstream calls found.\n\n")
 		} else {
+			count := 0
 			for _, r := range records {
 				m := r.AsMap()
 				name := getStringFromRecord(m, "name")
 				file := getStringFromRecord(m, "filePath")
 				depth := getIntFromRecord(m, "depth")
+				if file != "" && !s.fileInWorkspace(file) {
+					continue
+				}
 
 				indent := strings.Repeat("  ", depth)
 				if file != "" {
-					file = filepath.Base(file)
 					output.WriteString(fmt.Sprintf("%s→ `%s` (%s)\n", indent, name, file))
 				} else {
 					output.WriteString(fmt.Sprintf("%s→ `%s`\n", indent, name))
 				}
+				count++
+			}
+			if count == 0 {
+				output.WriteString("No downstream calls found.\n")
 			}
 			output.WriteString("\n")
 		}
@@ -2600,37 +2806,50 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 	if direction == "upstream" || direction == "both" {
 		output.WriteString("### Upstream (callers)\n\n")
 		cypher := fmt.Sprintf(`
-			MATCH (target)
-			WHERE (target:Function OR target:Method) AND target.name CONTAINS $name
-			WITH target LIMIT 1
+			MATCH (target {nodeKey: $rootKey})
 			MATCH path = (caller)-[:CALLS*1..%d]->(target)
-			WHERE caller:Function OR caller:Method
+			WHERE (caller:Function OR caller:Method)
+			  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+			  AND coalesce(caller.isTestFunction, false) = false
+			  AND (caller.filePath IS NULL OR NOT caller.filePath ENDS WITH '_test.go')
+			  %s
 			WITH target, caller, length(path) AS depth,
-			     [n IN nodes(path) | n.name] AS chain,
+			     caller.nodeKey AS nodeKey,
 			     caller.filePath AS filePath
-			RETURN DISTINCT caller.name AS name, filePath, depth, chain
+			RETURN DISTINCT nodeKey, caller.name AS name, filePath, depth
 			ORDER BY depth, caller.name
-			LIMIT 100`, maxDepth)
+			LIMIT 100`, maxDepth, serviceFilterClause("caller"))
 
-		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"name": functionName})
+		records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{
+			"rootKey":      root.NodeKey,
+			"scopeId":      scopeCtx.ScopeID,
+			"serviceNames": serviceNames,
+		})
 		if err != nil {
 			output.WriteString(fmt.Sprintf("Error: %v\n\n", err))
 		} else if len(records) == 0 {
 			output.WriteString("No upstream callers found.\n\n")
 		} else {
+			count := 0
 			for _, r := range records {
 				m := r.AsMap()
 				name := getStringFromRecord(m, "name")
 				file := getStringFromRecord(m, "filePath")
 				depth := getIntFromRecord(m, "depth")
+				if file != "" && !s.fileInWorkspace(file) {
+					continue
+				}
 
 				indent := strings.Repeat("  ", depth)
 				if file != "" {
-					file = filepath.Base(file)
 					output.WriteString(fmt.Sprintf("%s← `%s` (%s)\n", indent, name, file))
 				} else {
 					output.WriteString(fmt.Sprintf("%s← `%s`\n", indent, name))
 				}
+				count++
+			}
+			if count == 0 {
+				output.WriteString("No upstream callers found.\n")
 			}
 			output.WriteString("\n")
 		}
@@ -2639,4 +2858,210 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 	return ToolCallResponse{
 		Content: []ToolContent{{Type: "text", Text: output.String()}},
 	}
+}
+
+func parseScopeContextArg(args map[string]interface{}) models.ScopeContext {
+	rawScopeID := getOptionalStringArg(args, "scope_id")
+	if rawScopeID == "" {
+		return models.DefaultScope()
+	}
+
+	if strings.HasPrefix(rawScopeID, "pr-") {
+		return models.ScopeContext{Scope: models.ScopePR, ScopeID: rawScopeID}
+	}
+
+	return models.ScopeContext{Scope: models.ScopeMain, ScopeID: rawScopeID}
+}
+
+func getOptionalStringArg(args map[string]interface{}, key string) string {
+	if args == nil {
+		return ""
+	}
+	if v, ok := args[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+func serviceFilterClause(nodeVar string) string {
+	return fmt.Sprintf(`
+                  AND (size($serviceNames) = 0 OR EXISTS {
+                        MATCH (svc:Service)-[:CONTAINS*1..3]->(%s)
+                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
+                          AND svc.name IN $serviceNames
+                  })`, nodeVar)
+}
+
+func (s *CodeGraphMCPServer) resolveWorkspaceServices(ctx context.Context, scopeID, explicitService string) []string {
+	if explicitService != "" {
+		return []string{explicitService}
+	}
+
+	cypher := `
+                MATCH (svc:Service)-[:CONTAINS]->(f:File)
+                WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
+                  AND (f.scopeId = $scopeId OR f.scopeId = 'main')
+                RETURN svc.name AS serviceName, collect(DISTINCT f.filePath)[0..25] AS filePaths`
+
+	records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		return nil
+	}
+
+	services := make([]string, 0)
+	for _, r := range records {
+		m := r.AsMap()
+		serviceName := getStringFromRecord(m, "serviceName")
+		if serviceName == "" {
+			continue
+		}
+
+		paths, ok := m["filePaths"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, p := range paths {
+			fp, _ := p.(string)
+			if s.fileInWorkspace(fp) {
+				services = append(services, serviceName)
+				break
+			}
+		}
+	}
+
+	sort.Strings(services)
+	uniq := services[:0]
+	for i, name := range services {
+		if i == 0 || services[i-1] != name {
+			uniq = append(uniq, name)
+		}
+	}
+	return uniq
+}
+
+func (s *CodeGraphMCPServer) fileInWorkspace(filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+
+	clean := filepath.Clean(filePath)
+	if filepath.IsAbs(clean) {
+		rel, err := filepath.Rel(s.workspaceRoot, clean)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return false
+		}
+		_, err = os.Stat(clean)
+		return err == nil
+	}
+
+	// 1) Path already rooted at repo root.
+	abs := filepath.Join(s.workspaceRoot, clean)
+	if _, err := os.Stat(abs); err == nil {
+		return true
+	}
+
+	// 2) Path rooted at module directories (e.g. "flow_spine.go" under
+	// "libs/query-go" when a submodule was indexed in isolation).
+	entries, err := os.ReadDir(s.workspaceRoot)
+	if err != nil {
+		return false
+	}
+
+	for _, e1 := range entries {
+		if !e1.IsDir() {
+			continue
+		}
+
+		cand := filepath.Join(s.workspaceRoot, e1.Name(), clean)
+		if _, err := os.Stat(cand); err == nil {
+			return true
+		}
+
+		l1 := filepath.Join(s.workspaceRoot, e1.Name())
+		subEntries, err := os.ReadDir(l1)
+		if err != nil {
+			continue
+		}
+		for _, e2 := range subEntries {
+			if !e2.IsDir() {
+				continue
+			}
+			cand2 := filepath.Join(l1, e2.Name(), clean)
+			if _, err := os.Stat(cand2); err == nil {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (s *CodeGraphMCPServer) filterFlowsToWorkspace(ctx context.Context, scopeID string, flows []query.FlowSpineResult) []query.FlowSpineResult {
+	if len(flows) == 0 {
+		return flows
+	}
+
+	nodeKeys := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, flow := range flows {
+		for _, step := range flow.Steps {
+			if step.Label != "Function" && step.Label != "Method" {
+				continue
+			}
+			if step.NodeKey == "" || seen[step.NodeKey] {
+				continue
+			}
+			seen[step.NodeKey] = true
+			nodeKeys = append(nodeKeys, step.NodeKey)
+		}
+	}
+
+	if len(nodeKeys) == 0 {
+		return nil
+	}
+
+	cypher := `
+                UNWIND $nodeKeys AS nk
+                MATCH (n {nodeKey: nk})
+                WHERE (n:Function OR n:Method)
+                  AND (n.scopeId = $scopeId OR n.scopeId = 'main')
+                RETURN nk AS nodeKey, coalesce(n.filePath, '') AS filePath`
+
+	records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"nodeKeys": nodeKeys, "scopeId": scopeID})
+	if err != nil {
+		return flows
+	}
+
+	workspaceNode := make(map[string]bool)
+	for _, r := range records {
+		m := r.AsMap()
+		nk := getStringFromRecord(m, "nodeKey")
+		if nk == "" {
+			continue
+		}
+		fp := getStringFromRecord(m, "filePath")
+		if fp != "" && s.fileInWorkspace(fp) {
+			workspaceNode[nk] = true
+		}
+	}
+
+	filtered := make([]query.FlowSpineResult, 0, len(flows))
+	for _, flow := range flows {
+		belongs := false
+		for _, step := range flow.Steps {
+			if step.Label != "Function" && step.Label != "Method" {
+				continue
+			}
+			if workspaceNode[step.NodeKey] {
+				belongs = true
+				break
+			}
+		}
+		if belongs {
+			filtered = append(filtered, flow)
+		}
+	}
+
+	return filtered
 }
