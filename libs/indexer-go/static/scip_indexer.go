@@ -163,11 +163,47 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	// Step 6 & 7: Index symbols (defs then refs) — instrumented inside indexSymbols
-	if err := si.indexSymbols(ctx, symbolDefs, fileNodes); err != nil {
+	symIdx, err := si.indexSymbols(ctx, symbolDefs, fileNodes)
+	if err != nil {
 		return fmt.Errorf("failed to index symbols: %w", err)
 	}
 
 	fmt.Printf("Successfully indexed %d symbols from SCIP data\n", len(symbolDefs))
+
+	// Step 6b: Extract and index IMPLEMENTS relationships from SCIP
+	if si.timer != nil {
+		si.timer.Start("IMPLEMENTS relationships")
+	}
+	scipRels, err := parser.ExtractRelationships()
+	if err != nil {
+		fmt.Printf("Warning: failed to extract SCIP relationships: %v\n", err)
+	} else {
+		implCount := 0
+		for _, r := range scipRels {
+			if r.IsImplementation {
+				implCount++
+			}
+		}
+		fmt.Printf("Extracted %d SCIP relationships (%d implementation)\n", len(scipRels), implCount)
+
+		if implCount > 0 {
+			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey)
+			if len(batch) > 0 {
+				if err := si.client.CreateRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
+					fmt.Printf("Warning: failed to create IMPLEMENTS relationships: %v\n", err)
+				} else {
+					fmt.Printf("Created %d IMPLEMENTS relationships\n", len(batch))
+				}
+			}
+		}
+	}
+	if si.timer != nil {
+		relCount := 0
+		if scipRels != nil {
+			relCount = len(scipRels)
+		}
+		si.timer.Stop(relCount, "")
+	}
 
 	// Step 8: Package dependencies
 	if si.timer != nil {
@@ -747,8 +783,16 @@ func dedupeByNodeKey(items []map[string]any) []map[string]any {
 	return deduped
 }
 
+// symbolIndex holds the Neo4j node ID maps produced by indexSymbols,
+// needed by subsequent pipeline stages (e.g. IMPLEMENTS edge creation).
+type symbolIndex struct {
+	symbolIDs      map[string]string // symbolNodeKey → elementId
+	defIDs         map[string]string // defNodeKey → elementId
+	symbolToDefKey map[string]string // SCIP symbol string → defNodeKey
+}
+
 // indexSymbols indexes all symbols and their relationships using UNWIND batches.
-func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.SymbolDefinition, fileNodes map[string]string) error {
+func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.SymbolDefinition, fileNodes map[string]string) (*symbolIndex, error) {
 	fmt.Printf("Indexing %d symbols...\n", len(symbolDefs))
 
 	// Initialize file content cache for byte offset calculations
@@ -798,6 +842,15 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		}
 
 		items = append(items, di)
+	}
+
+	// Build symbolToDefKey map for IMPLEMENTS edge resolution
+	symToDefKey := make(map[string]string, len(items))
+	for _, it := range items {
+		if it.defNodeKey != "" {
+			// symbolNodeKey == SCIP symbol string (via SymbolNodeKey)
+			symToDefKey[it.symbolNodeKey] = it.defNodeKey
+		}
 	}
 
 	// 1. Batch merge all Symbol nodes (deduplicated)
@@ -1027,7 +1080,11 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	fmt.Printf("Completed indexing symbols (created %d reference relationships)\n", len(refItems))
-	return nil
+	return &symbolIndex{
+		symbolIDs:      symbolIDs,
+		defIDs:         defIDs,
+		symbolToDefKey: symToDefKey,
+	}, nil
 }
 
 // indexPackageDependencies creates DEPENDS_ON relationships between services based on imports

@@ -3,6 +3,7 @@ module github.com/context-maximiser/code-graph/apps/mcp-server-go
 go 1.24.3
 
 require (
+	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/indexer-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/neo4j-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000
@@ -15,7 +16,6 @@ require (
 	cloud.google.com/go v0.116.0 // indirect
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	github.com/context-maximiser/code-graph/libs/core-models-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/context-maximiser/code-graph/libs/inference-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/context-maximiser/code-graph/libs/intelligence-go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000 // indirect

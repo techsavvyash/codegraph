@@ -215,15 +215,31 @@ type refInfo struct {
 
 // getReferencesInFile queries Reference nodes in this file that point to
 // Symbols defined by Function/Method nodes within the same project.
+// When IMPLEMENTS edges exist (from Phase 1 relationship ingestion),
+// the query follows them to resolve polymorphic calls to concrete
+// implementations instead of stopping at the interface method.
 func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, filePath string) ([]refInfo, error) {
 	// Filter targets to project-internal symbols using the package name.
 	// CONTAINS "" is always true, so empty packageName disables filtering.
+	//
+	// IMPLEMENTS traversal: if the direct target has incoming IMPLEMENTS
+	// edges from concrete types, return those instead (may-call fan-out).
+	// Otherwise fall back to the direct target.
 	query := `
 		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
 		      -[:REFERENCES]->(sym:Symbol)
-		      <-[:DEFINES]-(target)
-		WHERE (target:Function OR target:Method)
-		  AND target.signature CONTAINS $packageName
+		      <-[:DEFINES]-(directTarget)
+		WHERE (directTarget:Function OR directTarget:Method)
+		  AND directTarget.signature CONTAINS $packageName
+		OPTIONAL MATCH (concreteTarget)-[:IMPLEMENTS]->(directTarget)
+		WHERE (concreteTarget:Function OR concreteTarget:Method)
+		  AND concreteTarget.signature CONTAINS $packageName
+		WITH ref, directTarget,
+		     COLLECT(DISTINCT concreteTarget) AS concretes
+		UNWIND
+		  CASE WHEN SIZE(concretes) > 0 THEN concretes
+		       ELSE [directTarget]
+		  END AS target
 		RETURN ref.startLine AS refLine,
 		       elementId(target) AS targetId
 	`

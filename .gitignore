@@ -39,3 +39,6 @@ test-results/
 coverage.out
 integration.test
 plugins/
+
+
+*.pem

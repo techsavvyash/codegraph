@@ -17,7 +17,6 @@ require (
 	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/verification-go v0.0.0-00010101000000-000000000000
-	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
 )
@@ -83,6 +82,7 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/mwitkow/go-proto-validators v0.0.0-20180403085117-0950a7990007 // indirect
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.3 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
