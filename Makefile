@@ -65,6 +65,24 @@ benchmark: ## Run benchmarks
 		(cd $$mod && go test -bench=. -benchmem ./...); \
 	done
 
+benchmark-self: build ## Self-benchmark: full pipeline on this repo (graph only)
+	./bin/codegraph benchmark self . --doc-paths=docs
+
+benchmark-self-parallel: build ## Self-benchmark with parallel tier execution
+	./bin/codegraph benchmark self . --doc-paths=docs --parallel
+
+benchmark-self-json: build ## Self-benchmark with JSON output (for CI)
+	./bin/codegraph benchmark self . --doc-paths=docs --json
+
+benchmark-self-baseline: build ## Self-benchmark and save baseline
+	./bin/codegraph benchmark self . --doc-paths=docs --save-baseline
+
+benchmark-self-compare: build ## Self-benchmark and compare to saved baseline
+	./bin/codegraph benchmark self . --doc-paths=docs --compare-baseline
+
+benchmark-pipeline-polyglot: build ## Benchmark SCIP pipeline in polyglot mode
+	./bin/codegraph benchmark pipeline . --polyglot
+
 lint: ## Run golangci-lint across all workspace modules
 	@for mod in $(GO_MODULES); do \
 		echo "--- lint $$mod ---"; \

@@ -1,9 +1,12 @@
 package generated
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/contracts"
 )
 
 func TestDocTypeConstants(t *testing.T) {
@@ -199,5 +202,450 @@ func TestGeneratedDocNodeKey_DifferentTypesDiffer(t *testing.T) {
 	k2 := models.GeneratedDocNodeKey(DocTypeFlowSummary, "pr:1")
 	if k1 == k2 {
 		t.Error("different doc types should produce different keys")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// marshalCitationProps tests
+// ---------------------------------------------------------------------------
+
+func TestMarshalCitationProps_NilGenResult(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	marshalCitationProps(props, nil)
+	if _, ok := props["citations"]; ok {
+		t.Error("nil genResult should not add citations")
+	}
+	if _, ok := props["statements"]; ok {
+		t.Error("nil genResult should not add statements")
+	}
+}
+
+func TestMarshalCitationProps_EmptyCitations(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	marshalCitationProps(props, &contracts.GenerationResult{
+		Content:   "test",
+		Citations: nil,
+	})
+	if _, ok := props["citations"]; ok {
+		t.Error("empty citations should not add citations prop")
+	}
+}
+
+func TestMarshalCitationProps_WithCitations(t *testing.T) {
+	props := map[string]any{"type": "test"}
+	genResult := &contracts.GenerationResult{
+		Content: "Statement A.\nStatement B.",
+		Citations: []contracts.Citation{
+			{
+				StatementIndex: 0,
+				EvidenceRefs: []contracts.EvidenceRef{
+					{Kind: "citation", NodeKey: "func:a", Score: 0.95},
+				},
+			},
+			{
+				StatementIndex: 1,
+				EvidenceRefs: []contracts.EvidenceRef{
+					{Kind: "citation", NodeKey: "func:b", Score: 0.88},
+					{Kind: "graph_edge", NodeKey: "func:c", Score: 0.72},
+				},
+			},
+		},
+		Model: "test-model",
+	}
+
+	marshalCitationProps(props, genResult)
+
+	// Check citations is valid JSON
+	citationsRaw, ok := props["citations"].(string)
+	if !ok {
+		t.Fatal("citations prop should be a string")
+	}
+	var citations []contracts.Citation
+	if err := json.Unmarshal([]byte(citationsRaw), &citations); err != nil {
+		t.Fatalf("citations should be valid JSON: %v", err)
+	}
+	if len(citations) != 2 {
+		t.Errorf("expected 2 citations, got %d", len(citations))
+	}
+	if len(citations[0].EvidenceRefs) != 1 {
+		t.Errorf("expected 1 evidence ref for first citation, got %d", len(citations[0].EvidenceRefs))
+	}
+	if len(citations[1].EvidenceRefs) != 2 {
+		t.Errorf("expected 2 evidence refs for second citation, got %d", len(citations[1].EvidenceRefs))
+	}
+
+	// Check statements is valid JSON
+	stmtsRaw, ok := props["statements"].(string)
+	if !ok {
+		t.Fatal("statements prop should be a string")
+	}
+	var stmts []map[string]any
+	if err := json.Unmarshal([]byte(stmtsRaw), &stmts); err != nil {
+		t.Fatalf("statements should be valid JSON: %v", err)
+	}
+	if len(stmts) != 2 {
+		t.Errorf("expected 2 statement entries, got %d", len(stmts))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mock implementations for policy gate testing
+// ---------------------------------------------------------------------------
+
+type mockGenerator struct {
+	result *contracts.GenerationResult
+	err    error
+}
+
+func (m *mockGenerator) Generate(_ context.Context, _ *contracts.ContextBundle) (*contracts.GenerationResult, error) {
+	return m.result, m.err
+}
+
+type mockVerifier struct {
+	result *contracts.VerificationResult
+	err    error
+}
+
+func (m *mockVerifier) Verify(_ context.Context, _ *contracts.GenerationResult, _ models.ScopeContext) (*contracts.VerificationResult, error) {
+	return m.result, m.err
+}
+
+type mockPolicy struct {
+	decision PolicyDecision
+}
+
+func (m *mockPolicy) Evaluate(_ *contracts.GenerationResult, _ *contracts.VerificationResult) PolicyDecision {
+	return m.decision
+}
+
+// ---------------------------------------------------------------------------
+// Policy gate enforcement tests
+// ---------------------------------------------------------------------------
+
+func TestGenerateAndVerify_PolicyRejects(t *testing.T) {
+	gen := NewContextGenerator(nil) // nil client — storeDiagnostic gracefully skips
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Low quality output.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:            false,
+			TotalStatements:   1,
+			CitedStatements:   0,
+			UnsupportedClaims: []int{0},
+			Errors:            []string{"low quality"},
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{
+			Allowed:          false,
+			Reason:           "below threshold",
+			PolicyViolations: []string{"citation_coverage < 0.8"},
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeDocstringSuggestion,
+		MaxTokens:  500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeDocstringSuggestion, "code_symbol", "func:a", "Test docstring")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when policy rejects")
+	}
+}
+
+func TestGenerateAndVerify_PolicyAccepts(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "This docstring suggestion explains parameters, return behavior, and side effects with concrete evidence.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.95}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{
+			Allowed: true,
+			Reason:  "meets thresholds",
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeDocstringSuggestion,
+		MaxTokens:  500,
+	}
+
+	// With nil client, Store* will panic on MergeNode. We use recover to confirm
+	// that the accepted path was reached (i.e., policy did not reject).
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		gen.generateAndVerify(context.Background(), bundle, DocTypeDocstringSuggestion, "code_symbol", "func:a", "Test docstring")
+	}()
+
+	if !panicked {
+		t.Error("expected panic from nil client on accepted path — confirms policy accepted and tried to persist")
+	}
+}
+
+func TestGenerateAndVerify_VerifierFailsWithoutPolicy(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Unverified output.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "func:a", Score: 0.5}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:            false,
+			TotalStatements:   1,
+			CitedStatements:   0,
+			UnsupportedClaims: []int{0},
+			Errors:            []string{"verification failed"},
+		},
+	})
+	// No policy set — verifier failure alone should reject.
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "api:get/users", NodeType: "APIRoute"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
+		Template:   DocTypeFlowSummary,
+		MaxTokens:  1000,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypeFlowSummary, "flow", "func:a", "Test flow")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when verifier fails without policy")
+	}
+}
+
+func TestGenerateAndVerify_UncitedStatementsRejected(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "Statement without citation.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: nil}, // No evidence refs — uncited
+			},
+			Model: "test-model",
+		},
+	})
+	// No verifier, no policy — citation validation should still reject.
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "func:a", NodeType: "Function"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "file:a"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected generateAndVerify to return false when statements have no citations")
+	}
+}
+
+func TestGenerateAndVerify_LowInformationRejected(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "The pull request was successfully passed and is ready for the next steps.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "pr:1", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "pr:1", NodeType: "PullRequest"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "pr:1", TargetKey: "file:a"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  500,
+	}
+
+	ok, err := gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:1", "Test PR")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected low-information content to be rejected")
+	}
+}
+
+func TestLowInformationViolation(t *testing.T) {
+	if got := lowInformationViolation(DocTypePRSummary, ""); got == "" {
+		t.Fatal("expected empty content violation")
+	}
+
+	if got := lowInformationViolation(DocTypePRSummary, "The pull request was successfully passed and is ready for the next steps in development."); got == "" {
+		t.Fatal("expected generic-phrase violation")
+	}
+
+	if got := lowInformationViolation(DocTypeFlowSummary, "This flow summary describes handler dispatch, service calls, and persistence operations with concrete evidence references."); got != "" {
+		t.Fatalf("unexpected violation for strong content: %s", got)
+	}
+}
+
+func TestGenerateAndVerify_PRSummaryDocType(t *testing.T) {
+	gen := NewContextGenerator(nil)
+
+	gen.SetGenerator(&mockGenerator{
+		result: &contracts.GenerationResult{
+			Content: "This PR summary highlights indexed files, generated flows, verified evidence links, and scope-specific symbol changes to explain exactly what changed and why it matters.",
+			Citations: []contracts.Citation{
+				{StatementIndex: 0, EvidenceRefs: []contracts.EvidenceRef{{Kind: "citation", NodeKey: "pr:42", Score: 0.9}}},
+			},
+			Model: "test-model",
+		},
+	})
+	gen.SetVerifier(&mockVerifier{
+		result: &contracts.VerificationResult{
+			Passed:          true,
+			TotalStatements: 1,
+			CitedStatements: 1,
+		},
+	})
+	gen.SetPolicy(&mockPolicy{
+		decision: PolicyDecision{Allowed: true, Reason: "ok"},
+	})
+
+	bundle := &contracts.ContextBundle{
+		Anchors: []contracts.RetrievalCandidate{{NodeKey: "pr:42", NodeType: "PullRequest"}},
+		Expansions: []contracts.RetrievalCandidate{
+			{NodeKey: "file:a", NodeType: "File"},
+			{NodeKey: "file:b", NodeType: "File"},
+			{NodeKey: "flow:a", NodeType: "Flow"},
+			{NodeKey: "func:b", NodeType: "Function"},
+			{NodeKey: "func:c", NodeType: "Function"},
+			{NodeKey: "doc:1", NodeType: "Document"},
+		},
+		Inferences: []contracts.InferenceResult{{SourceKey: "pr:42", TargetKey: "service:billing"}},
+		Template:   DocTypePRSummary,
+		MaxTokens:  1000,
+	}
+
+	// Should attempt StorePRSummary which panics with nil client — confirming PR summary
+	// is routed through the accepted path of generateAndVerify.
+	panicked := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+			}
+		}()
+		gen.generateAndVerify(context.Background(), bundle, DocTypePRSummary, "pull_request", "pr:42", "PR summary")
+	}()
+
+	if !panicked {
+		t.Error("expected panic from nil client — confirms PR summary routes through generateAndVerify accepted path")
+	}
+}
+
+func TestGeneratedDocModel_WithCitations(t *testing.T) {
+	doc := models.GeneratedDoc{
+		Type:       DocTypePRSummary,
+		Title:      "PR #123 Summary",
+		Content:    "This PR adds feature X.",
+		Model:      "test-model",
+		SourceType: "pull_request",
+		SourceKey:  "pr:123",
+		Statements: `[{"index":0,"refs":2}]`,
+		Citations:  `[{"statementIndex":0,"evidenceRefs":[{"kind":"citation","nodeKey":"func:a"}]}]`,
+	}
+
+	if doc.Statements == "" {
+		t.Error("expected non-empty Statements")
+	}
+	if doc.Citations == "" {
+		t.Error("expected non-empty Citations")
+	}
+
+	// Verify Citations field is valid JSON
+	var citations []contracts.Citation
+	if err := json.Unmarshal([]byte(doc.Citations), &citations); err != nil {
+		t.Fatalf("Citations field should be valid JSON: %v", err)
+	}
+	if len(citations) != 1 {
+		t.Errorf("expected 1 citation, got %d", len(citations))
+	}
+	if citations[0].EvidenceRefs[0].NodeKey != "func:a" {
+		t.Errorf("expected nodeKey func:a, got %s", citations[0].EvidenceRefs[0].NodeKey)
 	}
 }

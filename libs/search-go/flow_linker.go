@@ -6,7 +6,9 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/provenance"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
@@ -148,6 +150,28 @@ func (fl *FlowLinker) LinkFlowsForDocument(ctx context.Context, docNodeKey strin
 }
 
 func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, flowName string, patterns []string) error {
+	// Build reasons from detected patterns.
+	reasons := make([]string, 0, len(patterns)+1)
+	reasons = append(reasons, "flow_step_reference")
+	for _, p := range patterns {
+		reasons = append(reasons, p)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Validate provenance fields before writing.
+	props, err := provenance.BuildMentionEdgeProps(
+		0.7,
+		reasons,
+		"flow_aware_linking",
+		now,
+		fl.scopeID,
+		[]string{chunkKey, flowKey},
+	)
+	if err != nil {
+		return fmt.Errorf("flow mention provenance validation failed: %w", err)
+	}
+
 	cypher := `
 		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})
 		WHERE chunk.scopeId = $scopeId OR chunk.scopeId = 'main'
@@ -159,15 +183,29 @@ func (fl *FlowLinker) createFlowMention(ctx context.Context, chunkKey, flowKey, 
 		SET r.contextType = 'flow_aware_linking',
 		    r.flowName = $flowName,
 		    r.patterns = $patterns,
-		    r.scopeId = $scopeId
+		    r.scope = $scope,
+		    r.scopeId = $scopeId,
+		    r.confidence = $confidence,
+		    r.reasons = $reasons,
+		    r.strategy = $strategy,
+		    r.evidenceRefs = $evidenceRefs,
+		    r.createdAt = $createdAt,
+		    r.model = $model
 		RETURN elementId(r) AS id
 	`
-	_, err := fl.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"chunkKey": chunkKey,
-		"flowKey":  flowKey,
-		"flowName": flowName,
-		"patterns": patterns,
-		"scopeId":  fl.scopeID,
+	_, err = fl.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"chunkKey":     chunkKey,
+		"flowKey":      flowKey,
+		"flowName":     flowName,
+		"patterns":     patterns,
+		"scope":        props["scope"],
+		"scopeId":      fl.scopeID,
+		"confidence":   props["confidence"],
+		"reasons":      props["reasons"],
+		"strategy":     props["strategy"],
+		"evidenceRefs": props["evidenceRefs"],
+		"createdAt":    props["createdAt"],
+		"model":        props["model"],
 	})
 	return err
 }

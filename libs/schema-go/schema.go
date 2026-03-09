@@ -488,6 +488,79 @@ func GetIndexes() []Index {
 			Properties: []string{"tenantId", "repoId"},
 			Type:       "BTREE",
 		},
+		// GDS graph metrics indexes (Phase: Graph-Structural Flow Seeds)
+		{
+			Name:       "function_indegree_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"inDegree"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_pagerank_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"pageRank"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_betweenness_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"betweennessCentrality"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_community_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"communityId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_component_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"componentId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "function_istest_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"isTestFunction"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_indegree_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"inDegree"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_pagerank_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"pageRank"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_betweenness_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"betweennessCentrality"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_community_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"communityId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_component_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"componentId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_istest_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"isTestFunction"},
+			Type:       "BTREE",
+		},
 	}
 }
 

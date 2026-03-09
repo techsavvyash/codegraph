@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/context-maximiser/code-graph/libs/search-go"
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
@@ -58,17 +59,29 @@ func (si *SCIPIndexer) populateSecondaryStores(ctx context.Context) {
 	totalVectors := 0
 	totalText := 0
 	for _, nt := range nodeTypes {
+		t0 := time.Now()
 		n, err := si.populateVectorsForNodeType(ctx, nt, batchSize)
 		if err != nil {
 			fmt.Printf("Warning: vector population for %s failed: %v\n", nt, err)
 		}
 		totalVectors += n
+		if si.timer != nil {
+			if recorder, ok := si.timer.(SubPhaseRecorder); ok {
+				recorder.AddResult("  Embed+Upsert("+nt+")", time.Since(t0), n, "")
+			}
+		}
 
+		t1 := time.Now()
 		m, err := si.populateTextIndexForNodeType(ctx, nt, batchSize)
 		if err != nil {
 			fmt.Printf("Warning: text index population for %s failed: %v\n", nt, err)
 		}
 		totalText += m
+		if si.timer != nil {
+			if recorder, ok := si.timer.(SubPhaseRecorder); ok {
+				recorder.AddResult("  TextIndex("+nt+")", time.Since(t1), m, "")
+			}
+		}
 	}
 
 	fmt.Printf("Secondary stores populated: %d vectors, %d text docs\n", totalVectors, totalText)

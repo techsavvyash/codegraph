@@ -25,7 +25,8 @@ const (
 	FlowNode          NodeType = "Flow"
 	FeatureNode       NodeType = "Feature"
 	PullRequestNode   NodeType = "PullRequest"
-	GeneratedDocNode  NodeType = "GeneratedDoc"
+	GeneratedDocNode            NodeType = "GeneratedDoc"
+	GenerationDiagnosticNode    NodeType = "GenerationDiagnostic"
 )
 
 // BaseNode represents common properties for all nodes
@@ -244,6 +245,20 @@ type GeneratedDoc struct {
 	Model      string `json:"model" neo4j:"model"`           // LLM model used
 	SourceType string `json:"sourceType" neo4j:"sourceType"` // What triggered generation
 	SourceKey  string `json:"sourceKey" neo4j:"sourceKey"`   // nodeKey of the source
+	Statements string `json:"statements" neo4j:"statements"` // JSON-serialized []Statement
+	Citations  string `json:"citations" neo4j:"citations"`   // JSON-serialized []Citation (statement-indexed evidence refs)
+}
+
+// GenerationDiagnostic captures a rejected generation attempt for audit and debugging.
+type GenerationDiagnostic struct {
+	BaseNode
+	Type              string   `json:"type" neo4j:"type"`                           // pr_summary, flow_summary, docstring_suggestion
+	SourceType        string   `json:"sourceType" neo4j:"sourceType"`
+	SourceKey         string   `json:"sourceKey" neo4j:"sourceKey"`
+	Model             string   `json:"model" neo4j:"model"`
+	RejectionReasons  []string `json:"rejectionReasons" neo4j:"rejectionReasons"`
+	UnsupportedClaims []int    `json:"unsupportedClaims" neo4j:"unsupportedClaims"`
+	Content           string   `json:"content" neo4j:"content"`                     // Draft content that failed verification
 }
 
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
@@ -321,6 +336,10 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case GeneratedDocNode:
 		return &GeneratedDoc{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case GenerationDiagnosticNode:
+		return &GenerationDiagnostic{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	default:

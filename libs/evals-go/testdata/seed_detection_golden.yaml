@@ -1,0 +1,148 @@
+# Golden set for graph-structural seed detection evaluation.
+# Expected seeds when indexing the CodeGraph codebase itself.
+version: "1.0"
+description: "Seed detection golden set for CodeGraph self-index"
+
+expected_seeds:
+  # Tier 1: API Exposed (if any - CodeGraph is CLI-based, may not have API routes)
+  # Tier 3: Topological roots - exported functions with no callers and downstream calls
+  - nodeKey: "fn:apps/cli/main.go:main"
+    name: "main"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/static/scip_indexer.go:IndexProject"
+    name: "IndexProject"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/static/scip_indexer.go:IndexProjectPolyglot"
+    name: "IndexProjectPolyglot"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/pipeline/pipeline.go:Run"
+    name: "Run"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/pipeline/pipeline.go:RunParallel"
+    name: "RunParallel"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/query-go/flow_spine.go:GenerateFlows"
+    name: "GenerateFlows"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/query-go/flow_spine.go:GenerateFromAPIEndpoints"
+    name: "GenerateFromAPIEndpoints"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/schema-go/schema.go:CreateSchema"
+    name: "CreateSchema"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/inference-go/graph_seeds.go:FindSeeds"
+    name: "FindSeeds"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/documents/indexer.go:IndexDirectory"
+    name: "IndexDirectory"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/search-go/chunk_linker.go:LinkChunksForDocument"
+    name: "LinkChunksForDocument"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/search-go/flow_linker.go:LinkFlowsForDocument"
+    name: "LinkFlowsForDocument"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/static/call_graph_scip.go:BuildCallGraph"
+    name: "BuildCallGraph"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/neo4j-go/client.go:NewClient"
+    name: "NewClient"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/indexer-go/static/scip_indexer.go:ValidateEnvironment"
+    name: "ValidateEnvironment"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/query-go/flow_spine.go:GetFlow"
+    name: "GetFlow"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/query-go/flow_spine.go:ListFlows"
+    name: "ListFlows"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/schema-go/schema.go:DropSchema"
+    name: "DropSchema"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/schema-go/schema.go:ValidateSchema"
+    name: "ValidateSchema"
+    tier: 3
+    expected_type: "topological_root"
+
+  - nodeKey: "fn:libs/gds-go/projection.go:ProjectGraph"
+    name: "ProjectGraph"
+    tier: 3
+    expected_type: "topological_root"
+
+known_false_positives:
+  - nodeKey: "fn:libs/inference-go/flow_seeds.go:isTestName"
+    name: "isTestName"
+    reason: "Internal helper, not an entry point"
+
+  - nodeKey: "fn:libs/inference-go/flow_quality.go:toLower"
+    name: "toLower"
+    reason: "Utility function"
+
+  - nodeKey: "fn:libs/indexer-go/static/helpers.go:getStringFromMap"
+    name: "getStringFromMap"
+    reason: "Internal helper"
+
+  - nodeKey: "fn:libs/indexer-go/static/helpers.go:getInt64FromMap"
+    name: "getInt64FromMap"
+    reason: "Internal helper"
+
+  - nodeKey: "fn:libs/core-models-go/nodekey.go:ServiceNodeKey"
+    name: "ServiceNodeKey"
+    reason: "Pure function, not an entry point"
+
+  - nodeKey: "fn:libs/indexer-go/static/scip_indexer.go:isTestFunction"
+    name: "isTestFunction"
+    reason: "Internal helper"
+
+  - nodeKey: "fn:libs/inference-go/flow_quality.go:hasPrefix"
+    name: "hasPrefix"
+    reason: "Utility function"
+
+  - nodeKey: "fn:libs/inference-go/flow_quality.go:hasSuffix"
+    name: "hasSuffix"
+    reason: "Utility function"
+
+  - nodeKey: "fn:libs/indexer-go/static/call_graph_scip.go:isGoFile"
+    name: "isGoFile"
+    reason: "Utility function"
+
+  - nodeKey: "fn:libs/indexer-go/static/scip_indexer.go:dedupeByNodeKey"
+    name: "dedupeByNodeKey"
+    reason: "Internal helper"

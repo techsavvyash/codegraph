@@ -102,6 +102,11 @@ func GeneratedDocNodeKey(docType, sourceKey string) string {
 	return "gendoc:" + docType + ":" + sourceKey
 }
 
+// GenerationDiagnosticNodeKey returns "gendiag:{type}:{sourceKey}".
+func GenerationDiagnosticNodeKey(docType, sourceKey string) string {
+	return "gendiag:" + docType + ":" + sourceKey
+}
+
 // SDKCallNodeKey returns "sdkcall:{target}".
 func SDKCallNodeKey(target string) string {
 	return "sdkcall:" + target

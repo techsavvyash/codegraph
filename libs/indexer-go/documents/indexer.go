@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/provenance"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
+	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
@@ -42,6 +44,12 @@ func NewDocumentIndexer(client *neo4j.Client) *DocumentIndexer {
 // SetScope sets the scope context for the document indexer.
 func (di *DocumentIndexer) SetScope(scope models.ScopeContext) {
 	di.scopeCtx = scope
+	if di.chunkLinker != nil {
+		di.chunkLinker.SetScope(scope.ScopeID)
+	}
+	if di.intelligentLinker != nil {
+		di.intelligentLinker.SetScope(scope.ScopeID)
+	}
 }
 
 // WithTextStore sets an optional TextIndexStore for pushing chunks to OpenSearch (or any BM25 backend).
@@ -63,6 +71,7 @@ func (di *DocumentIndexer) WithVectorStore(es search.EmbeddingService, vs search
 // EnableIntelligentLinking enables semantic analysis and intelligent linking
 func (di *DocumentIndexer) EnableIntelligentLinking(embeddingService search.EmbeddingService, vectorStore search.VectorStore) {
 	di.intelligentLinker = search.NewIntelligentDocumentLinker(di.client, embeddingService, vectorStore)
+	di.intelligentLinker.SetScope(di.scopeCtx.ScopeID)
 	di.useIntelligentLinking = true
 }
 
@@ -470,12 +479,26 @@ func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID st
 		}
 
 		// Create MENTIONS relationships to found symbols
+		now := time.Now().UTC().Format(time.RFC3339)
 		for _, record := range results {
 			recordMap := record.AsMap()
 			if symbolObj, ok := recordMap["s"]; ok {
 				if symbolNode, ok := symbolObj.(dbtype.Node); ok {
-					_, err = di.client.CreateRelationship(ctx, docID, symbolNode.ElementId, "MENTIONS",
-						map[string]any{"context": symbolRef, "scope": di.scopeCtx.Scope, "scopeId": di.scopeCtx.ScopeID})
+					props, err := provenance.BuildMentionEdgeProps(
+						0.5,
+						[]string{"symbol_reference"},
+						"simple_symbol_extraction",
+						now,
+						di.scopeCtx.ScopeID,
+						[]string{symbolRef},
+					)
+					if err != nil {
+						log.Printf("Warning: skipping MENTIONS edge for %s: provenance validation failed: %v", symbolRef, err)
+						continue
+					}
+					props["context"] = symbolRef
+					props["scope"] = di.scopeCtx.Scope
+					_, err = di.client.CreateRelationship(ctx, docID, symbolNode.ElementId, "MENTIONS", props)
 					if err != nil {
 						continue // Skip failed relationships
 					}
@@ -491,12 +514,12 @@ func (di *DocumentIndexer) simpleLinkToCodeSymbols(ctx context.Context, docID st
 func (di *DocumentIndexer) isDocumentFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	documentExts := map[string]bool{
-		".md":  true,
-		".txt": true,
-		".rst": true,
+		".md":   true,
+		".txt":  true,
+		".rst":  true,
 		".adoc": true,
 	}
-	
+
 	return documentExts[ext]
 }
 
@@ -512,16 +535,16 @@ func (di *DocumentIndexer) GetDocumentStats(ctx context.Context) (map[string]any
 			count(DISTINCT s) as mentionedSymbolCount,
 			collect(DISTINCT d.type) as documentTypes
 	`
-	
+
 	results, err := di.client.ExecuteQuery(ctx, cypher, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get document stats: %w", err)
 	}
-	
+
 	if len(results) > 0 {
 		return results[0].AsMap(), nil
 	}
-	
+
 	return map[string]any{}, nil
 }
 

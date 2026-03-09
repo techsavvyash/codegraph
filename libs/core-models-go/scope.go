@@ -1,5 +1,10 @@
 package models
 
+import (
+	"fmt"
+	"strings"
+)
+
 // ScopeContext represents the scope context for indexing operations.
 // Scope is either "main" (default branch) or "pr" (pull request overlay).
 // ScopeID uniquely identifies the scope instance (e.g., "main", "pr-42").
@@ -28,6 +33,32 @@ func NewPRScope(prID string) ScopeContext {
 	return ScopeContext{
 		Scope:   ScopePR,
 		ScopeID: "pr-" + prID,
+	}
+}
+
+// NormalizePRID strips the "pr-" prefix from a raw PR ID if present.
+// Callers that accept user input must call this before NewPRScope.
+func NormalizePRID(rawID string) string {
+	if strings.HasPrefix(rawID, "pr-") {
+		return rawID[3:]
+	}
+	return rawID
+}
+
+// ParseScopeFlags resolves --scope and --scope-id CLI flag values into a ScopeContext.
+// Returns error if --scope-id is provided without --scope=pr, or if --scope=pr without --scope-id.
+func ParseScopeFlags(scopeFlag, scopeIDFlag string) (ScopeContext, error) {
+	switch scopeFlag {
+	case ScopePR:
+		if scopeIDFlag == "" {
+			return ScopeContext{}, fmt.Errorf("--scope-id is required when --scope=pr")
+		}
+		return NewPRScope(NormalizePRID(scopeIDFlag)), nil
+	default:
+		if scopeIDFlag != "" && scopeIDFlag != ScopeMain {
+			return ScopeContext{}, fmt.Errorf("--scope-id %q is only valid with --scope=pr", scopeIDFlag)
+		}
+		return DefaultScope(), nil
 	}
 }
 

@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/provenance"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
 // ChunkLinker creates MENTIONS relationships between DocumentChunk nodes and code nodes.
-// Each MENTIONS edge carries provenance: confidence, reasons, model, createdAt.
+// Each MENTIONS edge carries provenance: scope, scopeId, confidence, reasons,
+// strategy, evidenceRefs, createdAt.
 type ChunkLinker struct {
 	client  *neo4j.Client
 	scopeID string // Scope filter for target node lookup
@@ -176,6 +178,19 @@ func (cl *ChunkLinker) findCodeNodesByName(ctx context.Context, name string) []c
 }
 
 func (cl *ChunkLinker) createMentionEdge(ctx context.Context, edge ChunkMentionEdge, scopeID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	props, err := provenance.BuildMentionEdgeProps(
+		edge.Confidence,
+		edge.Reasons,
+		edge.Model,
+		now,
+		scopeID,
+		[]string{edge.ChunkNodeKey, edge.TargetNodeKey},
+	)
+	if err != nil {
+		return fmt.Errorf("mention edge provenance validation failed: %w", err)
+	}
+
 	cypher := `
 		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey, scopeId: $scopeId})
 		MATCH (target {nodeKey: $targetKey})
@@ -184,20 +199,26 @@ func (cl *ChunkLinker) createMentionEdge(ctx context.Context, edge ChunkMentionE
 		MERGE (chunk)-[r:MENTIONS]->(target)
 		SET r.confidence = $confidence,
 		    r.reasons = $reasons,
+		    r.strategy = $strategy,
 		    r.model = $model,
+		    r.evidenceRefs = $evidenceRefs,
 		    r.createdAt = $createdAt,
+		    r.scope = $scope,
 		    r.scopeId = $scopeId`
 	params := map[string]any{
-		"chunkKey":   edge.ChunkNodeKey,
-		"targetKey":  edge.TargetNodeKey,
-		"scopeId":    scopeID,
-		"confidence": edge.Confidence,
-		"reasons":    edge.Reasons,
-		"model":      edge.Model,
-		"createdAt":  time.Now().UTC().Format(time.RFC3339),
+		"chunkKey":     edge.ChunkNodeKey,
+		"targetKey":    edge.TargetNodeKey,
+		"scopeId":      scopeID,
+		"confidence":   props["confidence"],
+		"reasons":      props["reasons"],
+		"strategy":     props["strategy"],
+		"model":        props["model"],
+		"evidenceRefs": props["evidenceRefs"],
+		"createdAt":    props["createdAt"],
+		"scope":        props["scope"],
 	}
 
-	_, err := cl.client.ExecuteQuery(ctx, cypher, params)
+	_, err = cl.client.ExecuteQuery(ctx, cypher, params)
 	return err
 }
 
@@ -215,17 +236,36 @@ func (cl *ChunkLinker) createMentionEdgesBatch(ctx context.Context, edges []Chun
 		}
 		batch := edges[i:end]
 
-		edgeMaps := make([]map[string]any, len(batch))
+		var edgeMaps []map[string]any
 		now := time.Now().UTC().Format(time.RFC3339)
-		for j, e := range batch {
-			edgeMaps[j] = map[string]any{
-				"chunkKey":   e.ChunkNodeKey,
-				"targetKey":  e.TargetNodeKey,
-				"confidence": e.Confidence,
-				"reasons":    e.Reasons,
-				"model":      e.Model,
-				"createdAt":  now,
+		for _, e := range batch {
+			props, err := provenance.BuildMentionEdgeProps(
+				e.Confidence,
+				e.Reasons,
+				e.Model,
+				now,
+				scopeID,
+				[]string{e.ChunkNodeKey, e.TargetNodeKey},
+			)
+			if err != nil {
+				log.Printf("Warning: skipping mention edge %s → %s: provenance validation failed: %v",
+					e.ChunkNodeKey, e.TargetNodeKey, err)
+				continue
 			}
+			edgeMaps = append(edgeMaps, map[string]any{
+				"chunkKey":     e.ChunkNodeKey,
+				"targetKey":    e.TargetNodeKey,
+				"confidence":   props["confidence"],
+				"reasons":      props["reasons"],
+				"strategy":     props["strategy"],
+				"model":        props["model"],
+				"evidenceRefs": props["evidenceRefs"],
+				"createdAt":    props["createdAt"],
+				"scope":        props["scope"],
+			})
+		}
+		if len(edgeMaps) == 0 {
+			continue
 		}
 
 		cypher := `
@@ -239,9 +279,12 @@ func (cl *ChunkLinker) createMentionEdgesBatch(ctx context.Context, edges []Chun
 			MERGE (chunk)-[r:MENTIONS]->(target)
 			SET r.confidence = edge.confidence,
 			    r.reasons = edge.reasons,
+			    r.strategy = edge.strategy,
 			    r.model = edge.model,
-			    r.createdAt = edge.createdAt,
-			    r.scopeId = $scopeId
+			    r.evidenceRefs = edge.evidenceRefs,
+				    r.createdAt = edge.createdAt,
+				    r.scope = edge.scope,
+				    r.scopeId = $scopeId
 			RETURN count(r) AS created`
 		params := map[string]any{
 			"edges":   edgeMaps,

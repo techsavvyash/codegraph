@@ -17,10 +17,19 @@ import (
 
 // funcRange represents the line span of a function/method body in a Go file.
 type funcRange struct {
-	Name      string
-	DeclLine  int // Line of the function name declaration (matches SCIP's startLine)
-	StartLine int // Body opening brace line
-	EndLine   int // Body closing brace line
+	Name         string
+	DeclLine     int      // Line of the function name declaration (matches SCIP's startLine)
+	StartLine    int      // Body opening brace line
+	EndLine      int      // Body closing brace line
+	ParamTypes   []string // Fully-qualified parameter types (e.g., "net/http.ResponseWriter")
+	ReceiverType string   // Receiver type for methods (e.g., "*SCIPIndexer")
+}
+
+// branchRange represents a conditional block (if/switch/select) span in a Go file.
+type branchRange struct {
+	StartLine int
+	EndLine   int
+	Depth     int // nesting level (1-based)
 }
 
 // SCIPCallGraphBuilder infers CALLS relationships between Functions/Methods
@@ -96,7 +105,66 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	fmt.Printf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
+
+	// Compute in/out degree properties on all Function/Method nodes in scope.
+	if err := cg.ComputeDegreeProperties(ctx); err != nil {
+		fmt.Printf("Warning: degree computation failed: %v\n", err)
+	}
+
 	return nil
+}
+
+// ComputeDegreeProperties sets inDegree and outDegree properties on all
+// Function/Method nodes in the current scope based on CALLS relationships.
+func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) error {
+	cypher := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
+		WHERE (caller:Function OR caller:Method)
+		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
+		WHERE (callee:Function OR callee:Method)
+		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
+		WITH fn, count(DISTINCT caller) AS inD, count(DISTINCT callee) AS outD
+		SET fn.inDegree = inD, fn.outDegree = outD
+	`
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": cg.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return fmt.Errorf("degree computation: %w", err)
+	}
+	fmt.Println("Computed inDegree/outDegree for all Function/Method nodes")
+	return nil
+}
+
+// updateFunctionBodyRanges updates the startLine and endLine properties on
+// Function/Method nodes to reflect the actual AST body range (Lbrace to Rbrace).
+// SCIP indexing only stores the declaration line, which makes line-based
+// containment queries (like findContainingFunction) fail.
+func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, callers []callerInfo) error {
+	cypher := `
+		UNWIND $updates AS u
+		MATCH (fn) WHERE elementId(fn) = u.id
+		SET fn.startLine = u.startLine,
+		    fn.endLine = u.endLine,
+		    fn.paramTypes = u.paramTypes,
+		    fn.receiverType = u.receiverType
+	`
+	updates := make([]map[string]any, len(callers))
+	for i, c := range callers {
+		updates[i] = map[string]any{
+			"id":           c.ID,
+			"startLine":    c.StartLine,
+			"endLine":      c.EndLine,
+			"paramTypes":   c.ParamTypes,
+			"receiverType": c.ReceiverType,
+		}
+	}
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})
+	return err
 }
 
 // listGoFiles returns all file paths with a .go extension that are indexed in the graph.
@@ -146,9 +214,11 @@ func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]string, erro
 
 // callerInfo pairs an AST-derived body range with the graph node element ID.
 type callerInfo struct {
-	ID        string // Neo4j element ID
-	StartLine int    // AST body start line
-	EndLine   int    // AST body end line
+	ID           string   // Neo4j element ID
+	StartLine    int      // AST body start line
+	EndLine      int      // AST body end line
+	ParamTypes   []string // Fully-qualified parameter types
+	ReceiverType string   // Receiver type for methods
 }
 
 // processFile parses a single Go file with the AST to get function body ranges,
@@ -167,6 +237,9 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	if len(funcRanges) == 0 {
 		return 0, nil
 	}
+
+	// Parse branch ranges for conditional metadata on CALLS edges.
+	branches, _ := parseBranchRanges(fullPath)
 
 	// Load graph node IDs for functions in this file, keyed by base name.
 	// We filter to only functions whose SCIP signature matches this file's
@@ -190,9 +263,11 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 			continue
 		}
 		callers = append(callers, callerInfo{
-			ID:        nodeID,
-			StartLine: fr.StartLine,
-			EndLine:   fr.EndLine,
+			ID:           nodeID,
+			StartLine:    fr.StartLine,
+			EndLine:      fr.EndLine,
+			ParamTypes:   fr.ParamTypes,
+			ReceiverType: fr.ReceiverType,
 		})
 	}
 
@@ -200,16 +275,36 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		return 0, nil
 	}
 
+	// Update graph nodes with AST-derived body ranges so that line-based
+	// lookups (e.g., findContainingFunction in API analysis) work correctly.
+	// SCIP only stores the declaration line; the AST gives us the real body range.
+	if err := cg.updateFunctionBodyRanges(ctx, callers); err != nil {
+		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+	}
+
 	// Query: find all references in this file that point to symbols which
 	// have a DEFINES edge from a Function or Method.
 	// Filter targets to only intra-project calls when modulePath is set.
 	// (CONTAINS "" is always true, so empty modulePath disables filtering.)
+	//
+	// IMPLEMENTS traversal: if the direct target has incoming IMPLEMENTS
+	// edges from concrete types, return those instead (may-call fan-out).
+	// Otherwise fall back to the direct target.
 	query := `
 		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
 		      -[:REFERENCES]->(sym:Symbol)
-		      <-[:DEFINES]-(target)
-		WHERE (target:Function OR target:Method)
-		  AND target.signature CONTAINS $modulePath
+		      <-[:DEFINES]-(directTarget)
+		WHERE (directTarget:Function OR directTarget:Method)
+		  AND directTarget.signature CONTAINS $modulePath
+		OPTIONAL MATCH (concreteTarget)-[:IMPLEMENTS]->(directTarget)
+		WHERE (concreteTarget:Function OR concreteTarget:Method)
+		  AND concreteTarget.signature CONTAINS $modulePath
+		WITH ref, directTarget,
+		     COLLECT(DISTINCT concreteTarget) AS concretes
+		UNWIND
+		  CASE WHEN SIZE(concretes) > 0 THEN concretes
+		       ELSE [directTarget]
+		  END AS target
 		RETURN ref.startLine AS refLine,
 		       elementId(target) AS targetId
 	`
@@ -242,9 +337,12 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		}
 		seen[pairKey] = true
 
+		// Compute branch metadata for this call site.
+		depth, isCond := branchDepthAtLine(branches, refLine)
+
 		_, err := cg.client.MergeRelationship(ctx, caller.ID, targetID, string(models.CallsRel),
 			nil,
-			map[string]any{"line": refLine, "filePath": filePath})
+			map[string]any{"line": refLine, "filePath": filePath, "branchDepth": depth, "isConditional": isCond})
 		if err != nil {
 			fmt.Printf("Warning: failed to create CALLS edge: %v\n", err)
 			continue
@@ -329,6 +427,9 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 		return nil, err
 	}
 
+	// Collect import paths so we can resolve qualified type names.
+	importMap := buildImportMap(f)
+
 	var ranges []funcRange
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -337,11 +438,29 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 		}
 
 		name := fn.Name.Name
+		var receiverType string
 		// For methods, include the receiver type in the name to disambiguate.
 		if fn.Recv != nil && len(fn.Recv.List) > 0 {
 			recvType := exprName(fn.Recv.List[0].Type)
 			if recvType != "" {
 				name = recvType + "." + name
+				receiverType = exprTypeName(fn.Recv.List[0].Type)
+			}
+		}
+
+		// Extract parameter types.
+		var paramTypes []string
+		if fn.Type.Params != nil {
+			for _, field := range fn.Type.Params.List {
+				typeName := resolveTypeName(field.Type, importMap)
+				// A field may declare multiple names (e.g., a, b int).
+				count := len(field.Names)
+				if count == 0 {
+					count = 1 // unnamed parameter
+				}
+				for range count {
+					paramTypes = append(paramTypes, typeName)
+				}
 			}
 		}
 
@@ -350,14 +469,170 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 		endLine := fset.Position(fn.Body.Rbrace).Line
 
 		ranges = append(ranges, funcRange{
-			Name:      name,
-			DeclLine:  declLine,
-			StartLine: startLine,
-			EndLine:   endLine,
+			Name:         name,
+			DeclLine:     declLine,
+			StartLine:    startLine,
+			EndLine:      endLine,
+			ParamTypes:   paramTypes,
+			ReceiverType: receiverType,
 		})
 	}
 
 	return ranges, nil
+}
+
+// buildImportMap builds a mapping from local package alias/name to import path
+// for a Go file's imports. For example, "http" -> "net/http", "models" -> "github.com/...".
+func buildImportMap(f *ast.File) map[string]string {
+	m := make(map[string]string)
+	for _, imp := range f.Imports {
+		if imp.Path == nil {
+			continue
+		}
+		importPath := strings.Trim(imp.Path.Value, `"`)
+		var localName string
+		if imp.Name != nil {
+			localName = imp.Name.Name
+		} else {
+			// Default: last segment of import path
+			parts := strings.Split(importPath, "/")
+			localName = parts[len(parts)-1]
+		}
+		if localName != "_" && localName != "." {
+			m[localName] = importPath
+		}
+	}
+	return m
+}
+
+// resolveTypeName resolves an AST type expression to a qualified type string,
+// using the import map to resolve package-qualified names (e.g., http.Request -> net/http.Request).
+func resolveTypeName(expr ast.Expr, importMap map[string]string) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return "*" + resolveTypeName(t.X, importMap)
+	case *ast.SelectorExpr:
+		if ident, ok := t.X.(*ast.Ident); ok {
+			if fullPkg, found := importMap[ident.Name]; found {
+				return fullPkg + "." + t.Sel.Name
+			}
+			return ident.Name + "." + t.Sel.Name
+		}
+		return t.Sel.Name
+	case *ast.ArrayType:
+		return "[]" + resolveTypeName(t.Elt, importMap)
+	case *ast.MapType:
+		return "map[" + resolveTypeName(t.Key, importMap) + "]" + resolveTypeName(t.Value, importMap)
+	case *ast.InterfaceType:
+		return "interface{}"
+	case *ast.FuncType:
+		return "func"
+	case *ast.ChanType:
+		return "chan " + resolveTypeName(t.Value, importMap)
+	case *ast.Ellipsis:
+		return "..." + resolveTypeName(t.Elt, importMap)
+	case *ast.IndexExpr:
+		return resolveTypeName(t.X, importMap) + "[" + resolveTypeName(t.Index, importMap) + "]"
+	case *ast.IndexListExpr:
+		return resolveTypeName(t.X, importMap)
+	case *ast.StructType:
+		return "struct{}"
+	}
+	return "unknown"
+}
+
+// exprTypeName extracts a string representation of a receiver type expression,
+// including pointer markers (e.g., "*SCIPIndexer").
+func exprTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return "*" + exprTypeName(t.X)
+	case *ast.IndexExpr:
+		return exprTypeName(t.X)
+	case *ast.IndexListExpr:
+		return exprTypeName(t.X)
+	}
+	return ""
+}
+
+// parseBranchRanges extracts line ranges for conditional blocks (if/switch/select)
+// from a Go source file. Each range includes its nesting depth.
+func parseBranchRanges(filePath string) ([]branchRange, error) {
+	src, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, src, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var ranges []branchRange
+	var walk func(node ast.Node, depth int)
+	walk = func(node ast.Node, depth int) {
+		if node == nil {
+			return
+		}
+		switch n := node.(type) {
+		case *ast.IfStmt:
+			start := fset.Position(n.Pos()).Line
+			end := fset.Position(n.End()).Line
+			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
+			ast.Inspect(n.Body, func(child ast.Node) bool {
+				if child == n.Body {
+					return true
+				}
+				walk(child, depth+1)
+				return false
+			})
+			if n.Else != nil {
+				walk(n.Else, depth)
+			}
+			return
+		case *ast.SwitchStmt:
+			start := fset.Position(n.Pos()).Line
+			end := fset.Position(n.End()).Line
+			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
+			return
+		case *ast.TypeSwitchStmt:
+			start := fset.Position(n.Pos()).Line
+			end := fset.Position(n.End()).Line
+			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
+			return
+		case *ast.SelectStmt:
+			start := fset.Position(n.Pos()).Line
+			end := fset.Position(n.End()).Line
+			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
+			return
+		}
+	}
+
+	ast.Inspect(f, func(node ast.Node) bool {
+		walk(node, 0)
+		return true
+	})
+
+	return ranges, nil
+}
+
+// branchDepthAtLine returns the maximum nesting depth of conditional blocks
+// enclosing the given line, and whether the line is inside any conditional block.
+func branchDepthAtLine(branches []branchRange, line int) (int, bool) {
+	maxDepth := 0
+	for _, b := range branches {
+		if line >= b.StartLine && line <= b.EndLine {
+			if b.Depth > maxDepth {
+				maxDepth = b.Depth
+			}
+		}
+	}
+	return maxDepth, maxDepth > 0
 }
 
 // exprName extracts the type name from a receiver expression, handling

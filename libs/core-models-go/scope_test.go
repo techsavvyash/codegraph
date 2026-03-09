@@ -212,3 +212,70 @@ func TestScopeContextFieldsPreserved(t *testing.T) {
 		t.Errorf("field values not preserved: %+v", sc)
 	}
 }
+
+// TestNormalizePRID tests the NormalizePRID function with various input patterns.
+func TestNormalizePRID(t *testing.T) {
+	cases := []struct {
+		name    string
+		rawID   string
+		wantID  string
+	}{
+		{"plain number", "42", "42"},
+		{"with pr- prefix", "pr-42", "42"},
+		{"double prefix", "pr-pr-42", "pr-42"},
+		{"empty string", "", ""},
+		{"just pr-", "pr-", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := NormalizePRID(c.rawID)
+			if got != c.wantID {
+				t.Errorf("NormalizePRID(%q) = %q, want %q", c.rawID, got, c.wantID)
+			}
+		})
+	}
+}
+
+// TestParseScopeFlags tests ParseScopeFlags with all valid and invalid combinations.
+func TestParseScopeFlags(t *testing.T) {
+	cases := []struct {
+		name      string
+		scopeFlag string
+		scopeID   string
+		wantErr   bool
+		wantScope string
+		wantID    string
+	}{
+		// Happy path: PR scope
+		{"pr scope with pr-prefixed id", "pr", "pr-42", false, "pr", "pr-42"},
+		{"pr scope with plain id", "pr", "42", false, "pr", "pr-42"},
+		{"pr scope with double-prefixed id", "pr", "pr-pr-42", false, "pr", "pr-pr-42"},
+
+		// Happy path: main scope (default)
+		{"default scope no id", "", "", false, "main", "main"},
+		{"main scope no id", "main", "", false, "main", "main"},
+		{"main scope with main id", "main", "main", false, "main", "main"},
+
+		// Error cases
+		{"pr scope without scope-id", "pr", "", true, "", ""},
+		{"non-pr scope with scope-id", "", "pr-42", true, "", ""},
+		{"main scope with non-main scope-id", "main", "pr-99", true, "", ""},
+		{"unknown scope with scope-id", "unknown", "pr-42", true, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sc, err := ParseScopeFlags(c.scopeFlag, c.scopeID)
+			if (err != nil) != c.wantErr {
+				t.Errorf("ParseScopeFlags(%q, %q): error = %v, wantErr %v", c.scopeFlag, c.scopeID, err, c.wantErr)
+			}
+			if !c.wantErr {
+				if sc.Scope != c.wantScope {
+					t.Errorf("ParseScopeFlags(%q, %q).Scope = %q, want %q", c.scopeFlag, c.scopeID, sc.Scope, c.wantScope)
+				}
+				if sc.ScopeID != c.wantID {
+					t.Errorf("ParseScopeFlags(%q, %q).ScopeID = %q, want %q", c.scopeFlag, c.scopeID, sc.ScopeID, c.wantID)
+				}
+			}
+		})
+	}
+}

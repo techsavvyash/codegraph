@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	gds "github.com/context-maximiser/code-graph/libs/gds-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
@@ -39,6 +40,10 @@ func (s *IngestCodeStage) Run(ctx context.Context, cfg *PipelineConfig) (int, er
 	if cfg.TextStore != nil {
 		indexer.SetTextStore(cfg.TextStore)
 	}
+	// Propagate benchmark timer so SCIP sub-phases are recorded.
+	if cfg.Timer != nil {
+		indexer.SetBenchmarkTimer(cfg.Timer)
+	}
 
 	if err := indexer.IndexProjectPolyglot(ctx, cfg.ProjectPath); err != nil {
 		return 0, fmt.Errorf("IngestCode: %w", err)
@@ -70,8 +75,13 @@ func (s *GenerateFlowSpinesStage) Optional() bool  { return true }
 func (s *GenerateFlowSpinesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
 	gen := query.NewFlowSpineGenerator(cfg.Client)
 	gen.SetScope(cfg.ScopeCtx)
+	if cfg.ServiceName != "" {
+		// Polyglot indexing creates sub-services as "{service}/{subpath}".
+		// Prefix filtering keeps flow generation confined to the currently indexed project.
+		gen.SetServicePrefix(cfg.ServiceName)
+	}
 
-	results, err := gen.GenerateFromAPIEndpoints(ctx, 3)
+	results, err := gen.GenerateFlows(ctx, 3)
 	if err != nil {
 		return 0, fmt.Errorf("GenerateFlowSpines: %w", err)
 	}
@@ -172,13 +182,33 @@ func (s *LinkDocumentChunksStage) Run(ctx context.Context, cfg *PipelineConfig) 
 type GenerateContextDocsStage struct{}
 
 func (s *GenerateContextDocsStage) Name() StageName { return StageGenerateContextDocs }
-func (s *GenerateContextDocsStage) Optional() bool  { return true }
+func (s *GenerateContextDocsStage) Optional() bool  { return false }
 
 func (s *GenerateContextDocsStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	if cfg.Generator == nil {
+		return 0, fmt.Errorf("GenerateContextDocs: generator is required but was nil")
+	}
 	ctxGen := generated.NewContextGenerator(cfg.Client)
 	ctxGen.SetScope(cfg.ScopeCtx)
 
+	if cfg.Generator != nil {
+		ctxGen.SetGenerator(cfg.Generator)
+	}
+	if cfg.Verifier != nil {
+		ctxGen.SetVerifier(cfg.Verifier)
+	}
+	if cfg.Policy != nil {
+		ctxGen.SetPolicy(cfg.Policy)
+	}
+
 	total := 0
+
+	// PR summaries for PullRequest nodes without summaries.
+	if n, err := ctxGen.GeneratePRSummaryForScope(ctx); err != nil {
+		log.Printf("Warning: PR summary generation failed: %v", err)
+	} else {
+		total += n
+	}
 
 	// Docstring suggestions for exported symbols missing docs.
 	if n, err := ctxGen.GenerateDocstringSuggestionsForScope(ctx); err != nil {
@@ -213,4 +243,67 @@ func (s *RefreshRetrievalIndexesStage) Run(ctx context.Context, cfg *PipelineCon
 	}
 	log.Printf("[RefreshRetrievalIndexes] Retrieval indexes refreshed during ingest stages")
 	return 0, nil
+}
+
+// --- Stage: ComputeGraphMetrics ---
+
+type ComputeGraphMetricsStage struct{}
+
+func (s *ComputeGraphMetricsStage) Name() StageName { return StageComputeGraphMetrics }
+func (s *ComputeGraphMetricsStage) Optional() bool  { return true }
+
+func (s *ComputeGraphMetricsStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	gdsClient := gds.NewGDSClient(cfg.Client)
+
+	// Check if GDS plugin is available; skip gracefully if not.
+	if !gdsClient.IsGDSAvailable(ctx) {
+		log.Printf("[ComputeGraphMetrics] GDS plugin not available, skipping")
+		return 0, nil
+	}
+
+	graphName := "codegraph_calls_" + cfg.ScopeCtx.ScopeID
+	nodeLabels := []string{"Function", "Method"}
+	relTypes := []string{"CALLS"}
+
+	// Project the call graph subgraph.
+	if err := gdsClient.ProjectGraph(ctx, graphName, nodeLabels, relTypes, cfg.ScopeCtx.ScopeID); err != nil {
+		return 0, fmt.Errorf("ComputeGraphMetrics: projection failed: %w", err)
+	}
+	defer gdsClient.DropGraph(ctx, graphName)
+
+	totalWritten := 0
+
+	// Run PageRank.
+	if n, err := gdsClient.RunPageRank(ctx, graphName, gds.DefaultPageRankOpts()); err != nil {
+		log.Printf("[ComputeGraphMetrics] PageRank failed: %v", err)
+	} else {
+		totalWritten += n
+		log.Printf("[ComputeGraphMetrics] PageRank wrote %d properties", n)
+	}
+
+	// Run Betweenness Centrality.
+	if n, err := gdsClient.RunBetweennessCentrality(ctx, graphName, gds.DefaultBetweennessOpts()); err != nil {
+		log.Printf("[ComputeGraphMetrics] Betweenness failed: %v", err)
+	} else {
+		totalWritten += n
+		log.Printf("[ComputeGraphMetrics] Betweenness wrote %d properties", n)
+	}
+
+	// Run Weakly Connected Components.
+	if n, err := gdsClient.RunWCC(ctx, graphName); err != nil {
+		log.Printf("[ComputeGraphMetrics] WCC failed: %v", err)
+	} else {
+		totalWritten += n
+		log.Printf("[ComputeGraphMetrics] WCC wrote %d properties", n)
+	}
+
+	// Run Louvain Community Detection.
+	if n, err := gdsClient.RunLouvain(ctx, graphName); err != nil {
+		log.Printf("[ComputeGraphMetrics] Louvain failed: %v", err)
+	} else {
+		totalWritten += n
+		log.Printf("[ComputeGraphMetrics] Louvain wrote %d properties", n)
+	}
+
+	return totalWritten, nil
 }

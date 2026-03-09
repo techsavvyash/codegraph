@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/context-maximiser/code-graph/libs/intelligence-go/provenance"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 )
 
@@ -27,6 +29,9 @@ func (idl *IntelligentDocumentLinker) SetScope(scopeID string) {
 		scopeID = "main"
 	}
 	idl.scopeID = scopeID
+	if idl.hybridSearch != nil {
+		idl.hybridSearch.SetScope(scopeID)
+	}
 }
 
 // NewIntelligentDocumentLinker creates a new intelligent document linker
@@ -54,11 +59,11 @@ type CodeMatch struct {
 
 // LinkingResult contains the results of intelligent document linking
 type LinkingResult struct {
-	DocumentID    string      `json:"documentId"`
-	DirectMatches []CodeMatch `json:"directMatches"`
-	SemanticMatches []CodeMatch `json:"semanticMatches"`
+	DocumentID       string      `json:"documentId"`
+	DirectMatches    []CodeMatch `json:"directMatches"`
+	SemanticMatches  []CodeMatch `json:"semanticMatches"`
 	CallGraphMatches []CodeMatch `json:"callGraphMatches"`
-	CreatedLinks  int         `json:"createdLinks"`
+	CreatedLinks     int         `json:"createdLinks"`
 }
 
 // LinkDocumentToCode performs intelligent linking between a document and code
@@ -175,6 +180,9 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 		vectorResults, err := idl.vectorStore.Query(ctx, VectorQuery{
 			Vector: docEmbedding,
 			Limit:  20,
+			Filters: map[string]any{
+				"scopeId": []string{idl.scopeID, "main"},
+			},
 		})
 		if err == nil {
 			for _, result := range vectorResults {
@@ -202,6 +210,8 @@ func (idl *IntelligentDocumentLinker) findSemanticMatches(ctx context.Context, c
 			}
 		}
 	}
+
+	allMatches = idl.enrichMatchesWithGraphEvidence(ctx, allMatches)
 
 	// Also search using hybrid search for each query
 	for _, query := range searchQueries[:minInt(5, len(searchQueries))] { // Limit to first 5 queries
@@ -288,13 +298,15 @@ func (idl *IntelligentDocumentLinker) expandWithCallGraph(ctx context.Context, b
 // findCallees finds functions called by the given function
 func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionNodeKey string, maxDepth int) ([]CodeMatch, error) {
 	cypher := `
-		MATCH (f:Function {nodeKey: $nodeKey})
-		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
+		MATCH (f {nodeKey: $nodeKey})
+		WHERE (f:Function OR f:Method)
+		  AND (f.scopeId = $scopeId OR f.scopeId = 'main')
 		WITH f
-		MATCH (f)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(callee:Function)
-		WHERE callee.scopeId = $scopeId OR callee.scopeId = 'main'
+		MATCH (f)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(callee)
+		WHERE (callee:Function OR callee:Method)
+		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		RETURN callee.nodeKey AS nodeKey, labels(callee)[0] AS type, callee.name AS name,
-			   callee.signature AS signature, callee.filePath AS filePath
+		       callee.signature AS signature, callee.filePath AS filePath
 		LIMIT 20
 	`
 
@@ -329,13 +341,15 @@ func (idl *IntelligentDocumentLinker) findCallees(ctx context.Context, functionN
 // findCallers finds functions that call the given function
 func (idl *IntelligentDocumentLinker) findCallers(ctx context.Context, functionNodeKey string, maxDepth int) ([]CodeMatch, error) {
 	cypher := `
-		MATCH (f:Function {nodeKey: $nodeKey})
-		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
+		MATCH (f {nodeKey: $nodeKey})
+		WHERE (f:Function OR f:Method)
+		  AND (f.scopeId = $scopeId OR f.scopeId = 'main')
 		WITH f
-		MATCH (caller:Function)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(f)
-		WHERE caller.scopeId = $scopeId OR caller.scopeId = 'main'
+		MATCH (caller)-[:CALLS*1..` + fmt.Sprintf("%d", maxDepth) + `]->(f)
+		WHERE (caller:Function OR caller:Method)
+		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		RETURN caller.nodeKey AS nodeKey, labels(caller)[0] AS type, caller.name AS name,
-			   caller.signature AS signature, caller.filePath AS filePath
+		       caller.signature AS signature, caller.filePath AS filePath
 		LIMIT 20
 	`
 
@@ -419,15 +433,37 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 
 	log.Printf("Creating MENTIONS edges: docID=%s, %d matches after confidence filter (>= 0.15)", documentID, len(filtered))
 
-	// Build batch parameter list.
-	edgeMaps := make([]map[string]any, len(filtered))
-	for i, match := range filtered {
-		edgeMaps[i] = map[string]any{
-			"targetKey":      match.NodeKey,
-			"confidence":     match.Confidence,
-			"reasons":        match.MatchReasons,
-			"callGraphDepth": match.CallGraphDepth,
+	// Build batch parameter list with provenance fields.
+	now := time.Now().UTC().Format(time.RFC3339)
+	var edgeMaps []map[string]any
+	for _, match := range filtered {
+		prov, err := provenance.BuildMentionEdgeProps(
+			match.Confidence,
+			match.MatchReasons,
+			"intelligent_linking",
+			now,
+			idl.scopeID,
+			[]string{documentID, match.NodeKey},
+		)
+		if err != nil {
+			log.Printf("Warning: skipping MENTIONS edge to %s: provenance validation failed: %v", match.NodeKey, err)
+			continue
 		}
+		edgeMaps = append(edgeMaps, map[string]any{
+			"targetKey":      match.NodeKey,
+			"confidence":     prov["confidence"],
+			"reasons":        prov["reasons"],
+			"callGraphDepth": match.CallGraphDepth,
+			"model":          prov["model"],
+			"strategy":       prov["strategy"],
+			"createdAt":      prov["createdAt"],
+			"scope":          prov["scope"],
+			"scopeId":        prov["scopeId"],
+			"evidenceRefs":   prov["evidenceRefs"],
+		})
+	}
+	if len(edgeMaps) == 0 {
+		return 0, nil
 	}
 
 	// documentID may be a Neo4j element ID (e.g. "4:abc:123") or a nodeKey.
@@ -446,7 +482,13 @@ func (idl *IntelligentDocumentLinker) createMentionsRelationships(ctx context.Co
 		SET r.confidence = edge.confidence,
 		    r.reasons = edge.reasons,
 		    r.contextType = 'intelligent_linking',
-		    r.callGraphDepth = edge.callGraphDepth
+		    r.callGraphDepth = edge.callGraphDepth,
+		    r.strategy = edge.strategy,
+		    r.evidenceRefs = edge.evidenceRefs,
+		    r.scope = edge.scope,
+		    r.model = edge.model,
+		    r.createdAt = edge.createdAt,
+		    r.scopeId = edge.scopeId
 		RETURN count(r) AS created
 	`
 	records, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
@@ -506,6 +548,132 @@ func (idl *IntelligentDocumentLinker) deduplicateMatches(matches []CodeMatch) []
 	return unique
 }
 
+// enrichMatchesWithGraphEvidence adjusts confidence using graph-grounded signals
+// rather than only lexical/vector heuristics.
+func (idl *IntelligentDocumentLinker) enrichMatchesWithGraphEvidence(ctx context.Context, matches []CodeMatch) []CodeMatch {
+	if len(matches) == 0 {
+		return matches
+	}
+
+	nodeKeys := make([]string, 0, len(matches))
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if m.NodeKey == "" || seen[m.NodeKey] {
+			continue
+		}
+		seen[m.NodeKey] = true
+		nodeKeys = append(nodeKeys, m.NodeKey)
+	}
+	if len(nodeKeys) == 0 {
+		return matches
+	}
+
+	cypher := `
+		UNWIND $nodeKeys AS nk
+		MATCH (n {nodeKey: nk})
+		WHERE n.scopeId = $scopeId OR n.scopeId = 'main'
+		WITH n ORDER BY CASE WHEN n.scopeId = $scopeId THEN 0 ELSE 1 END
+		WITH head(collect(n)) AS n
+		WHERE n IS NOT NULL
+		OPTIONAL MATCH (n)<-[:HAS_STEP]-(:Flow)
+		WITH n, count(*) AS flowRefs
+		OPTIONAL MATCH (n)<-[:CALLS]-(:Function)
+		WITH n, flowRefs, count(*) AS incomingCalls
+		OPTIONAL MATCH (n)-[:CALLS]->(:Function)
+		RETURN n.nodeKey AS nodeKey,
+		       flowRefs AS flowRefs,
+		       incomingCalls AS incomingCalls,
+		       count(*) AS outgoingCalls,
+		       coalesce(n.isExported, false) AS isExported,
+		       size(coalesce(n.docstring, '')) > 0 AS hasDocstring`
+
+	rows, err := idl.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"nodeKeys": nodeKeys,
+		"scopeId":  idl.scopeID,
+	})
+	if err != nil {
+		return matches
+	}
+
+	type evidence struct {
+		flowRefs      int
+		incomingCalls int
+		outgoingCalls int
+		isExported    bool
+		hasDocstring  bool
+	}
+	evByKey := make(map[string]evidence, len(rows))
+	for _, r := range rows {
+		m := r.AsMap()
+		nk := getStringValue(m, "nodeKey")
+		if nk == "" {
+			continue
+		}
+		evByKey[nk] = evidence{
+			flowRefs:      int(getInt64(m, "flowRefs")),
+			incomingCalls: int(getInt64(m, "incomingCalls")),
+			outgoingCalls: int(getInt64(m, "outgoingCalls")),
+			isExported:    getBool(m, "isExported"),
+			hasDocstring:  getBool(m, "hasDocstring"),
+		}
+	}
+
+	for i := range matches {
+		ev, ok := evByKey[matches[i].NodeKey]
+		if !ok {
+			continue
+		}
+		boost := 0.0
+		if ev.flowRefs > 0 {
+			boost += 0.12
+		}
+		if ev.incomingCalls > 0 {
+			boost += 0.07
+		}
+		if ev.outgoingCalls > 0 {
+			boost += 0.05
+		}
+		if ev.isExported {
+			boost += 0.05
+		}
+		if ev.hasDocstring {
+			boost += 0.03
+		}
+		if boost > 0 {
+			matches[i].Confidence = math.Min(1.0, matches[i].Confidence+boost)
+			matches[i].MatchReasons = append(matches[i].MatchReasons, "graph_evidence")
+		}
+	}
+
+	return matches
+}
+
+func getInt64(m map[string]any, key string) int64 {
+	v, ok := m[key]
+	if !ok {
+		return 0
+	}
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case float64:
+		return int64(t)
+	default:
+		return 0
+	}
+}
+
+func getBool(m map[string]any, key string) bool {
+	v, ok := m[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
+}
+
 func getStringValue(m map[string]any, key string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {
@@ -518,10 +686,10 @@ func getStringValue(m map[string]any, key string) string {
 func contains(s, substr string) bool {
 	return len(substr) > 0 && len(s) >= len(substr) &&
 		(s == substr ||
-		 (len(s) > len(substr) &&
-		  (s[:len(substr)] == substr ||
-		   s[len(s)-len(substr):] == substr ||
-		   findSubstring(s, substr))))
+			(len(s) > len(substr) &&
+				(s[:len(substr)] == substr ||
+					s[len(s)-len(substr):] == substr ||
+					findSubstring(s, substr))))
 }
 
 func findSubstring(s, substr string) bool {

@@ -12,12 +12,14 @@ import (
 
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 	"github.com/context-maximiser/code-graph/libs/benchmarks-go"
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/evals-go"
+	"github.com/context-maximiser/code-graph/libs/generation-go"
+	inference "github.com/context-maximiser/code-graph/libs/inference-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/pipeline"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/llm-go"
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
 	_ "github.com/context-maximiser/code-graph/libs/llm-go/gemini"
 	_ "github.com/context-maximiser/code-graph/libs/llm-go/litellm"
 	_ "github.com/context-maximiser/code-graph/libs/llm-go/openai"
@@ -25,6 +27,7 @@ import (
 	"github.com/context-maximiser/code-graph/libs/query-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
+	"github.com/context-maximiser/code-graph/libs/verification-go"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -478,19 +481,14 @@ var indexPipelineCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		scopeCtx := models.DefaultScope()
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
-		if scopeFlag == "pr" {
-			prID := scopeIDFlag
-			if prID == "" {
-				return fmt.Errorf("--scope-id is required when --scope=pr")
-			}
-			if strings.HasPrefix(prID, "pr-") {
-				prID = prID[3:]
-			}
-			scopeCtx = models.NewPRScope(prID)
-			fmt.Printf("Pipeline running in PR scope: pr-%s\n", prID)
+		scopeCtx, err := models.ParseScopeFlags(scopeFlag, scopeIDFlag)
+		if err != nil {
+			return fmt.Errorf("invalid scope flags: %w", err)
+		}
+		if scopeCtx.Scope == models.ScopePR {
+			fmt.Printf("Pipeline running in PR scope: %s\n", scopeCtx.ScopeID)
 		}
 
 		tenantID, _ := cmd.Flags().GetString("tenant-id")
@@ -527,6 +525,11 @@ var indexPipelineCmd = &cobra.Command{
 			cfg.TextStore = osStore
 		}
 
+		// Wire generation + verification + policy for Stage 6.
+		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
+			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+		}
+
 		parallel, _ := cmd.Flags().GetBool("parallel")
 
 		p := pipeline.New(pipeline.DefaultStages()...)
@@ -541,6 +544,144 @@ var indexPipelineCmd = &cobra.Command{
 		for _, r := range results {
 			if r.Err != nil && !r.Skipped {
 				return fmt.Errorf("pipeline failed at stage %s: %w", r.Name, r.Err)
+			}
+		}
+		return nil
+	},
+}
+
+// indexReplayCmd re-runs only the specified pipeline stages.
+var indexReplayCmd = &cobra.Command{
+	Use:   "replay [path]",
+	Short: "Re-run specific pipeline stages without a full reindex",
+	Long: `Re-run one or more pipeline stages by name. This is useful when only
+documents have changed and you want to re-run LinkDocumentChunks and
+GenerateContextDocs without re-ingesting code.
+
+Available stages: IngestCode, InferServiceDependencies, GenerateFlowSpines,
+IngestDocuments, LinkDocumentChunks, GenerateContextDocs, RefreshRetrievalIndexes.
+
+Example:
+  codegraph index replay . --stages LinkDocumentChunks,GenerateContextDocs --service my-svc`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		stagesCSV, _ := cmd.Flags().GetString("stages")
+		if stagesCSV == "" {
+			return fmt.Errorf("--stages flag is required (comma-separated stage names)")
+		}
+
+		// Build a lookup from DefaultStages.
+		allStages := pipeline.DefaultStages()
+		stageMap := make(map[pipeline.StageName]pipeline.Stage, len(allStages))
+		for _, s := range allStages {
+			stageMap[s.Name()] = s
+		}
+
+		// Resolve requested stages preserving user order.
+		requested := strings.Split(stagesCSV, ",")
+		var selected []pipeline.Stage
+		for _, name := range requested {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			s, ok := stageMap[pipeline.StageName(name)]
+			if !ok {
+				var valid []string
+				for _, ds := range allStages {
+					valid = append(valid, string(ds.Name()))
+				}
+				return fmt.Errorf("unknown stage %q; valid stages: %s", name, strings.Join(valid, ", "))
+			}
+			selected = append(selected, s)
+		}
+		if len(selected) == 0 {
+			return fmt.Errorf("no valid stages specified")
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		docPaths, _ := cmd.Flags().GetStringSlice("doc-paths")
+
+		if serviceName == "" {
+			serviceName = "context-maximiser"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		scopeFlag, _ := cmd.Flags().GetString("scope")
+		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		scopeCtx, err := models.ParseScopeFlags(scopeFlag, scopeIDFlag)
+		if err != nil {
+			return fmt.Errorf("invalid scope flags: %w", err)
+		}
+		if scopeCtx.Scope == models.ScopePR {
+			fmt.Printf("Replay running in PR scope: %s\n", scopeCtx.ScopeID)
+		}
+
+		tenantID, _ := cmd.Flags().GetString("tenant-id")
+		repo, _ := cmd.Flags().GetString("repo")
+		if tenantID != "" {
+			scopeCtx.TenantID = tenantID
+		}
+		if repo != "" {
+			scopeCtx.Repo = repo
+		}
+
+		cfg := &pipeline.PipelineConfig{
+			Client:      client,
+			ScopeCtx:    scopeCtx,
+			ProjectPath: projectPath,
+			ServiceName: serviceName,
+			Version:     version,
+			RepoURL:     repoURL,
+			TenantID:    tenantID,
+			Repo:        repo,
+			DocPaths:    docPaths,
+		}
+
+		if embSvc, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+			cfg.EmbeddingService = embSvc
+			if vs, err := createVectorStore(); err == nil {
+				defer vs.(*search.QdrantVectorStore).Close()
+				cfg.VectorStore = vs
+			}
+		}
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			cfg.TextStore = osStore
+		}
+
+		// Wire generation + verification + policy for Stage 6.
+		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
+			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+		}
+
+		stageNames := make([]string, len(selected))
+		for i, s := range selected {
+			stageNames[i] = string(s.Name())
+		}
+		fmt.Printf("Replaying %d stage(s): %s\n", len(selected), strings.Join(stageNames, ", "))
+
+		p := pipeline.New(selected...)
+		results := p.Run(context.Background(), cfg)
+		fmt.Println(pipeline.Summary(results))
+		for _, r := range results {
+			if r.Err != nil && !r.Skipped {
+				return fmt.Errorf("replay failed at stage %s: %w", r.Name, r.Err)
 			}
 		}
 		return nil
@@ -845,37 +986,52 @@ var querySearchCmd = &cobra.Command{
 		searchTerm := args[0]
 		limit, _ := cmd.Flags().GetInt("limit")
 
-		// Set up tri-store hybrid search.
-		embeddingService, err := createEmbeddingServiceFromFlags(cmd)
-		if err != nil {
-			return fmt.Errorf("hybrid search setup failed: %w", err)
-		}
-
 		client, err := createNeo4jClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Neo4j client: %w", err)
 		}
 		defer client.Close(context.Background())
 
-		vectorStore, err := createVectorStore()
-		if err != nil {
-			return fmt.Errorf("Qdrant connection failed: %w", err)
+		// Try to set up embedding service; fall back gracefully if unavailable.
+		searchMode := "graph-only"
+		var embeddingService search.EmbeddingService
+		var vectorStore search.VectorStore
+		if svc, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+			embeddingService = svc
+			if vs, err := createVectorStore(); err == nil {
+				vectorStore = vs
+				defer vs.(*search.QdrantVectorStore).Close()
+				searchMode = "hybrid"
+			} else {
+				fmt.Printf("Warning: Qdrant unavailable (%v), skipping vector search\n", err)
+				searchMode = "bm25+graph"
+			}
+		} else {
+			fmt.Printf("Note: Embedding service not configured (%v), using graph+text search\n", err)
+			searchMode = "graph+text"
 		}
-		defer vectorStore.(*search.QdrantVectorStore).Close()
-
-		osStore, err := createOpenSearchStoreRequired()
-		if err != nil {
-			return fmt.Errorf("OpenSearch connection failed: %w", err)
-		}
-		defer osStore.Close()
 
 		hybridSearch := search.NewHybridSearchManager(client, embeddingService, vectorStore)
-		hybridSearch.WithTextStore(osStore)
+
+		// Optionally attach OpenSearch for BM25; fall back to Neo4j fulltext.
+		if osStore, ok := createOpenSearchStore(); ok {
+			defer osStore.Close()
+			hybridSearch.WithTextStore(osStore)
+		} else if searchMode == "hybrid" {
+			searchMode = "hybrid (neo4j-fulltext)"
+		}
+
+		// Apply scope if provided.
+		if scopeID, _ := cmd.Flags().GetString("scope-id"); scopeID != "" {
+			hybridSearch.SetScope(scopeID)
+		}
+
+		fmt.Printf("🔍 Search mode: %s\n", searchMode)
 
 		ctx := context.Background()
 		response, err := hybridSearch.UnifiedSearch(ctx, searchTerm, limit)
 		if err != nil {
-			return fmt.Errorf("hybrid search failed: %w", err)
+			return fmt.Errorf("search failed: %w", err)
 		}
 
 		// Display results using RRF-fused rendering.
@@ -1065,7 +1221,12 @@ var queryFlowsCmd = &cobra.Command{
 
 		gen := query.NewFlowSpineGenerator(client)
 		if scopeID != "" {
-			gen.SetScope(models.NewPRScope(scopeID))
+			gen.SetScope(models.NewPRScope(models.NormalizePRID(scopeID)))
+		}
+		if maxDepth > 0 {
+			budget := inference.DefaultTraversalBudget
+			budget.MaxDepth = maxDepth
+			gen.SetBudget(budget)
 		}
 		ctx := context.Background()
 
@@ -1542,6 +1703,8 @@ var benchmarkPipelineCmd = &cobra.Command{
 			language = detectedLang
 		}
 
+		polyglotFlag, _ := cmd.Flags().GetBool("polyglot")
+
 		// Create indexer with timer
 		timer := benchmarks.NewPhaseTimer()
 		scipIndexer := static.NewSCIPIndexerWithLanguage(client, serviceName, version, repoURL, language)
@@ -1549,7 +1712,13 @@ var benchmarkPipelineCmd = &cobra.Command{
 
 		fmt.Printf("Benchmarking SCIP pipeline for %s project at %s...\n\n", language, projectPath)
 
-		if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
+		if polyglotFlag {
+			polyIndexer := static.NewSCIPIndexer(client, serviceName, version, repoURL)
+			polyIndexer.SetBenchmarkTimer(timer)
+			if err := polyIndexer.IndexProjectPolyglot(ctx, projectPath); err != nil {
+				return fmt.Errorf("polyglot indexing failed: %w", err)
+			}
+		} else if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
 			return fmt.Errorf("indexing failed: %w", err)
 		}
 
@@ -1560,6 +1729,151 @@ var benchmarkPipelineCmd = &cobra.Command{
 			}
 		} else {
 			timer.PrintTable(os.Stdout)
+		}
+
+		if pprofFlag {
+			fmt.Println("CPU profile written to cpu.prof")
+			fmt.Println("Analyze with: go tool pprof cpu.prof")
+		}
+
+		return nil
+	},
+}
+
+var benchmarkSelfCmd = &cobra.Command{
+	Use:   "self [path]",
+	Short: "Self-benchmark: run full pipeline on this repo",
+	Long:  "Index this polyglot repo through all 7 pipeline stages and report detailed phase timings to reveal bottlenecks",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repoRoot := "."
+		if len(args) > 0 {
+			repoRoot = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		version, _ := cmd.Flags().GetString("version")
+		repoURL, _ := cmd.Flags().GetString("repo-url")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+		pprofFlag, _ := cmd.Flags().GetBool("pprof")
+		incrementalFlag, _ := cmd.Flags().GetBool("incremental")
+		parallelFlag, _ := cmd.Flags().GetBool("parallel")
+		saveBaselineFlag, _ := cmd.Flags().GetBool("save-baseline")
+		compareBaselineFlag, _ := cmd.Flags().GetBool("compare-baseline")
+		baselineDir, _ := cmd.Flags().GetString("baseline-dir")
+		docPaths, _ := cmd.Flags().GetStringSlice("doc-paths")
+
+		if serviceName == "" {
+			serviceName = "benchmark-self"
+		}
+		if version == "" {
+			version = "v1.0.0"
+		}
+		if baselineDir == "" {
+			baselineDir = ".codegraph/benchmarks"
+		}
+
+		// CPU profiling.
+		if pprofFlag {
+			f, err := os.Create("cpu.prof")
+			if err != nil {
+				return fmt.Errorf("failed to create CPU profile: %w", err)
+			}
+			defer f.Close()
+			if err := pprof.StartCPUProfile(f); err != nil {
+				return fmt.Errorf("failed to start CPU profile: %w", err)
+			}
+			defer pprof.StopCPUProfile()
+			fmt.Println("CPU profiling enabled, will write to cpu.prof")
+		}
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		ctx := context.Background()
+
+		// Create schema before benchmarking.
+		schemaManager := schema.NewSchemaManager(client)
+		if err := schemaManager.CreateSchema(ctx); err != nil {
+			return fmt.Errorf("failed to create schema: %w", err)
+		}
+
+		skipStoresFlag, _ := cmd.Flags().GetBool("skip-stores")
+
+		cfg := benchmarks.SelfBenchmarkConfig{
+			RepoRoot:    repoRoot,
+			ServiceName: serviceName,
+			Version:     version,
+			RepoURL:     repoURL,
+			DocPaths:    docPaths,
+			Incremental: incrementalFlag,
+			Parallel:    parallelFlag,
+			SkipStores:  skipStoresFlag,
+		}
+
+		// Wire up embedding/vector/text stores unless --skip-stores.
+		if !skipStoresFlag {
+			if embSvc, err := createEmbeddingServiceFromFlags(cmd); err == nil {
+				cfg.EmbeddingService = embSvc
+				if vs, err := createVectorStore(); err == nil {
+					cfg.VectorStore = vs
+				} else {
+					fmt.Printf("Warning: vector store unavailable: %v\n", err)
+				}
+			} else {
+				fmt.Printf("Note: no embedding service configured, running graph-only benchmark\n")
+			}
+
+			osURL := viper.GetString("opensearch.url")
+			if osURL == "" {
+				osURL = "http://localhost:9200"
+			}
+			osIndex := viper.GetString("opensearch.index")
+			if osIndex == "" {
+				osIndex = "codegraph"
+			}
+			osStore := textindex.NewOpenSearchStore(textindex.OpenSearchConfig{
+				BaseURL:   osURL,
+				IndexName: osIndex,
+			})
+			cfg.TextStore = osStore
+		}
+
+		result, err := benchmarks.RunSelfBenchmark(ctx, cfg, client)
+		if err != nil {
+			return fmt.Errorf("self-benchmark failed: %w", err)
+		}
+
+		// Output results.
+		if jsonFlag {
+			if err := benchmarks.PrintResultJSON(os.Stdout, result); err != nil {
+				return fmt.Errorf("failed to write JSON: %w", err)
+			}
+		} else {
+			benchmarks.PrintResult(os.Stdout, result)
+		}
+
+		// Save baseline.
+		if saveBaselineFlag {
+			path, err := benchmarks.SaveBaseline(result, baselineDir)
+			if err != nil {
+				return fmt.Errorf("failed to save baseline: %w", err)
+			}
+			fmt.Printf("Baseline saved to %s\n", path)
+		}
+
+		// Compare to baseline.
+		if compareBaselineFlag {
+			baseline, err := benchmarks.LoadBaseline(baselineDir)
+			if err != nil {
+				fmt.Printf("Warning: no baseline found at %s: %v\n", baselineDir, err)
+			} else {
+				comparison := benchmarks.CompareToBaseline(result, baseline, 20.0)
+				benchmarks.PrintComparison(os.Stdout, comparison)
+			}
 		}
 
 		if pprofFlag {
@@ -2628,6 +2942,7 @@ func init() {
 	indexCmd.AddCommand(indexDocsCmd)
 	indexDocsCmd.AddCommand(docsSyncCmd)
 	indexCmd.AddCommand(indexTombstoneCmd)
+	indexCmd.AddCommand(indexReplayCmd)
 
 	// Flags for project command
 	indexProjectCmd.Flags().StringP("service", "s", "", "Service name")
@@ -2667,6 +2982,31 @@ func init() {
 	indexPipelineCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
 	indexPipelineCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
 	indexPipelineCmd.Flags().Bool("parallel", false, "Run independent pipeline stages in parallel tiers")
+	indexPipelineCmd.Flags().String("provider", "", "LLM provider for generation (gemini, litellm, openai; also LLM_PROVIDER env)")
+	indexPipelineCmd.Flags().String("api-key", "", "LLM API key for generation (also LLM_API_KEY / GEMINI_API_KEY env)")
+	indexPipelineCmd.Flags().String("text-model", "", "LLM text model for generation (also LLM_TEXT_MODEL env)")
+	indexPipelineCmd.Flags().Bool("gemini", false, "Use Gemini provider (backward compat)")
+	indexPipelineCmd.Flags().String("llm-base-url", "", "LLM base URL (also LLM_BASE_URL env)")
+
+	// Flags for replay command
+	indexReplayCmd.Flags().String("stages", "", "Comma-separated stage names to replay (required)")
+	indexReplayCmd.Flags().StringP("service", "s", "", "Service name")
+	indexReplayCmd.Flags().StringP("version", "", "v1.0.0", "Service version")
+	indexReplayCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	indexReplayCmd.Flags().String("scope", "main", "Scope: 'main' (default) or 'pr'")
+	indexReplayCmd.Flags().String("scope-id", "", "Scope ID (e.g., 'pr-42')")
+	indexReplayCmd.Flags().StringSlice("doc-paths", nil, "Paths to local documentation directories")
+	indexReplayCmd.Flags().String("tenant-id", "", "Tenant ID for multi-tenant namespacing")
+	indexReplayCmd.Flags().String("repo", "", "Repository identifier for repo-level isolation")
+	indexReplayCmd.Flags().String("embedding-api-key", "", "API key for embedding service")
+	indexReplayCmd.Flags().String("embedding-model", "gemini-embedding-001", "Embedding model")
+	indexReplayCmd.Flags().Bool("embedding-gemini", true, "Use Google Gemini for embeddings")
+	indexReplayCmd.Flags().String("embedding-base-url", "", "Base URL for non-Gemini embedding provider")
+	indexReplayCmd.Flags().String("provider", "", "LLM provider for generation (gemini, litellm, openai; also LLM_PROVIDER env)")
+	indexReplayCmd.Flags().String("api-key", "", "LLM API key for generation (also LLM_API_KEY / GEMINI_API_KEY env)")
+	indexReplayCmd.Flags().String("text-model", "", "LLM text model for generation (also LLM_TEXT_MODEL env)")
+	indexReplayCmd.Flags().Bool("gemini", false, "Use Gemini provider (backward compat)")
+	indexReplayCmd.Flags().String("llm-base-url", "", "LLM base URL (also LLM_BASE_URL env)")
 
 	// Flags for docs command
 	indexDocsCmd.Flags().String("scope", "main", "Scope for indexing: 'main' (default) or 'pr'")
@@ -2727,6 +3067,25 @@ func init() {
 	benchmarkCmd.AddCommand(benchmarkFullCmd)
 	benchmarkCmd.AddCommand(benchmarkIncrementalCmd)
 	benchmarkCmd.AddCommand(benchmarkPipelineCmd)
+	benchmarkCmd.AddCommand(benchmarkSelfCmd)
+
+	// Benchmark self flags
+	benchmarkSelfCmd.Flags().StringP("service", "s", "", "Service name")
+	benchmarkSelfCmd.Flags().String("version", "v1.0.0", "Service version")
+	benchmarkSelfCmd.Flags().StringP("repo-url", "r", "", "Repository URL")
+	benchmarkSelfCmd.Flags().Bool("json", false, "Output results as JSON")
+	benchmarkSelfCmd.Flags().Bool("pprof", false, "Write CPU profile to cpu.prof")
+	benchmarkSelfCmd.Flags().Bool("incremental", false, "Also run incremental re-index after full")
+	benchmarkSelfCmd.Flags().Bool("parallel", false, "Use tiered parallel execution")
+	benchmarkSelfCmd.Flags().Bool("save-baseline", false, "Save result as baseline")
+	benchmarkSelfCmd.Flags().Bool("compare-baseline", false, "Compare against saved baseline")
+	benchmarkSelfCmd.Flags().String("baseline-dir", ".codegraph/benchmarks", "Directory for baselines")
+	benchmarkSelfCmd.Flags().StringSlice("doc-paths", []string{"docs"}, "Doc directories to index")
+	benchmarkSelfCmd.Flags().Bool("skip-stores", false, "Skip Qdrant/OpenSearch (graph-only benchmark)")
+	benchmarkSelfCmd.Flags().Bool("embedding-gemini", false, "Use Google Gemini for embeddings")
+	benchmarkSelfCmd.Flags().String("embedding-api-key", "", "API key for embedding service")
+	benchmarkSelfCmd.Flags().String("embedding-base-url", "", "Base URL for embedding API")
+	benchmarkSelfCmd.Flags().String("embedding-model", "", "Model for embeddings")
 
 	// Benchmark pipeline flags
 	benchmarkPipelineCmd.Flags().StringP("service", "s", "", "Service name")
@@ -2735,6 +3094,7 @@ func init() {
 	benchmarkPipelineCmd.Flags().StringP("language", "l", "", "Language to index (auto-detected if not specified)")
 	benchmarkPipelineCmd.Flags().Bool("pprof", false, "Write CPU profile to cpu.prof")
 	benchmarkPipelineCmd.Flags().Bool("json", false, "Output results as JSON instead of table")
+	benchmarkPipelineCmd.Flags().Bool("polyglot", false, "Use IndexProjectPolyglot for multi-language repos")
 
 	// Benchmark flags
 	benchmarkMemoryCmd.Flags().StringP("service", "s", "", "Service name")
@@ -2891,6 +3251,31 @@ func createOpenSearchStoreRequired() (*textindex.OpenSearchStore, error) {
 		return nil, fmt.Errorf("OpenSearch not reachable at %s: %w", url, err)
 	}
 	return store, nil
+}
+
+// wireGenerationDeps creates and wires a Generator, Verifier, and
+// PolicyEvaluator into the PipelineConfig for evidence-backed Stage 6 output.
+// Returns an error if the LLM provider is not available.
+func wireGenerationDeps(cmd *cobra.Command, cfg *pipeline.PipelineConfig, client *neo4j.Client) error {
+	provider, err := createLLMProvider(cmd)
+	if err != nil {
+		return fmt.Errorf("LLM provider is required for Stage 6: %w", err)
+	}
+
+	llmClient := &llmClientAdapter{provider: provider.Provider}
+	parser := generation.NewSimpleResponseParser()
+	gen := generation.NewGenerator(llmClient, parser)
+	cfg.Generator = gen
+
+	resolver := &neo4jGraphResolver{overlay: query.NewOverlayResolver(client)}
+	ver := verification.NewVerifier(resolver)
+	cfg.Verifier = ver
+
+	gate := verification.NewPolicyGate(verification.DefaultPolicy)
+	cfg.Policy = &policyGateAdapter{gate: gate}
+
+	fmt.Println("🧪 Evidence-backed generation wired (generator + verifier + policy gate)")
+	return nil
 }
 
 // createEmbeddingServiceFromFlags parses embedding flags and returns the service.

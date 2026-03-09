@@ -29,6 +29,10 @@ const (
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"
 	MentionsRel  RelationshipType = "MENTIONS"
+
+	// Async / Message Queue Relationships
+	ConsumesFromRel RelationshipType = "CONSUMES_FROM"
+	ScheduledByRel  RelationshipType = "SCHEDULED_BY"
 )
 
 // BaseRelationship represents common properties for all relationships
