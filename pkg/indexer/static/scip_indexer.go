@@ -334,6 +334,82 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		}
 	}
 
+	// Third pass: Create CALLS relationships between functions
+	// Strategy: For each reference to a function/method, find which function contains that reference
+	fmt.Println("Extracting call graph relationships...")
+	callsCreated := 0
+	callsSkipped := 0
+
+	// Build a map of function symbols and their source ranges
+	functionRanges := make(map[string]*models.SymbolInfo)
+	for _, symbolDef := range symbolDefs {
+		if (symbolDef.Info.Kind == models.FunctionSymbol ||
+		    symbolDef.Info.Kind == models.MethodSymbol) &&
+		    symbolDef.Info.FilePath != "" {
+			functionRanges[symbolDef.Symbol.String()] = symbolDef.Info
+		}
+	}
+	fmt.Printf("Found %d functions/methods with location info\n", len(functionRanges))
+
+	// For each function/method symbol, check its references
+	processedRefs := 0
+	for targetSymbol := range functionRanges {
+		targetSymbolDef := findSymbolDef(symbolDefs, targetSymbol)
+		if targetSymbolDef == nil {
+			continue
+		}
+
+		// For each reference to this function/method
+		for _, ref := range targetSymbolDef.Refs {
+			processedRefs++
+			if ref.IsDefinition {
+				continue // Skip the definition
+			}
+
+			// Find which function contains this reference
+			callerFunc := findContainingFunction(functionRanges, ref.FilePath, ref.StartLine)
+			if callerFunc == "" {
+				callsSkipped++
+				continue // No containing function found
+			}
+			if callerFunc == targetSymbol {
+				continue // Self-reference
+			}
+
+			// Get the Function/Method nodes for both caller and callee
+			callerNode, err := si.getFunctionNode(ctx, callerFunc)
+			if err != nil || callerNode == "" {
+				if callsCreated < 5 {
+					fmt.Printf("Debug: Could not find caller node for %s: %v\n", callerFunc, err)
+				}
+				continue
+			}
+
+			calleeNode, err := si.getFunctionNode(ctx, targetSymbol)
+			if err != nil || calleeNode == "" {
+				if callsCreated < 5 {
+					fmt.Printf("Debug: Could not find callee node for %s: %v\n", targetSymbol, err)
+				}
+				continue
+			}
+
+			// Create CALLS relationship
+			relProps := map[string]any{
+				"line":   ref.StartLine,
+				"column": ref.StartColumn,
+			}
+			_, err = si.client.CreateRelationship(ctx, callerNode, calleeNode, "CALLS", relProps)
+			if err == nil {
+				callsCreated++
+				if callsCreated <= 3 {
+					fmt.Printf("Created CALLS: %s -> %s at line %d\n", callerFunc, targetSymbol, ref.StartLine)
+				}
+			}
+		}
+	}
+	fmt.Printf("Processed %d references, created %d CALLS relationships (%d skipped - no containing function)\n",
+		processedRefs, callsCreated, callsSkipped)
+
 	fmt.Printf("Completed indexing symbols\n")
 	return nil
 }
@@ -571,6 +647,52 @@ func (si *SCIPIndexer) ValidateEnvironment() error {
 // GetLanguage returns the language this indexer is configured for
 func (si *SCIPIndexer) GetLanguage() Language {
 	return si.language
+}
+
+// findSymbolDef finds a symbol definition by symbol string
+func findSymbolDef(symbolDefs []*models.SymbolDefinition, symbol string) *models.SymbolDefinition {
+	for _, def := range symbolDefs {
+		if def.Symbol.String() == symbol {
+			return def
+		}
+	}
+	return nil
+}
+
+// findContainingFunction finds which function contains a given line in a file
+func findContainingFunction(functionRanges map[string]*models.SymbolInfo, filePath string, line int) string {
+	for symbol, info := range functionRanges {
+		if info.FilePath == filePath &&
+		   line >= info.StartLine &&
+		   line <= info.EndLine {
+			return symbol
+		}
+	}
+	return ""
+}
+
+// getFunctionNode retrieves the Function/Method node ID for a given symbol
+func (si *SCIPIndexer) getFunctionNode(ctx context.Context, scipSymbol string) (string, error) {
+	query := `
+		MATCH (sym:Symbol {symbol: $scipSymbol})
+		MATCH (sym)<-[:DEFINES]-(node)
+		WHERE node:Function OR node:Method
+		RETURN elementId(node) AS nodeId
+		LIMIT 1
+	`
+	results, err := si.client.ExecuteQuery(ctx, query, map[string]any{"scipSymbol": scipSymbol})
+	if err != nil {
+		return "", err
+	}
+	if len(results) == 0 {
+		return "", fmt.Errorf("no function node found for symbol: %s", scipSymbol)
+	}
+
+	nodeID, ok := results[0].AsMap()["nodeId"].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid node ID type")
+	}
+	return nodeID, nil
 }
 
 // calculateByteOffsets calculates the start and end byte positions for a code location

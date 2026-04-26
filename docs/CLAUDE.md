@@ -108,9 +108,124 @@ verbose: false
 ./bin/codegraph query source "functionName"
 ```
 
+## LLM Provider Architecture
+
+CodeGraph supports multiple LLM providers via a plugin architecture:
+
+- **LiteLLM** - Unified proxy for 100+ models (recommended)
+- **Google Gemini** - Direct Gemini API integration
+- **OpenAI** - Direct OpenAI API integration
+
+### LLM Configuration
+```bash
+# Using LiteLLM (access any model)
+export LLM_PROVIDER="litellm"
+export LLM_BASE_URL="http://localhost:4000"
+export LLM_API_KEY="sk-1234"
+export LLM_TEXT_MODEL="openai/gpt-4"
+export LLM_EMBEDDING_MODEL="openai/text-embedding-3-small"
+
+# Using Gemini directly
+export GEMINI_API_KEY="your-key"
+
+# Using OpenAI directly
+export LLM_PROVIDER="openai"
+export LLM_API_KEY="sk-..."
+```
+
+The LLM abstraction layer is in `pkg/llm/` with:
+- `provider.go` - Interface definition
+- `config.go` - Configuration management
+- `adapters.go` - Provider registration
+- `gemini/`, `openai/`, `litellm/` - Provider implementations
+
+## MCP Server Architecture
+
+The MCP server (`mcp-server/`) exposes 12 tools for AI assistants:
+
+**Code Intelligence:**
+- `codegraph_search` - Search symbols
+- `codegraph_get_source` - Get function source
+- `codegraph_analyze_function` - Analyze function with call graph
+
+**Document Intelligence:**
+- `codegraph_index_documents` - Index documents
+- `codegraph_show_document` - Show document with linked code
+- `codegraph_link_features` - LLM-based feature-to-code linking
+
+**Service Architecture:**
+- `codegraph_list_services` - List all services
+- `codegraph_service_dependencies` - Show DEPENDS_ON relationships
+- `codegraph_service_api_endpoints` - List API endpoints
+- `codegraph_service_api_calls` - Show API calls
+- `codegraph_cross_service_calls` - Find call chains between services
+- `codegraph_service_architecture` - Complete architecture overview
+
+## Advanced Features
+
+### API Pattern Detection
+The `pkg/indexer/static/api_analyzer.go` detects:
+- API endpoints (Express, Elysia, Go net/http, etc.)
+- HTTP calls (axios, fetch)
+- SDK calls (e.g., `stripeClient.createCharge`)
+- Creates APIRoute, HTTPCall, SDKCall nodes
+
+### Semantic Search (RFC-002)
+The platform implements semantic feature-to-code linking:
+1. Documents/features are embedded using LLM
+2. Vector similarity finds candidate functions
+3. LLM validation creates IMPLEMENTS relationships
+4. See `pkg/search/feature_linker.go` and `pkg/search/intelligent_linker.go`
+
+### Cross-Service Analysis
+The system tracks:
+- Service dependencies via DEPENDS_ON relationships
+- API calls between services via SDKCall -> TARGETS_SERVICE
+- Call chains spanning multiple services
+
+## Development Patterns
+
+### Adding New Node Types
+1. Define struct in `pkg/models/node.go`
+2. Add creation logic in `pkg/neo4j/client.go`
+3. Add constraints/indexes in `pkg/schema/schema.go`
+4. Update indexer in `pkg/indexer/static/scip_indexer.go`
+
+### Adding New Relationships
+1. Define in `pkg/models/relationship.go`
+2. Update query builder in `pkg/neo4j/query.go`
+3. Add creation logic in indexer
+
+### Batching Pattern
+Always use batched operations for bulk writes:
+```cypher
+UNWIND $batch AS item
+MERGE (n:Node {id: item.id})
+SET n += item.properties
+```
+
+## Testing
+
+Run specific tests:
+```bash
+# Single test
+go test -v ./pkg/neo4j -run TestClientConnection
+
+# Package tests
+go test -v ./pkg/indexer/static/...
+
+# Integration tests (requires Neo4j running)
+go test -v ./test/integration/...
+```
+
 ## Project Structure Notes
 
 - **cmd/codegraph/main.go** - Single main file with all CLI commands using Cobra
+- **mcp-server/main.go** - MCP server with JSON-RPC 2.0 protocol
+- **pkg/indexer/static/** - SCIP and AST indexing logic
+- **pkg/search/** - Vector search, hybrid search, feature linking
+- **pkg/llm/** - Multi-provider LLM abstraction
+- **pkg/neo4j/** - Neo4j client, query builder, batching
 - **Makefile** - Comprehensive build automation with 30+ targets
 - **docker-compose.yml** - Neo4j 5.15 with APOC plugins
 - Uses Go 1.24+ with modern dependency management

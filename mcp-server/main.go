@@ -91,7 +91,7 @@ func main() {
 	}
 	defer client.Close(context.Background())
 
-	// Initialize embedding service - require GEMINI_API_KEY
+	// Initialize embedding service - optional, use simple mock if not available
 	var embeddingService search.EmbeddingService
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
@@ -102,7 +102,8 @@ func main() {
 		embeddingService = search.NewGeminiEmbeddingService(apiKey, "gemini-embedding-001")
 		log.Printf("Using Gemini embedding service")
 	} else {
-		log.Fatalf("GEMINI_API_KEY environment variable is required for embedding functionality")
+		log.Printf("GEMINI_API_KEY not set - using simple embedding service (limited functionality)")
+		embeddingService = search.NewSimpleEmbeddingService("http://localhost:11434", "", "nomic-embed-text")
 	}
 
 	// Initialize search managers
