@@ -810,11 +810,45 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 	}
 
+	visible := tools[:0]
+	for _, t := range tools {
+		if retiredTools[t.Name] {
+			continue
+		}
+		visible = append(visible, t)
+	}
+
 	result := map[string]interface{}{
-		"tools": tools,
+		"tools": visible,
 	}
 
 	s.sendResponse(request.ID, result)
+}
+
+// retiredTools are superseded by RFC-004 primitives. Handler code is retained
+// for now; tools are hidden from tools/list and rejected in tools/call so
+// stale clients can't invoke them by name. Code deletion deferred.
+var retiredTools = map[string]bool{
+	"codegraph_search":                true, // → find
+	"codegraph_get_source":            true, // renamed → source
+	"codegraph_find_references":       true, // → expand(_, [REFERENCES], in)
+	"codegraph_analyze_function":      true, // → find + expand([CALLS]) + source
+	"codegraph_hybrid_search":         true, // doc-linking out of scope
+	"codegraph_vector_search":         true, // doc-linking out of scope
+	"codegraph_index_documents":       true, // doc-linking out of scope
+	"codegraph_search_docs":           true, // doc-linking out of scope
+	"codegraph_search_by_comment":     true, // doc-linking out of scope
+	"codegraph_link_docs_to_code":     true, // doc-linking out of scope
+	"codegraph_intelligent_link":      true, // doc-linking out of scope
+	"codegraph_list_services":         true, // → find(label=Service)
+	"codegraph_service_dependencies":  true, // → expand
+	"codegraph_service_api_endpoints": true, // → expand
+	"codegraph_service_api_calls":     true, // → expand
+	"codegraph_cross_service_calls":   true, // → path
+	"codegraph_service_architecture":  true, // → composition of find + expand
+	"codegraph_get_entry_points":      true, // renamed → entry_points
+	"codegraph_generate_flows":        true, // renamed → flows
+	"codegraph_trace_call_graph":      true, // → expand([CALLS], depth)
 }
 
 func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
@@ -822,6 +856,11 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 	paramsBytes, _ := json.Marshal(request.Params)
 	if err := json.Unmarshal(paramsBytes, &toolCall); err != nil {
 		s.sendError(request.ID, -32602, "Invalid params")
+		return
+	}
+
+	if retiredTools[toolCall.Name] {
+		s.sendError(request.ID, -32601, fmt.Sprintf("Tool %q is retired (RFC-004). Use codegraph_schema to discover the replacement primitive.", toolCall.Name))
 		return
 	}
 
