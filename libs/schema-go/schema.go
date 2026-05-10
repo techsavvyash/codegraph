@@ -160,7 +160,13 @@ func GetIndexes() []Index {
 			Properties: []string{"displayName"},
 			Type:       "BTREE",
 		},
-		// Composite indexes for common query patterns
+		// Composite indexes for common query patterns.
+		// serviceName is populated by SCIPIndexer on per-service identity nodes
+		// (File, Function, Method, Variable, Parameter, Reference) so scoped
+		// queries hit indexes directly instead of traversing the Service-CONTAINS
+		// chain. Class/Interface/Module/Symbol intentionally omitted — those
+		// merge across services on FQN-based nodeKeys, so a single serviceName
+		// property would be incoherent.
 		{
 			Name:       "file_service_path_idx",
 			NodeLabel:  "File",
@@ -168,9 +174,27 @@ func GetIndexes() []Index {
 			Type:       "BTREE",
 		},
 		{
-			Name:       "symbol_service_idx",
-			NodeLabel:  "Symbol",
-			Properties: []string{"serviceName", "kind"},
+			Name:       "function_service_idx",
+			NodeLabel:  "Function",
+			Properties: []string{"serviceName"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "method_service_idx",
+			NodeLabel:  "Method",
+			Properties: []string{"serviceName"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "variable_service_idx",
+			NodeLabel:  "Variable",
+			Properties: []string{"serviceName"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "reference_service_idx",
+			NodeLabel:  "Reference",
+			Properties: []string{"serviceName"},
 			Type:       "BTREE",
 		},
 		// nodeKey indexes for stable identity (Phase 1)

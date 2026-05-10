@@ -56,6 +56,10 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 	// Use a map for O(1) lookups instead of O(n) linear search
 	symbolMap := make(map[string]*models.SymbolDefinition)
 
+	// Identify symbols that are targets of impl relationships — these are
+	// interfaces (or interface members) and need refined kind classification.
+	interfaceLike := sp.collectInterfaceLikeSymbols()
+
 	// Process external symbols first
 	for _, symbolInfo := range sp.index.ExternalSymbols {
 		scipSymbol, err := models.ParseSCIPSymbol(symbolInfo.Symbol)
@@ -113,32 +117,51 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 			targetSymbolDef, exists := symbolMap[symbolKey]
 
 			if !exists {
-				// Create new symbol definition
+				// Create new symbol definition. Only stamp the location
+				// (FilePath/StartLine/...) when this occurrence is the
+				// actual definition. Reference-only occurrences leave the
+				// location empty so the indexer doesn't create a typed
+				// definition node (Class/Method/Variable/...) for symbols
+				// that are merely *referenced* from this project — e.g.
+				// `console`/`console.log` in TypeScript or `fmt.Println`
+				// in Go. Those still get a Symbol node + Reference nodes,
+				// just no fake "Variable named console" definition.
+				info := &models.SymbolInfo{
+					Symbol:      scipSymbol,
+					Kind:        inferSymbolKindWith(occurrence.Symbol, interfaceLike),
+					DisplayName: extractDisplayName(occurrence.Symbol),
+					Signature:   occurrence.Symbol, // SCIP symbol string drives unique nodeKey
+				}
+				if ref.IsDefinition {
+					info.FilePath = filePath
+					info.StartLine = startLine
+					info.EndLine = endLine
+					info.StartColumn = startColumn
+					info.EndColumn = endColumn
+				}
 				targetSymbolDef = &models.SymbolDefinition{
 					Symbol: scipSymbol,
-					Info: &models.SymbolInfo{
-						Symbol:      scipSymbol,
-						Kind:        inferSymbolKind(occurrence.Symbol),
-						DisplayName: extractDisplayName(occurrence.Symbol),
-						Signature:   occurrence.Symbol, // Use SCIP symbol string as signature for unique nodeKey derivation
-						FilePath:    filePath,
-						StartLine:   startLine,
-						EndLine:     endLine,
-						StartColumn: startColumn,
-						EndColumn:   endColumn,
-					},
-					Refs: []*models.SymbolReference{},
+					Info:   info,
+					Refs:   []*models.SymbolReference{},
 				}
 				symbolMap[symbolKey] = targetSymbolDef
 			} else if ref.IsDefinition {
-				// Update location to the actual definition site.
-				// Without this, the symbol inherits the location of its
-				// first reference (which may be in a different file).
-				targetSymbolDef.Info.FilePath = filePath
-				targetSymbolDef.Info.StartLine = startLine
-				targetSymbolDef.Info.EndLine = endLine
-				targetSymbolDef.Info.StartColumn = startColumn
-				targetSymbolDef.Info.EndColumn = endColumn
+				// Update location to the actual definition site. A symbol
+				// can have multiple def-occurrences (e.g. scip-go emits a
+				// def at the interface method's declaration AND at every
+				// implementation site). To stay deterministic regardless
+				// of iteration / output order, we always pick the def
+				// with the smallest (filePath, startLine, startColumn).
+				cur := targetSymbolDef.Info
+				curEmpty := cur.FilePath == ""
+				better := !curEmpty && isLocationLess(filePath, startLine, startColumn, cur.FilePath, cur.StartLine, cur.StartColumn)
+				if curEmpty || better {
+					cur.FilePath = filePath
+					cur.StartLine = startLine
+					cur.EndLine = endLine
+					cur.StartColumn = startColumn
+					cur.EndColumn = endColumn
+				}
 			}
 
 			// Add reference to symbol definition
@@ -155,20 +178,35 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 	return symbolDefs, nil
 }
 
-// shouldExcludePath checks if a file path should be excluded from indexing
+// isLocationLess reports whether (fileA, lineA, colA) sorts before
+// (fileB, lineB, colB) by lexicographic (file, line, col).
+func isLocationLess(fileA string, lineA, colA int, fileB string, lineB, colB int) bool {
+	if fileA != fileB {
+		return fileA < fileB
+	}
+	if lineA != lineB {
+		return lineA < lineB
+	}
+	return colA < colB
+}
+
+// shouldExcludePath checks if a file path should be excluded from indexing.
+// We exclude generated/build/dependency directories and test fixture trees
+// because they are not part of the production logic graph users want to
+// reason about. Real test files (e.g. *_test.go, src/**/*.test.ts) live
+// alongside the code they cover and are kept.
 func shouldExcludePath(path string) bool {
 	excludedDirs := []string{
-		"node_modules/",
-		"vendor/",
-		".git/",
-		".next/",
-		".nuxt/",
-		"dist/",
-		"build/",
-		"target/", // Maven/Gradle build output
-		"venv/",   // Python virtual env
-		".venv/",
-		"__pycache__/",
+		// Dependencies / generated.
+		"node_modules/", "vendor/", ".git/",
+		".next/", ".nuxt/", ".svelte-kit/",
+		// Build output.
+		"dist/", "build/",
+		"target/", // Maven/Gradle build output.
+		// Python.
+		"venv/", ".venv/", "__pycache__/",
+		// Test fixture data — sample inputs, not source.
+		"testdata/", "fixtures/",
 	}
 
 	for _, dir := range excludedDirs {
@@ -188,26 +226,32 @@ func (sp *SCIPParser) ExtractDocuments() ([]*models.File, error) {
 	var files []*models.File
 	totalDocs := len(sp.index.Documents)
 	excludedCount := 0
+	// scip-typescript can emit the same RelativePath twice when a source file
+	// is referenced via multiple module-resolution paths; without dedup,
+	// downstream createFileNode runs twice and CreateRelationship produces a
+	// duplicate Service→File CONTAINS edge (visible as Service→File rels=2 in
+	// Neo4j). We dedupe at this seam so every callsite below benefits.
+	seenPaths := make(map[string]bool)
 
 	for _, doc := range sp.index.Documents {
-		// Skip excluded paths like node_modules, vendor, etc.
 		if shouldExcludePath(doc.RelativePath) {
 			excludedCount++
 			continue
 		}
+		if seenPaths[doc.RelativePath] {
+			continue
+		}
+		seenPaths[doc.RelativePath] = true
 
 		file := &models.File{
 			Path:     doc.RelativePath,
 			Language: inferLanguage(doc.RelativePath),
-			// Note: SCIP doesn't provide file size, line count, or hash
-			// These would need to be computed separately if needed
 		}
-
 		files = append(files, file)
 	}
 
 	if excludedCount > 0 {
-		fmt.Printf("Filtered out %d/%d files from excluded directories (node_modules, vendor, etc.)\n", excludedCount, totalDocs)
+		fmt.Printf("Filtered out %d/%d files from excluded directories (node_modules, vendor, fixtures, .svelte-kit, etc.)\n", excludedCount, totalDocs)
 	}
 
 	return files, nil
@@ -275,44 +319,148 @@ func convertSymbolKind(scipKind scip.SymbolInformation_Kind) models.SymbolKind {
 	}
 }
 
+// inferSymbolKind classifies a SCIP symbol from its descriptor alone.
+// Calls without an interfaceLike set cannot distinguish:
+//   - Interface vs Class (both end "#")
+//   - Interface method vs struct field (both end "." with a "#" parent)
+//
+// Use inferSymbolKindWith when the SCIP relationships are available.
 func inferSymbolKind(symbol string) models.SymbolKind {
-	// Simple heuristic to infer symbol kind from SCIP symbol string
-	if strings.Contains(symbol, "#") && strings.Contains(symbol, "().") {
-		return models.MethodSymbol
-	} else if strings.Contains(symbol, "().") {
-		return models.FunctionSymbol
-	} else if strings.Contains(symbol, "#") {
-		return models.TypeSymbol
-	} else if strings.Contains(symbol, "/") {
-		return models.PackageSymbol
-	} else {
-		return models.VariableSymbol
-	}
+	return inferSymbolKindWith(symbol, nil)
 }
 
-func extractDisplayName(symbol string) string {
-	// Extract the last component as display name
-	parts := strings.Split(symbol, " ")
-	if len(parts) < 5 {
-		return symbol
-	}
-	
-	descriptor := parts[4] // SCIP format: scheme manager name version descriptor
-	
-	// Extract the actual name from the descriptor
-	if strings.Contains(descriptor, "#") {
-		// Type or method
-		parts := strings.Split(descriptor, "#")
-		if len(parts) > 1 {
-			return strings.TrimSuffix(parts[len(parts)-1], "()")
+// inferSymbolKindWith refines kind classification using the set of symbols that
+// are targets of is_implementation_of relationships (i.e. "interface-like").
+// In Go, scip-go does not tag interfaces explicitly — we infer them from the
+// fact that something implements them.
+func inferSymbolKindWith(symbol string, interfaceLike map[string]bool) models.SymbolKind {
+	descriptor := scipDescriptor(symbol)
+
+	switch {
+	case strings.HasSuffix(descriptor, "/"):
+		return models.PackageSymbol
+
+	case strings.HasSuffix(descriptor, "()."):
+		if strings.Contains(descriptor, "#") {
+			return models.MethodSymbol
 		}
-	} else if strings.Contains(descriptor, "/") {
-		// Package
-		parts := strings.Split(descriptor, "/")
+		return models.FunctionSymbol
+
+	case strings.HasSuffix(descriptor, "#"):
+		if interfaceLike[symbol] {
+			return models.InterfaceSymbol
+		}
+		return models.TypeSymbol
+
+	case strings.HasSuffix(descriptor, "."):
+		// Term descriptor: a "." child is either a struct field or an
+		// interface method, depending on whether anything implements it.
+		if strings.Contains(descriptor, "#") {
+			if interfaceLike[symbol] {
+				return models.MethodSymbol
+			}
+			return models.FieldSymbol
+		}
+		return models.VariableSymbol
+	}
+
+	return models.VariableSymbol
+}
+
+// scipDescriptor returns the descriptor portion of a SCIP symbol string.
+// SCIP format is: "scheme manager name version descriptor" (5 space-separated
+// parts). Falls back to the whole symbol for shorter forms like "local 0".
+func scipDescriptor(symbol string) string {
+	parts := strings.Split(symbol, " ")
+	if len(parts) >= 5 {
 		return parts[len(parts)-1]
 	}
-	
-	return descriptor
+	return symbol
+}
+
+// collectInterfaceLikeSymbols returns the set of SCIP symbols that appear as
+// the target of any is_implementation_of relationship anywhere in the index.
+// In Go semantics, a type that something implements is by definition an
+// interface; an interface method is the corresponding "."-terminated target.
+func (sp *SCIPParser) collectInterfaceLikeSymbols() map[string]bool {
+	out := make(map[string]bool)
+	if sp.index == nil {
+		return out
+	}
+	add := func(infos []*scip.SymbolInformation) {
+		for _, info := range infos {
+			for _, rel := range info.Relationships {
+				if rel.IsImplementation && rel.Symbol != "" {
+					out[rel.Symbol] = true
+				}
+			}
+		}
+	}
+	add(sp.index.ExternalSymbols)
+	for _, doc := range sp.index.Documents {
+		add(doc.Symbols)
+	}
+	return out
+}
+
+// extractDisplayName returns the human-readable name of a SCIP symbol.
+// Examples (with surrounding scheme prefix omitted for brevity):
+//
+//	`pkg`/Greeter#                  → "Greeter"
+//	`pkg`/EnglishGreeter#Greet().   → "Greet"
+//	`pkg`/EnglishGreeter#Prefix.    → "Prefix"
+//	`pkg`/main().                   → "main"
+//	`pkg`/                          → "pkg"  (last segment, backticks stripped)
+//	`pkg`/Foo#`<constructor>`().    → "<constructor>"
+//	`pkg`/greet().(logger)          → "logger"  (parameter descriptor)
+func extractDisplayName(symbol string) string {
+	descriptor := scipDescriptor(symbol)
+	name := descriptor
+
+	// Parameter descriptor `(<name>)` always ends in ")" but is NOT a method
+	// terminator (those end in "()." or bare "()"). Extract the parameter name
+	// from between the last `(` and trailing `)`.
+	if strings.HasSuffix(name, ")") && !strings.HasSuffix(name, "().") && !strings.HasSuffix(name, "()") {
+		if i := strings.LastIndex(name, "("); i >= 0 {
+			return strings.Trim(name[i+1:len(name)-1], "`")
+		}
+	}
+
+	// Strip the terminator so the remaining name is at the trailing edge.
+	// SCIP method/function descriptors normally end "()." but some legacy
+	// inputs end "()"; handle both. ":" is the meta descriptor terminator
+	// (used by scip-typescript for object-literal property keys).
+	switch {
+	case strings.HasSuffix(name, "()."):
+		name = strings.TrimSuffix(name, "().")
+	case strings.HasSuffix(name, "()"):
+		name = strings.TrimSuffix(name, "()")
+	case strings.HasSuffix(name, "/"):
+		name = strings.TrimSuffix(name, "/")
+	case strings.HasSuffix(name, "#"):
+		name = strings.TrimSuffix(name, "#")
+	case strings.HasSuffix(name, "."):
+		name = strings.TrimSuffix(name, ".")
+	case strings.HasSuffix(name, ":"):
+		name = strings.TrimSuffix(name, ":")
+	}
+
+	// Member-of-type wins: take what follows the last "#" if present.
+	// Trim backticks since names like `<constructor>` are wrapped in them.
+	if i := strings.LastIndex(name, "#"); i >= 0 {
+		return strings.Trim(name[i+1:], "`")
+	}
+	// SCIP wraps multi-segment package paths in backticks: `a/b/c`. After
+	// trimming a trailing terminator we may be left with the bare backtick
+	// form — strip surrounds and treat the inside as a path.
+	if strings.HasPrefix(name, "`") && strings.HasSuffix(name, "`") {
+		name = strings.Trim(name, "`")
+	}
+	// Take the trailing path segment.
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		return strings.Trim(name[i+1:], "`")
+	}
+	return strings.Trim(name, "`")
 }
 
 func extractSignature(symbolInfo *scip.SymbolInformation) string {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -47,6 +48,15 @@ type SCIPIndexer struct {
 	vectorStore         search.VectorStore
 	textStore           textindex.TextIndexStore
 	skipSecondaryStores bool // true for sub-indexers in polyglot mode
+	// skipDependencyResolution defers the DEPENDS_ON-creation pass so the
+	// polyglot orchestrator can run it once at the end, after every sibling
+	// service exists in Neo4j (otherwise early sub-indexes resolve against an
+	// empty service set and produce zero edges).
+	skipDependencyResolution bool
+	// pendingImports holds parsed imports captured during IndexProject when
+	// skipDependencyResolution is true; the polyglot post-pass drains it.
+	pendingImports   []*models.PackageImport
+	pendingServiceID string
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -187,7 +197,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		fmt.Printf("Extracted %d SCIP relationships (%d implementation)\n", len(scipRels), implCount)
 
 		if implCount > 0 {
-			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey)
+			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
 			if len(batch) > 0 {
 				if err := si.client.CreateRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
 					fmt.Printf("Warning: failed to create IMPLEMENTS relationships: %v\n", err)
@@ -214,7 +224,11 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		fmt.Printf("Warning: failed to extract imports: %v\n", err)
 	} else {
 		fmt.Printf("Extracted %d import statements\n", len(imports))
-		if err := si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
+		if si.skipDependencyResolution {
+			si.pendingImports = imports
+			si.pendingServiceID = serviceID
+			fmt.Println("Deferring DEPENDS_ON resolution to polyglot post-pass")
+		} else if err := si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
 			fmt.Printf("Warning: failed to index package dependencies: %v\n", err)
 		}
 	}
@@ -385,6 +399,7 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	_ = installed
 
 	// Index each root.
+	var indexedSubs []indexedSub
 	var errs []error
 	for _, r := range roots {
 		if _, didFail := failed[r.Language]; didFail {
@@ -415,12 +430,21 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 		sub.SetVectorStore(si.vectorStore)
 		sub.SetTextStore(si.textStore)
 		sub.skipSecondaryStores = true
+		// Defer DEPENDS_ON resolution so all sibling services exist before
+		// any of them try to resolve imports against the service catalog.
+		sub.skipDependencyResolution = true
 
 		if err := sub.IndexProject(ctx, r.Path); err != nil {
 			fmt.Printf("Warning: %s indexing at %s failed: %v\n", cfg.DisplayName, rel, err)
 			errs = append(errs, fmt.Errorf("%s@%s: %w", r.Language, rel, err))
+			continue
 		}
+		indexedSubs = append(indexedSubs, indexedSub{indexer: sub})
 	}
+
+	// Resolve DEPENDS_ON edges after every root is indexed so cross-service
+	// references can find their targets.
+	si.resolveDeferredDependencies(ctx, indexedSubs)
 
 	// Populate secondary stores once after all roots are indexed.
 	if si.embeddingService != nil && si.vectorStore != nil {
@@ -598,14 +622,11 @@ func (si *SCIPIndexer) detectWorkspaceType(projectPath string) string {
 
 // createServiceNode creates the service node in Neo4j
 func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string) (string, error) {
-	// Try to extract actual package name from package.json for TypeScript/JavaScript
-	actualPackageName := si.serviceName
-	if si.language == LanguageTypeScript || si.language == LanguageJavaScript {
-		if npmName := si.extractNPMPackageName(projectPath); npmName != "" {
-			actualPackageName = npmName
-			fmt.Printf("Detected NPM package name: %s\n", npmName)
-		}
-	}
+	// packageName must hold the canonical identifier that imports of this service
+	// resolve to (Go module path, NPM package name, Python distribution name).
+	// indexPackageDependencies matches imp.TargetPackage against Service.packageName,
+	// so a wrong value here breaks the entire DEPENDS_ON graph.
+	actualPackageName := si.detectPackageName(projectPath)
 
 	nodeKey := models.ServiceNodeKey(si.serviceName)
 	serviceProps := map[string]any{
@@ -621,6 +642,88 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 
 	return si.client.MergeNode(ctx, []string{"Service"},
 		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, serviceProps)
+}
+
+// detectPackageName returns the canonical import-resolution path for the service,
+// per language manifest. Falls back to serviceName when no manifest is found.
+func (si *SCIPIndexer) detectPackageName(projectPath string) string {
+	switch si.language {
+	case LanguageGo:
+		if mod := extractGoModulePath(projectPath); mod != "" {
+			fmt.Printf("Detected Go module path: %s\n", mod)
+			return mod
+		}
+	case LanguageTypeScript, LanguageJavaScript:
+		if npm := si.extractNPMPackageName(projectPath); npm != "" {
+			fmt.Printf("Detected NPM package name: %s\n", npm)
+			return npm
+		}
+	case LanguagePython:
+		if py := extractPythonPackageName(projectPath); py != "" {
+			fmt.Printf("Detected Python package name: %s\n", py)
+			return py
+		}
+	}
+	return si.serviceName
+}
+
+// extractGoModulePath reads go.mod and returns the value of the `module` directive.
+// Returns "" if go.mod is missing or unparseable.
+func extractGoModulePath(projectPath string) string {
+	data, err := os.ReadFile(filepath.Join(projectPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "module ") {
+			continue
+		}
+		mod := strings.TrimSpace(strings.TrimPrefix(line, "module"))
+		// Strip optional inline comment and surrounding quotes.
+		if i := strings.Index(mod, "//"); i >= 0 {
+			mod = strings.TrimSpace(mod[:i])
+		}
+		mod = strings.Trim(mod, `"`)
+		return mod
+	}
+	return ""
+}
+
+// extractPythonPackageName reads pyproject.toml and returns the [project].name value.
+// Falls back to top-level `name = "..."` outside any [project] table for setup-style files.
+// Returns "" if no name is found.
+func extractPythonPackageName(projectPath string) string {
+	data, err := os.ReadFile(filepath.Join(projectPath, "pyproject.toml"))
+	if err != nil {
+		return ""
+	}
+	var inProject bool
+	var nameRegex = []byte(`name`)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inProject = trimmed == "[project]"
+			continue
+		}
+		if !inProject {
+			continue
+		}
+		// Match `name = "..."` (TOML basic string).
+		if !strings.HasPrefix(trimmed, string(nameRegex)) {
+			continue
+		}
+		eq := strings.Index(trimmed, "=")
+		if eq < 0 {
+			continue
+		}
+		val := strings.TrimSpace(trimmed[eq+1:])
+		val = strings.Trim(val, `"'`)
+		if val != "" {
+			return val
+		}
+	}
+	return ""
 }
 
 // extractNPMPackageName reads package.json and extracts the package name
@@ -644,7 +747,7 @@ func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
 
 // createFileNode creates a file node in Neo4j
 func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, serviceID string) (string, error) {
-	nodeKey := models.FileNodeKey(file.Path)
+	nodeKey := models.FileNodeKey(si.serviceName, file.Path)
 	fileProps := map[string]any{
 		"path":         file.Path,
 		"nodeKey":      nodeKey,
@@ -654,6 +757,7 @@ func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, se
 		"lineCount":    0,
 		"scope":        si.scopeCtx.Scope,
 		"scopeId":      si.scopeCtx.ScopeID,
+		"serviceName":  si.serviceName,
 	}
 
 	fileID, err := si.client.MergeNode(ctx, []string{"File"},
@@ -696,21 +800,21 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 
 	switch label {
 	case "Function":
-		nodeKey = models.FunctionNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+		nodeKey = models.FunctionNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature)
 	case "Method":
-		nodeKey = models.MethodNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+		nodeKey = models.MethodNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature)
 	case "Class":
-		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName)
 	case "Interface":
-		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName)
 	case "Variable":
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+		nodeKey = models.VariableNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
 	case "Parameter":
-		nodeKey = models.ParameterNodeKey(symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
+		nodeKey = models.ParameterNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
 	case "Module":
 		nodeKey = models.ModuleNodeKey(symbolInfo.Symbol.String())
 	default:
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+		nodeKey = models.VariableNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
 	}
 
 	props = map[string]any{
@@ -724,6 +828,18 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		"endColumn":   symbolInfo.EndColumn,
 		"scope":       si.scopeCtx.Scope,
 		"scopeId":     si.scopeCtx.ScopeID,
+	}
+
+	// Per-service identity nodes carry serviceName so scoped queries can hit
+	// (n {serviceName: $svc}) directly instead of traversing the
+	// CONTAINS chain from the Service node. Class/Interface/Module are
+	// intentionally omitted: their nodeKeys derive from globally-unique SCIP
+	// FQNs and the same node is MERGEd from multiple services — a single
+	// serviceName property on a shared node would be incoherent (last-writer
+	// wins). Cross-service joins for those types go through SymbolNodeKey.
+	switch label {
+	case "Function", "Method", "Variable", "Parameter":
+		props["serviceName"] = si.serviceName
 	}
 
 	if label == "Function" || label == "Method" {
@@ -746,7 +862,7 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 	switch label {
 	case "Function", "Method":
 		props["returnType"] = ""
-		props["isExported"] = true
+		props["isExported"] = si.computeIsExported(symbolInfo.DisplayName)
 		props["complexity"] = 1
 		props["docstring"] = symbolInfo.Documentation
 		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
@@ -761,6 +877,21 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 	}
 
 	return label, nodeKey, props
+}
+
+// computeIsExported returns whether a symbol's display name marks it as
+// exported in its source language. For Go we use the leading-uppercase
+// convention (ast.IsExported equivalent). For other languages SCIP doesn't
+// give us a visibility modifier directly, so we conservatively return true
+// (matches the prior hardcoded behavior for those languages).
+func (si *SCIPIndexer) computeIsExported(displayName string) bool {
+	if displayName == "" {
+		return false
+	}
+	if si.language == LanguageGo {
+		return unicode.IsUpper(rune(displayName[0]))
+	}
+	return true
 }
 
 const batchSize = 500
@@ -983,7 +1114,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			if ref.IsDefinition {
 				continue
 			}
-			nk := models.ReferenceNodeKey(ref.FilePath, ref.StartLine, ref.StartColumn)
+			nk := models.ReferenceNodeKey(si.serviceName, ref.FilePath, ref.StartLine, ref.StartColumn)
 			refItems = append(refItems, refItem{
 				nodeKey: nk,
 				props: map[string]any{
@@ -996,6 +1127,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 					"context":     ref.Context,
 					"scope":       si.scopeCtx.Scope,
 					"scopeId":     si.scopeCtx.ScopeID,
+					"serviceName": si.serviceName,
 				},
 				symbolNodeKey: symNK,
 				filePath:      ref.FilePath,
@@ -1050,18 +1182,33 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 	tRelReferences := time.Since(t)
 
-	// 3. Batch create CONTAINS rels (fileID → refID)
+	// 3. Batch create CONTAINS rels (fileID → refID).
+	// refItems contains one entry per (symbol, reference) pair; the same
+	// Reference node can appear under multiple symbols (e.g. an identifier
+	// occurrence that satisfies both a definition and an import). Without
+	// deduping by (fileID, refID), CreateRelsBatch produces N parallel CONTAINS
+	// edges between the same File and Reference (visible as File→Reference
+	// rels=2..23 in Neo4j). We dedupe before the batch since CONTAINS is a
+	// boolean structural fact — there is no per-edge data to preserve.
+	type fileRefKey struct{ fromID, toID string }
+	seenContains := make(map[fileRefKey]bool, len(refItems))
 	var refContainsRels []map[string]any
 	for _, ri := range refItems {
 		refID, ok1 := refIDs[ri.nodeKey]
 		fileID, ok2 := fileNodes[ri.filePath]
-		if ok1 && ok2 {
-			refContainsRels = append(refContainsRels, map[string]any{
-				"fromId": fileID,
-				"toId":   refID,
-				"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
-			})
+		if !ok1 || !ok2 {
+			continue
 		}
+		key := fileRefKey{fromID: fileID, toID: refID}
+		if seenContains[key] {
+			continue
+		}
+		seenContains[key] = true
+		refContainsRels = append(refContainsRels, map[string]any{
+			"fromId": fileID,
+			"toId":   refID,
+			"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
+		})
 	}
 
 	t = time.Now()
@@ -1087,6 +1234,36 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}, nil
 }
 
+// indexedSub holds a polyglot sub-indexer whose dependency resolution has been
+// deferred to the post-pass. The sub-indexer itself carries the captured
+// imports and service ID.
+type indexedSub struct {
+	indexer *SCIPIndexer
+}
+
+// resolveDeferredDependencies runs the DEPENDS_ON resolver for each polyglot
+// sub-indexer after all sibling services have been written to Neo4j. We need
+// the post-pass because indexPackageDependencies matches imports against the
+// service catalog at query time — running it eagerly per-root produces zero
+// edges for the first root (catalog is empty) and incomplete edges for the
+// middle roots.
+func (si *SCIPIndexer) resolveDeferredDependencies(ctx context.Context, subs []indexedSub) {
+	if len(subs) == 0 {
+		return
+	}
+	fmt.Println("\n=== Resolving cross-service DEPENDS_ON edges ===")
+	for _, s := range subs {
+		if s.indexer.pendingServiceID == "" {
+			// Indexing failed before serviceNode was created; nothing to resolve.
+			continue
+		}
+		if err := s.indexer.indexPackageDependencies(ctx,
+			s.indexer.pendingImports, s.indexer.pendingServiceID); err != nil {
+			fmt.Printf("Warning: deferred dep resolution failed for %s: %v\n", s.indexer.serviceName, err)
+		}
+	}
+}
+
 // indexPackageDependencies creates DEPENDS_ON relationships between services based on imports
 func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*models.PackageImport, serviceID string) error {
 	if len(imports) == 0 {
@@ -1103,33 +1280,45 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 		}
 	}
 
+	// Match strategy (longest match wins):
+	//   1. Exact match on s.packageName (canonical module path).
+	//   2. Subpackage import: $packageName starts with s.packageName + '/'
+	//      (e.g. importing ".../libs/core-models-go/foo" hits the
+	//      core-models-go service whose packageName is the parent module).
+	//
+	// The previous bidirectional CONTAINS branches are intentionally removed:
+	//   - "$packageName CONTAINS s.packageName" matched any service whose
+	//     packageName was a substring anywhere in the import (false positives
+	//     like 'go' matching '.../go-something').
+	//   - "s.packageName CONTAINS $packageName" matched the root-module service
+	//     for every sub-module import.
+	// Both produced silent mis-attribution of dependencies.
+	const targetServiceQuery = `
+		MATCH (s:Service)
+		WHERE s.scopeId = $scopeId
+		  AND s.packageName IS NOT NULL
+		  AND s.packageName <> ''
+		  AND (s.packageName = $packageName
+		       OR $packageName STARTS WITH (s.packageName + '/'))
+		RETURN elementId(s) AS id, s.name AS name, s.packageName AS packageName
+		ORDER BY
+			CASE WHEN s.packageName = $packageName THEN 0 ELSE 1 END,
+			size(s.packageName) DESC
+		LIMIT 1
+	`
+
 	createdCount := 0
-
-	// Create DEPENDS_ON relationships for each external package
+	// Multiple distinct import paths can resolve to the same target service
+	// (e.g. .../libs/llm-go/foo and .../libs/llm-go/bar both hit llm-go's
+	// subpackage match). Without this dedup we emit one DEPENDS_ON per
+	// import path, producing 4× duplicates in the graph.
+	linkedTargets := make(map[string]bool, len(packageMap))
 	for packageName, count := range packageMap {
-		// Try to find the target service by package name or service name
-		// Multiple matching strategies:
-		// 1. Exact packageName match
-		// 2. Service name in package (e.g., "@try-veil/veil-gateway" matches "veil-gateway")
-		// 3. Package contains service name
-		targetServiceQuery := `
-			MATCH (s:Service)
-			WHERE s.packageName = $packageName
-			   OR s.name = $packageName
-			   OR $packageName CONTAINS s.packageName
-			   OR s.packageName CONTAINS $packageName
-			RETURN elementId(s) AS id, s.name AS name, s.packageName AS packageName
-			ORDER BY
-				CASE
-					WHEN s.packageName = $packageName THEN 0
-					WHEN s.name = $packageName THEN 1
-					ELSE 2
-				END
-			LIMIT 1
-		`
-
 		result, err := si.client.ExecuteQuery(ctx, targetServiceQuery,
-			map[string]any{"packageName": packageName})
+			map[string]any{
+				"packageName": packageName,
+				"scopeId":     si.scopeCtx.ScopeID,
+			})
 
 		if err != nil || len(result) == 0 {
 			// Target service not indexed yet, log and skip
@@ -1144,6 +1333,12 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 		if targetServiceID == serviceID {
 			continue
 		}
+
+		// Skip if we've already linked this target from this source.
+		if linkedTargets[targetServiceID] {
+			continue
+		}
+		linkedTargets[targetServiceID] = true
 
 		// Create DEPENDS_ON relationship
 		relProps := map[string]any{

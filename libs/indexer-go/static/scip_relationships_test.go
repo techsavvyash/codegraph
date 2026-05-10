@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/sourcegraph/scip/bindings/go/scip"
 	"google.golang.org/protobuf/proto"
 )
@@ -528,7 +529,7 @@ func TestBuildImplementsBatch(t *testing.T) {
 		"scip-go gomod example.com v1 `pkg`/SomeInterface#Method().": "method:iface.go#scip-go gomod example.com v1 `pkg`/SomeInterface#Method().",
 	}
 
-	batch := buildImplementsBatch(rels, symbolIDs, defIDs, symbolToDefKey)
+	batch := buildImplementsBatch(rels, symbolIDs, defIDs, symbolToDefKey, models.DefaultScope())
 
 	// Expected:
 	// 1. Neo4jStore#GetNode -> GraphStore#GetNode: both have defs, so def:1 -> def:2
@@ -566,12 +567,12 @@ func TestBuildImplementsBatch(t *testing.T) {
 
 // TestBuildImplementsBatch_Empty verifies no batch items for empty input.
 func TestBuildImplementsBatch_Empty(t *testing.T) {
-	batch := buildImplementsBatch(nil, nil, nil, nil)
+	batch := buildImplementsBatch(nil, nil, nil, nil, models.DefaultScope())
 	if len(batch) != 0 {
 		t.Errorf("expected 0 batch items for nil input, got %d", len(batch))
 	}
 
-	batch = buildImplementsBatch([]SCIPRelationship{}, map[string]string{}, map[string]string{}, map[string]string{})
+	batch = buildImplementsBatch([]SCIPRelationship{}, map[string]string{}, map[string]string{}, map[string]string{}, models.DefaultScope())
 	if len(batch) != 0 {
 		t.Errorf("expected 0 batch items for empty input, got %d", len(batch))
 	}

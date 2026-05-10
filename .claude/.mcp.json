@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "./bin/codegraph-mcp",
+      "cwd": "/home/techsavvyash/sweatAndBlood/context/codegraph"
+    }
+  }
+}

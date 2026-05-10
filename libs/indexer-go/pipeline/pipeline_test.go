@@ -195,8 +195,8 @@ func TestPipeline_ContextCancellation(t *testing.T) {
 
 func TestDefaultStages_Count(t *testing.T) {
 	stages := DefaultStages()
-	if len(stages) != 7 {
-		t.Fatalf("expected 7 default stages, got %d", len(stages))
+	if len(stages) != 8 {
+		t.Fatalf("expected 8 default stages, got %d", len(stages))
 	}
 }
 
@@ -204,6 +204,7 @@ func TestDefaultStages_Names(t *testing.T) {
 	stages := DefaultStages()
 	expectedNames := []StageName{
 		StageIngestCode,
+		StageComputeGraphMetrics,
 		StageInferServiceDeps,
 		StageGenerateFlowSpines,
 		StageIngestDocuments,
@@ -212,6 +213,9 @@ func TestDefaultStages_Names(t *testing.T) {
 		StageRefreshRetrievalIndexes,
 	}
 
+	if len(stages) != len(expectedNames) {
+		t.Fatalf("stage count drift: expected %d names, got %d stages", len(expectedNames), len(stages))
+	}
 	for i, stage := range stages {
 		if stage.Name() != expectedNames[i] {
 			t.Errorf("stage %d: expected name %q, got %q", i, expectedNames[i], stage.Name())
@@ -248,28 +252,21 @@ func TestDefaultStages_OptionalFlags(t *testing.T) {
 
 func TestDefaultTiers_Count(t *testing.T) {
 	tiers := DefaultTiers()
-	if len(tiers) != 4 {
-		t.Fatalf("expected 4 tiers, got %d", len(tiers))
+	if len(tiers) != 5 {
+		t.Fatalf("expected 5 tiers, got %d", len(tiers))
 	}
 }
 
 func TestDefaultTiers_StageDistribution(t *testing.T) {
 	tiers := DefaultTiers()
-	// Tier 0: 1 stage (IngestCode)
-	if len(tiers[0].Stages) != 1 {
-		t.Errorf("tier 0: expected 1 stage, got %d", len(tiers[0].Stages))
+	expected := []int{1, 1, 3, 2, 1} // IngestCode | Metrics | (Deps,Flows,Docs) | (Link,Generate) | Refresh
+	if len(tiers) != len(expected) {
+		t.Fatalf("expected %d tiers, got %d", len(expected), len(tiers))
 	}
-	// Tier 1: 3 stages (InferServiceDeps, GenerateFlowSpines, IngestDocuments)
-	if len(tiers[1].Stages) != 3 {
-		t.Errorf("tier 1: expected 3 stages, got %d", len(tiers[1].Stages))
-	}
-	// Tier 2: 2 stages (LinkDocumentChunks, GenerateContextDocs)
-	if len(tiers[2].Stages) != 2 {
-		t.Errorf("tier 2: expected 2 stages, got %d", len(tiers[2].Stages))
-	}
-	// Tier 3: 1 stage (RefreshRetrievalIndexes)
-	if len(tiers[3].Stages) != 1 {
-		t.Errorf("tier 3: expected 1 stage, got %d", len(tiers[3].Stages))
+	for i, want := range expected {
+		if got := len(tiers[i].Stages); got != want {
+			t.Errorf("tier %d: expected %d stages, got %d", i, want, got)
+		}
 	}
 }
 
@@ -279,8 +276,8 @@ func TestDefaultTiers_TotalStagesMatch(t *testing.T) {
 	for _, tier := range tiers {
 		total += len(tier.Stages)
 	}
-	if total != 7 {
-		t.Errorf("expected 7 total stages across tiers, got %d", total)
+	if total != len(DefaultStages()) {
+		t.Errorf("tier stage total %d should equal DefaultStages count %d", total, len(DefaultStages()))
 	}
 }
 

@@ -148,6 +148,65 @@ func TestReadModulePathMalformed(t *testing.T) {
 	}
 }
 
+// TestParseFuncRangesClosureVar locks the C2 fix: top-level
+// `var X = func(...){}` must be returned as a funcRange with
+// IsClosureVar=true so that calls inside the closure body get
+// attributed to X (and the var node can be promoted to :Function
+// for cross-file caller resolution).
+func TestParseFuncRangesClosureVar(t *testing.T) {
+	dir := t.TempDir()
+	src := `package example
+
+import "fmt"
+
+func host() {
+	buildManager()
+}
+
+var buildManager = func() error {
+	fmt.Println("called")
+	return nil
+}
+
+var notAFunc = 42
+`
+	tmpFile := filepath.Join(dir, "closure.go")
+	if err := os.WriteFile(tmpFile, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ranges, err := parseFuncRanges(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect: host (FuncDecl) + buildManager (closure-var); notAFunc must NOT
+	// appear (not a FuncLit value).
+	if len(ranges) != 2 {
+		t.Fatalf("expected 2 ranges, got %d: %+v", len(ranges), ranges)
+	}
+	var host, bm *funcRange
+	for i := range ranges {
+		switch ranges[i].Name {
+		case "host":
+			host = &ranges[i]
+		case "buildManager":
+			bm = &ranges[i]
+		}
+	}
+	if host == nil || host.IsClosureVar {
+		t.Errorf("host: want FuncDecl, got %+v", host)
+	}
+	if bm == nil {
+		t.Fatalf("buildManager closure-var range missing")
+	}
+	if !bm.IsClosureVar {
+		t.Errorf("buildManager: want IsClosureVar=true, got false")
+	}
+	// Body should span the FuncLit braces, not the var keyword line.
+	if bm.StartLine != 9 || bm.EndLine != 12 {
+		t.Errorf("buildManager body range: got %d-%d, want 9-12", bm.StartLine, bm.EndLine)
+	}
+}
+
 func TestParseFuncRangesInvalidFile(t *testing.T) {
 	_, err := parseFuncRanges("/nonexistent/path.go")
 	if err == nil {

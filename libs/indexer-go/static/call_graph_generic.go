@@ -164,7 +164,12 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 
 		_, err := cg.client.MergeRelationship(ctx, caller.ID, ref.targetID,
 			string(models.CallsRel), nil,
-			map[string]any{"line": ref.line, "filePath": filePath})
+			map[string]any{
+				"line":     ref.line,
+				"filePath": filePath,
+				"scope":    cg.scopeCtx.Scope,
+				"scopeId":  cg.scopeCtx.ScopeID,
+			})
 		if err != nil {
 			continue
 		}

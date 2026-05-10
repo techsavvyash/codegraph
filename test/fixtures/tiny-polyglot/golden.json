@@ -1,0 +1,3121 @@
+{
+  "nodes": [
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 12,
+        "endLine": 4,
+        "filePath": "server.go",
+        "fqn": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+        "isAbstract": false,
+        "name": "Handler",
+        "nodeKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+        "startColumn": 5,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 23,
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "fqn": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+        "isAbstract": false,
+        "name": "HttpClient",
+        "nodeKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+        "startColumn": 13,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:server.go",
+      "props": {
+        "absolutePath": "server.go",
+        "hash": "",
+        "language": "Go",
+        "lineCount": 0,
+        "nodeKey": "file:server.go",
+        "path": "server.go",
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:src/index.ts",
+      "props": {
+        "absolutePath": "src/index.ts",
+        "hash": "",
+        "language": "TypeScript",
+        "lineCount": 0,
+        "nodeKey": "file:src/index.ts",
+        "path": "src/index.ts",
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 9,
+        "endLine": 16,
+        "filePath": "server.go",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "main",
+        "nodeKey": "func:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+        "outDegree": 1,
+        "paramTypes": [],
+        "receiverType": "",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+        "startColumn": 5,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 19,
+        "endLine": 10016,
+        "filePath": "src/index.ts",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "main",
+        "nodeKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+        "outDegree": 2,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+        "startColumn": 15,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Interface"
+      ],
+      "nodeKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "endColumn": 23,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "name": "Client",
+        "nodeKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+        "startColumn": 17,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 23,
+        "endLine": 11,
+        "filePath": "server.go",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "Handle",
+        "nodeKey": "method:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+        "outDegree": 0,
+        "paramTypes": [
+          "string"
+        ],
+        "receiverType": "Handler",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+        "startColumn": 17,
+        "startLine": 9
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 6,
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "send",
+        "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+        "startColumn": 2,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 13,
+        "endLine": 6,
+        "filePath": "src/index.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "\u003cconstructor\u003e",
+        "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+        "startColumn": 2,
+        "startLine": 5
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 12,
+        "endLine": 15,
+        "filePath": "src/index.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "send",
+        "nodeKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+        "startColumn": 8,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+      "props": {
+        "endColumn": 12,
+        "endLine": 0,
+        "filePath": "server.go",
+        "name": "backend",
+        "nodeKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+        "startColumn": 8,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+      "props": {
+        "endColumn": 0,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "name": "index.ts",
+        "nodeKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+        "startColumn": 0,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:13:14",
+      "props": {
+        "context": "",
+        "endColumn": 18,
+        "endLine": 13,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:13:14",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 14,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:13:6",
+      "props": {
+        "context": "",
+        "endColumn": 13,
+        "endLine": 13,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:13:6",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 6,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:14:1",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 14,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:14:1",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 1,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:14:15",
+      "props": {
+        "context": "",
+        "endColumn": 21,
+        "endLine": 14,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:14:15",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 15,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:14:5",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 14,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:14:5",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 5,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:2:8",
+      "props": {
+        "context": "",
+        "endColumn": 11,
+        "endLine": 2,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:2:8",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 8,
+        "startLine": 2
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:8:8",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 8,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:8:8",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 8,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:9:12",
+      "props": {
+        "context": "",
+        "endColumn": 19,
+        "endLine": 9,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:9:12",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 12,
+        "startLine": 9
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:9:40",
+      "props": {
+        "context": "",
+        "endColumn": 44,
+        "endLine": 9,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:9:40",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 40,
+        "startLine": 9
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:server.go:9:8",
+      "props": {
+        "context": "",
+        "endColumn": 11,
+        "endLine": 9,
+        "filePath": "server.go",
+        "nodeKey": "ref:server.go:9:8",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 8,
+        "startLine": 9
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:10:12",
+      "props": {
+        "context": "",
+        "endColumn": 19,
+        "endLine": 10,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:10:12",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 12,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:12:15",
+      "props": {
+        "context": "",
+        "endColumn": 19,
+        "endLine": 12,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:12:15",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 15,
+        "startLine": 12
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:16:23",
+      "props": {
+        "context": "",
+        "endColumn": 30,
+        "endLine": 16,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:16:23",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 23,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:17:16",
+      "props": {
+        "context": "",
+        "endColumn": 22,
+        "endLine": 17,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:17:16",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 16,
+        "startLine": 17
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:17:29",
+      "props": {
+        "context": "",
+        "endColumn": 39,
+        "endLine": 17,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:17:29",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 29,
+        "startLine": 17
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:18:32",
+      "props": {
+        "context": "",
+        "endColumn": 36,
+        "endLine": 18,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:18:32",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 32,
+        "startLine": 18
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:19:10",
+      "props": {
+        "context": "",
+        "endColumn": 13,
+        "endLine": 19,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:19:10",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 10,
+        "startLine": 19
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:19:2",
+      "props": {
+        "context": "",
+        "endColumn": 9,
+        "endLine": 19,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:19:2",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 2,
+        "startLine": 19
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:1:25",
+      "props": {
+        "context": "",
+        "endColumn": 32,
+        "endLine": 1,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:1:25",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 25,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:22:0",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 22,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:22:0",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 0,
+        "startLine": 22
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:4:35",
+      "props": {
+        "context": "",
+        "endColumn": 41,
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:4:35",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 35,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:7:31",
+      "props": {
+        "context": "",
+        "endColumn": 38,
+        "endLine": 7,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:7:31",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 31,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:8:22",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 8,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:8:22",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 22,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:8:36",
+      "props": {
+        "context": "",
+        "endColumn": 43,
+        "endLine": 8,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:8:36",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 36,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Service"
+      ],
+      "nodeKey": "svc:polyglot/backend",
+      "props": {
+        "language": "Go",
+        "name": "polyglot/backend",
+        "nodeKey": "svc:polyglot/backend",
+        "packageName": "polyglot/backend",
+        "repositoryUrl": "https://example.com/polyglot",
+        "scope": "main",
+        "scopeId": "main",
+        "version": "v0.0.0"
+      }
+    },
+    {
+      "labels": [
+        "Service"
+      ],
+      "nodeKey": "svc:polyglot/frontend",
+      "props": {
+        "language": "TypeScript",
+        "name": "polyglot/frontend",
+        "nodeKey": "svc:polyglot/frontend",
+        "packageName": "tiny-polyglot-frontend",
+        "repositoryUrl": "https://example.com/polyglot",
+        "scope": "main",
+        "scopeId": "main",
+        "version": "v0.0.0"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+      "props": {
+        "displayName": "backend",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "displayName": "Handler",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "displayName": "Handle",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "displayName": "Name",
+        "documentation": "",
+        "kind": "Field",
+        "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "props": {
+        "displayName": "main",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "displayName": "fmt",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "displayName": "Println",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().",
+      "props": {
+        "displayName": "Sprintf",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+      "props": {
+        "displayName": "index.ts",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "displayName": "Client",
+        "documentation": "",
+        "kind": "Interface",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "displayName": "send",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
+      "props": {
+        "displayName": "payload",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "props": {
+        "displayName": "HttpClient",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "displayName": "\u003cconstructor\u003e",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
+      "props": {
+        "displayName": "baseUrl",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "props": {
+        "displayName": "send",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+      "props": {
+        "displayName": "payload",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
+      "props": {
+        "displayName": "body0",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "displayName": "main",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
+      "props": {
+        "displayName": "method0",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text().",
+      "props": {
+        "displayName": "text",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+      "props": {
+        "displayName": "log",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+      "props": {
+        "displayName": "console",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch().",
+      "props": {
+        "displayName": "fetch",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+      "props": {
+        "displayName": "Promise",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+      "props": {
+        "displayName": "Promise",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+      "props": {
+        "displayName": "Promise",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+      "props": {
+        "displayName": "Promise",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+      "props": {
+        "displayName": "Promise",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#"
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:server.go#Name:5",
+      "props": {
+        "endColumn": 5,
+        "endLine": 5,
+        "filePath": "server.go",
+        "isConstant": false,
+        "name": "Name",
+        "nodeKey": "var:server.go#Name:5",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+        "startColumn": 1,
+        "startLine": 5,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#baseUrl:5",
+      "props": {
+        "endColumn": 38,
+        "endLine": 5,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "baseUrl",
+        "nodeKey": "var:src/index.ts#baseUrl:5",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
+        "startColumn": 31,
+        "startLine": 5,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#body0:10",
+      "props": {
+        "endColumn": 10,
+        "endLine": 10,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "body0",
+        "nodeKey": "var:src/index.ts#body0:10",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
+        "startColumn": 6,
+        "startLine": 10,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#method0:9",
+      "props": {
+        "endColumn": 12,
+        "endLine": 9,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "method0",
+        "nodeKey": "var:src/index.ts#method0:9",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
+        "startColumn": 6,
+        "startLine": 9,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#payload:1",
+      "props": {
+        "endColumn": 14,
+        "endLine": 1,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "payload",
+        "nodeKey": "var:src/index.ts#payload:1",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
+        "startColumn": 7,
+        "startLine": 1,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#payload:7",
+      "props": {
+        "endColumn": 20,
+        "endLine": 7,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "payload",
+        "nodeKey": "var:src/index.ts#payload:7",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+        "startColumn": 13,
+        "startLine": 7,
+        "type": ""
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "server.go",
+        "isConditional": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 17,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 18,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:13:14",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:13:6",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:14:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:14:15",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:14:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:2:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:8:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:9:12",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:9:40",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:server.go:9:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:server.go",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:server.go#Name:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:10:12",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:12:15",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:16:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:16:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:16:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:16:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:16:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:17:16",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:17:29",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:18:32",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:19:10",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:19:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:1:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:1:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:1:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:1:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:1:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:22:0",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:4:35",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:31",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:31",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:31",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:31",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:31",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:8:22",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:8:36",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#baseUrl:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#body0:10",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#method0:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#payload:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#payload:7",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:polyglot/backend",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:server.go",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:polyglot/frontend",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:src/index.ts",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Interface"
+      ],
+      "startKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:server.go#Name:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#baseUrl:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#body0:10",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#method0:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#payload:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#payload:7",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:13:14",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "column": 14,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:13:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "column": 6,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:14:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:14:15",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "column": 15,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:14:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "column": 5,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:2:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:8:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:9:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().",
+      "props": {
+        "column": 12,
+        "isDefinition": false,
+        "line": 9,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:9:40",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "column": 40,
+        "isDefinition": false,
+        "line": 9,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:server.go:9:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 9,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:10:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+      "props": {
+        "column": 12,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:12:15",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text().",
+      "props": {
+        "column": 15,
+        "isDefinition": false,
+        "line": 12,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:16:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:16:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:16:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:16:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:16:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:17:16",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "column": 16,
+        "isDefinition": false,
+        "line": 17,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:17:29",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "column": 29,
+        "isDefinition": false,
+        "line": 17,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:18:32",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "column": 32,
+        "isDefinition": false,
+        "line": 18,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:19:10",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+      "props": {
+        "column": 10,
+        "isDefinition": false,
+        "line": 19,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:19:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+      "props": {
+        "column": 2,
+        "isDefinition": false,
+        "line": 19,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:1:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:1:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:1:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:1:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:1:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:22:0",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "column": 0,
+        "isDefinition": false,
+        "line": 22,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:4:35",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
+      "props": {
+        "column": 35,
+        "isDefinition": false,
+        "line": 4,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:31",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+      "props": {
+        "column": 31,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:31",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+      "props": {
+        "column": 31,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:31",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+      "props": {
+        "column": 31,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:31",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+      "props": {
+        "column": 31,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:31",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+      "props": {
+        "column": 31,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:8:22",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch().",
+      "props": {
+        "column": 22,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:8:36",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
+      "props": {
+        "column": 36,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    }
+  ]
+}

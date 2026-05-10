@@ -60,6 +60,17 @@ test: ## Run unit tests across all workspace modules (excludes integration)
 test-integration: ## Run integration tests (requires Neo4j)
 	go test -v ./test/integration/...
 
+test-correctness: ## Run the indexing+search correctness harness against Neo4j (test/harness)
+	@echo "Checking Neo4j availability at $${NEO4J_URI:-bolt://localhost:7687}..."
+	@curl -fsS -o /dev/null http://localhost:7474 2>/dev/null || ( \
+		echo "Neo4j not reachable — run 'make docker-up' first" && exit 1 )
+	@which scip-go > /dev/null || ( \
+		echo "scip-go not on PATH — install: go install github.com/sourcegraph/scip-go/cmd/scip-go@latest" && exit 1 )
+	go test -v ./test/harness/
+
+test-correctness-update: ## Regenerate golden snapshots in test/fixtures/*/golden.json
+	go test -v -update-golden ./test/harness/
+
 benchmark: ## Run benchmarks
 	@for mod in $(GO_MODULES); do \
 		(cd $$mod && go test -bench=. -benchmem ./...); \

@@ -67,10 +67,11 @@ func TestTombstoneReasonConstantsDistinct(t *testing.T) {
 // given (scopeID, targetNodeKey) pair is distinct from the targetNodeKey itself.
 // This matters because tombstones and their targets must be separately addressable.
 func TestTombstoneNodeKeyDoesNotCollideWithTarget(t *testing.T) {
+	const svc = "test-service"
 	targets := []string{
-		FileNodeKey("pkg/models/node.go"),
-		FunctionNodeKey("pkg/neo4j/client.go", "MergeNode(...)"),
-		MethodNodeKey("pkg/neo4j/client.go", "(*Client).Close()"),
+		FileNodeKey(svc, "pkg/models/node.go"),
+		FunctionNodeKey(svc, "pkg/neo4j/client.go", "MergeNode(...)"),
+		MethodNodeKey(svc, "pkg/neo4j/client.go", "(*Client).Close()"),
 	}
 	scopeID := "pr-42"
 	for _, target := range targets {

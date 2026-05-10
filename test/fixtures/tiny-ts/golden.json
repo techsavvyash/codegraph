@@ -1,0 +1,2177 @@
+{
+  "nodes": [
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 26,
+        "endLine": 4,
+        "filePath": "src/logger.ts",
+        "fqn": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+        "isAbstract": false,
+        "name": "ConsoleLogger",
+        "nodeKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+        "startColumn": 13,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:src/index.ts",
+      "props": {
+        "absolutePath": "src/index.ts",
+        "hash": "",
+        "language": "TypeScript",
+        "lineCount": 0,
+        "nodeKey": "file:src/index.ts",
+        "path": "src/index.ts",
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:src/logger.ts",
+      "props": {
+        "absolutePath": "src/logger.ts",
+        "hash": "",
+        "language": "TypeScript",
+        "lineCount": 0,
+        "nodeKey": "file:src/logger.ts",
+        "path": "src/logger.ts",
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 14,
+        "endLine": 10002,
+        "filePath": "src/index.ts",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "greet",
+        "nodeKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+        "outDegree": 2,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+        "startColumn": 9,
+        "startLine": 2
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 28,
+        "endLine": 10012,
+        "filePath": "src/logger.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "createLogger",
+        "nodeKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+        "outDegree": 1,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+        "startColumn": 16,
+        "startLine": 12
+      }
+    },
+    {
+      "labels": [
+        "Interface"
+      ],
+      "nodeKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "endColumn": 23,
+        "endLine": 0,
+        "filePath": "src/logger.ts",
+        "name": "Logger",
+        "nodeKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+        "startColumn": 17,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 13,
+        "endLine": 6,
+        "filePath": "src/logger.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "\u003cconstructor\u003e",
+        "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+        "startColumn": 2,
+        "startLine": 5
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 5,
+        "endLine": 11,
+        "filePath": "src/logger.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "log",
+        "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+        "startColumn": 2,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "complexity": 1,
+        "docstring": "",
+        "endColumn": 5,
+        "endLine": 4,
+        "filePath": "src/logger.ts",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "linesOfCode": 1,
+        "name": "log",
+        "nodeKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+        "startColumn": 2,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+      "props": {
+        "endColumn": 0,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "name": "index.ts",
+        "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+        "startColumn": 0,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "endColumn": 0,
+        "endLine": 0,
+        "filePath": "src/logger.ts",
+        "name": "logger.ts",
+        "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+        "startColumn": 0,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:0:23",
+      "props": {
+        "context": "",
+        "endColumn": 29,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:0:23",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 23,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:0:37",
+      "props": {
+        "context": "",
+        "endColumn": 47,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:0:37",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 37,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:0:9",
+      "props": {
+        "context": "",
+        "endColumn": 21,
+        "endLine": 0,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:0:9",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 9,
+        "startLine": 0
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:2:23",
+      "props": {
+        "context": "",
+        "endColumn": 29,
+        "endLine": 2,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:2:23",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 23,
+        "startLine": 2
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:3:2",
+      "props": {
+        "context": "",
+        "endColumn": 8,
+        "endLine": 3,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:3:2",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 2,
+        "startLine": 3
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:3:23",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 3,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:3:23",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 23,
+        "startLine": 3
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:3:9",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 3,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:3:9",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 9,
+        "startLine": 3
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:6:15",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 6,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:6:15",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 15,
+        "startLine": 6
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:7:0",
+      "props": {
+        "context": "",
+        "endColumn": 5,
+        "endLine": 7,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:7:0",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 0,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/index.ts:7:6",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 7,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:src/index.ts:7:6",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 6,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:12:46",
+      "props": {
+        "context": "",
+        "endColumn": 52,
+        "endLine": 12,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:12:46",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 46,
+        "startLine": 12
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:13:13",
+      "props": {
+        "context": "",
+        "endColumn": 26,
+        "endLine": 13,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:13:13",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 13,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:13:27",
+      "props": {
+        "context": "",
+        "endColumn": 33,
+        "endLine": 13,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:13:27",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 27,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:4:38",
+      "props": {
+        "context": "",
+        "endColumn": 44,
+        "endLine": 4,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:4:38",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 38,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:8:12",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 8,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:8:12",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 12,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:8:25",
+      "props": {
+        "context": "",
+        "endColumn": 31,
+        "endLine": 8,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:8:25",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 25,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:8:36",
+      "props": {
+        "context": "",
+        "endColumn": 43,
+        "endLine": 8,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:8:36",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 36,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:src/logger.ts:8:4",
+      "props": {
+        "context": "",
+        "endColumn": 11,
+        "endLine": 8,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:src/logger.ts:8:4",
+        "scope": "main",
+        "scopeId": "main",
+        "startColumn": 4,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Service"
+      ],
+      "nodeKey": "svc:tinyts",
+      "props": {
+        "language": "TypeScript",
+        "name": "tinyts",
+        "nodeKey": "svc:tinyts",
+        "packageName": "tiny-ts",
+        "repositoryUrl": "https://example.com/tinyts",
+        "scope": "main",
+        "scopeId": "main",
+        "version": "v0.0.0"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+      "props": {
+        "displayName": "index.ts",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "displayName": "greet",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
+      "props": {
+        "displayName": "logger",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+      "props": {
+        "displayName": "name",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+      "props": {
+        "displayName": "logger",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "displayName": "logger.ts",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "props": {
+        "displayName": "ConsoleLogger",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "displayName": "\u003cconstructor\u003e",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+      "props": {
+        "displayName": "prefix",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "displayName": "log",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+      "props": {
+        "displayName": "message",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "displayName": "Logger",
+        "documentation": "",
+        "kind": "Interface",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "displayName": "log",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
+      "props": {
+        "displayName": "message",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "displayName": "createLogger",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+      "props": {
+        "displayName": "prefix",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+      "props": {
+        "displayName": "log",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+      "props": {
+        "displayName": "console",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+        "scope": "main",
+        "scopeId": "main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console."
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#logger:2",
+      "props": {
+        "endColumn": 21,
+        "endLine": 2,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "logger",
+        "nodeKey": "var:src/index.ts#logger:2",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
+        "startColumn": 15,
+        "startLine": 2,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#logger:6",
+      "props": {
+        "endColumn": 12,
+        "endLine": 6,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "logger",
+        "nodeKey": "var:src/index.ts#logger:6",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+        "startColumn": 6,
+        "startLine": 6,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/index.ts#name:2",
+      "props": {
+        "endColumn": 35,
+        "endLine": 2,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "name",
+        "nodeKey": "var:src/index.ts#name:2",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+        "startColumn": 31,
+        "startLine": 2,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/logger.ts#message:1",
+      "props": {
+        "endColumn": 13,
+        "endLine": 1,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "message",
+        "nodeKey": "var:src/logger.ts#message:1",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
+        "startColumn": 6,
+        "startLine": 1,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/logger.ts#message:7",
+      "props": {
+        "endColumn": 13,
+        "endLine": 7,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "message",
+        "nodeKey": "var:src/logger.ts#message:7",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+        "startColumn": 6,
+        "startLine": 7,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/logger.ts#prefix:12",
+      "props": {
+        "endColumn": 35,
+        "endLine": 12,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "prefix",
+        "nodeKey": "var:src/logger.ts#prefix:12",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+        "startColumn": 29,
+        "startLine": 12,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:src/logger.ts#prefix:5",
+      "props": {
+        "endColumn": 37,
+        "endLine": 5,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "prefix",
+        "nodeKey": "var:src/logger.ts#prefix:5",
+        "scope": "main",
+        "scopeId": "main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+        "startColumn": 31,
+        "startLine": 5,
+        "type": ""
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 6,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "filePath": "src/logger.ts",
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:0:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:0:37",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:0:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:2:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:3:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:3:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:3:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:6:15",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:0",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/index.ts:7:6",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#logger:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#logger:6",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/index.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/index.ts#name:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:12:46",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:13:13",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:13:27",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:4:38",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:8:12",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:8:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:8:36",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:src/logger.ts:8:4",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/logger.ts#message:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/logger.ts#message:7",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/logger.ts#prefix:12",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:src/logger.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:src/logger.ts#prefix:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinyts",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:src/index.ts",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinyts",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:src/logger.ts",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Interface"
+      ],
+      "startKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#logger:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#logger:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/index.ts#name:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/logger.ts#message:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/logger.ts#message:7",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/logger.ts#prefix:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:src/logger.ts#prefix:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:0:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 0,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:0:37",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "column": 37,
+        "isDefinition": false,
+        "line": 0,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:0:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 0,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:2:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:3:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
+      "props": {
+        "column": 2,
+        "isDefinition": false,
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:3:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:3:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:6:15",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "column": 15,
+        "isDefinition": false,
+        "line": 6,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:0",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "column": 0,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/index.ts:7:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+      "props": {
+        "column": 6,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:12:46",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 46,
+        "isDefinition": false,
+        "line": 12,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:13:13",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "column": 13,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:13:27",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+      "props": {
+        "column": 27,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:4:38",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 38,
+        "isDefinition": false,
+        "line": 4,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:8:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
+      "props": {
+        "column": 12,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:8:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:8:36",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+      "props": {
+        "column": 36,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:src/logger.ts:8:4",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
+      "props": {
+        "column": 4,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    }
+  ]
+}

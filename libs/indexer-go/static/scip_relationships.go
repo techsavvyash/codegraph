@@ -1,6 +1,10 @@
 package static
 
-import "fmt"
+import (
+	"fmt"
+
+	models "github.com/context-maximiser/code-graph/libs/core-models-go"
+)
 
 // SCIPRelationship represents a relationship extracted from SCIP
 // SymbolInformation.Relationships. Each relationship links a "from" symbol
@@ -72,6 +76,7 @@ func buildImplementsBatch(
 	symbolIDs map[string]string,
 	defIDs map[string]string,
 	symbolToDefKey map[string]string,
+	scope models.ScopeContext,
 ) []map[string]any {
 	var batch []map[string]any
 
@@ -91,7 +96,10 @@ func buildImplementsBatch(
 		batch = append(batch, map[string]any{
 			"fromId": fromID,
 			"toId":   toID,
-			"props":  map[string]any{},
+			"props": map[string]any{
+				"scope":   scope.Scope,
+				"scopeId": scope.ScopeID,
+			},
 		})
 	}
 

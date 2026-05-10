@@ -48,17 +48,20 @@ func TestConvertSymbolKind(t *testing.T) {
 // ===========================================================================
 
 func TestInferSymbolKind(t *testing.T) {
+	// Without interface-like context: every "#" is a struct, every term is a field.
 	tests := []struct {
 		name     string
 		symbol   string
 		expected models.SymbolKind
 	}{
-		{"Method_hash_and_parens", "scip-go go pkg v1 Type#Method().", models.MethodSymbol},
-		{"Function_parens_only", "scip-go go pkg v1 Func().", models.FunctionSymbol},
-		{"Type_hash_only", "scip-go go pkg v1 Type#Field.", models.TypeSymbol},
-		{"Package_slash", "scip-go go pkg v1 package/", models.PackageSymbol},
+		{"Method_struct", "scip-go go pkg v1 Type#Method().", models.MethodSymbol},
+		{"Function", "scip-go go pkg v1 Func().", models.FunctionSymbol},
+		{"Field_on_type", "scip-go go pkg v1 Type#Field.", models.FieldSymbol},
+		{"Class_unimplemented", "scip-go go pkg v1 Type#", models.TypeSymbol},
+		{"Package", "scip-go go pkg v1 package/", models.PackageSymbol},
 		{"Local_default", "local 0", models.VariableSymbol},
-		{"Method_both_hash_and_parens", "scip-go go example.com/test v1 MyStruct#DoWork().", models.MethodSymbol},
+		{"Method_qualified", "scip-go go example.com/test v1 MyStruct#DoWork().", models.MethodSymbol},
+		{"Package_var", "scip-go go pkg v1 PkgVar.", models.VariableSymbol},
 	}
 
 	for _, tt := range tests {
@@ -66,6 +69,40 @@ func TestInferSymbolKind(t *testing.T) {
 			got := inferSymbolKind(tt.symbol)
 			if got != tt.expected {
 				t.Errorf("inferSymbolKind(%q) = %q, want %q", tt.symbol, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestInferSymbolKindWith covers the interface-aware refinement: a type that
+// something implements is an Interface; "."-terminated children of such a type
+// are interface methods rather than struct fields.
+func TestInferSymbolKindWith(t *testing.T) {
+	ifaceType := "scip-go go pkg v1 Greeter#"
+	ifaceMethod := "scip-go go pkg v1 Greeter#Greet."
+	structType := "scip-go go pkg v1 EnglishGreeter#"
+	structField := "scip-go go pkg v1 EnglishGreeter#Prefix."
+
+	interfaceLike := map[string]bool{
+		ifaceType:   true,
+		ifaceMethod: true,
+	}
+
+	cases := []struct {
+		name     string
+		symbol   string
+		expected models.SymbolKind
+	}{
+		{"Interface_when_implemented", ifaceType, models.InterfaceSymbol},
+		{"Interface_method_term", ifaceMethod, models.MethodSymbol},
+		{"Struct_when_not_implemented", structType, models.TypeSymbol},
+		{"Field_term_on_struct", structField, models.FieldSymbol},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inferSymbolKindWith(tc.symbol, interfaceLike)
+			if got != tc.expected {
+				t.Errorf("inferSymbolKindWith(%q) = %q, want %q", tc.symbol, got, tc.expected)
 			}
 		})
 	}
@@ -82,12 +119,21 @@ func TestExtractDisplayName(t *testing.T) {
 		expected string
 	}{
 		{"Method_via_hash", "scip-go gomod pkg v1 Type#Method()", "Method"},
-		{"Package_trailing_slash", "scip-go gomod pkg v1 package/subpkg/", ""},
+		{"Method_via_hash_with_dot", "scip-go gomod pkg v1 Type#Method().", "Method"},
+		{"Type_trailing_hash", "scip-go gomod pkg v1 `pkg`/Greeter#", "Greeter"},
+		{"Field_via_hash_dot", "scip-go gomod pkg v1 Greeter#Greet.", "Greet"},
+		{"Package_trailing_slash", "scip-go gomod pkg v1 package/subpkg/", "subpkg"},
+		{"Package_with_backticks", "scip-go gomod pkg v1 `example.com/foo`/", "foo"},
 		{"Package_no_trailing_slash", "scip-go gomod pkg v1 package/subpkg", "subpkg"},
-		{"SimpleFunc_no_hash_or_slash", "scip-go gomod pkg v1 SimpleFunc()", "SimpleFunc()"},
+		{"SimpleFunc_no_hash_or_slash", "scip-go gomod pkg v1 SimpleFunc()", "SimpleFunc"},
 		{"Short_less_than_5_parts", "short", "short"},
 		{"Five_parts_plain", "a b c d e", "e"},
-		{"Real_SCIP_Greet", "scip-go go example.com/test v1 Greet().", "Greet()."},
+		{"Real_SCIP_Greet", "scip-go go example.com/test v1 Greet().", "Greet"},
+		{"TS_constructor_backticks", "scip-typescript npm pkg 1 src/`logger.ts`/Foo#`<constructor>`().", "<constructor>"},
+		{"TS_param_top_level", "scip-typescript npm pkg 1 src/`a.ts`/greet().(logger)", "logger"},
+		{"TS_param_method", "scip-typescript npm pkg 1 src/`a.ts`/Foo#bar().(message)", "message"},
+		{"TS_param_constructor", "scip-typescript npm pkg 1 src/`a.ts`/Foo#`<constructor>`().(prefix)", "prefix"},
+		{"TS_meta_object_property", "scip-typescript npm pkg 1 src/`a.ts`/body0:", "body0"},
 	}
 
 	for _, tt := range tests {

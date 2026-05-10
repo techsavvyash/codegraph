@@ -6,6 +6,7 @@ import (
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 // LSPService provides Language Server Protocol-like functionality
@@ -164,37 +165,46 @@ func (lsp *LSPService) Search(ctx context.Context, req SearchRequest) (*SearchRe
 	var results []*SearchResult
 	for _, record := range records {
 		recordMap := record.AsMap()
-		
-		if node, ok := recordMap["n"]; ok {
-			if nodeMap, ok := node.(map[string]any); ok {
-				result := &SearchResult{
-					Properties: nodeMap,
-				}
 
-				// Extract common properties
-				if name, ok := nodeMap["name"].(string); ok {
-					result.Name = name
-				}
-				if filePath, ok := nodeMap["filePath"].(string); ok {
-					result.FilePath = filePath
-				}
-				if signature, ok := nodeMap["signature"].(string); ok {
-					result.Signature = signature
-				}
-				if description, ok := nodeMap["description"].(string); ok {
-					result.Description = description
-				}
+		// neo4j-go-driver returns nodes as dbtype.Node (or *dbtype.Node);
+		// the older code's map[string]any assertion always failed silently.
+		var props map[string]any
+		switch n := recordMap["n"].(type) {
+		case dbtype.Node:
+			props = n.Props
+		case *dbtype.Node:
+			if n != nil {
+				props = n.Props
+			}
+		case map[string]any:
+			props = n
+		}
+		if props == nil {
+			continue
+		}
 
-				// Extract node type from labels
-				if labels, ok := recordMap["nodeLabels"].([]interface{}); ok && len(labels) > 0 {
-					if label, ok := labels[0].(string); ok {
-						result.Type = label
-					}
-				}
+		result := &SearchResult{Properties: props}
+		if name, ok := props["name"].(string); ok {
+			result.Name = name
+		}
+		if filePath, ok := props["filePath"].(string); ok {
+			result.FilePath = filePath
+		}
+		if signature, ok := props["signature"].(string); ok {
+			result.Signature = signature
+		}
+		if description, ok := props["description"].(string); ok {
+			result.Description = description
+		}
 
-				results = append(results, result)
+		// Extract node type from labels (Neo4j returns []any of strings).
+		if labels, ok := recordMap["nodeLabels"].([]any); ok && len(labels) > 0 {
+			if label, ok := labels[0].(string); ok {
+				result.Type = label
 			}
 		}
+
+		results = append(results, result)
 	}
 
 	return &SearchResponse{

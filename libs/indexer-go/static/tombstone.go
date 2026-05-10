@@ -11,27 +11,38 @@ import (
 // TombstoneCreator handles creating tombstone nodes for PR overlays.
 // When files or symbols are deleted in a PR branch, tombstones are created
 // so that queries against the PR scope can hide the corresponding main-scope nodes.
+//
+// serviceName scopes deletions to a single service. Module-relative file paths
+// (e.g. "main.go") collide across services, so a tombstone for "main.go"
+// without a service would shadow every service's main.go in PR scope.
 type TombstoneCreator struct {
-	client   *neo4j.Client
-	scopeCtx models.ScopeContext
+	client      *neo4j.Client
+	scopeCtx    models.ScopeContext
+	serviceName string
 }
 
-// NewTombstoneCreator creates a new TombstoneCreator.
-func NewTombstoneCreator(client *neo4j.Client, scopeCtx models.ScopeContext) *TombstoneCreator {
+// NewTombstoneCreator creates a new TombstoneCreator scoped to a single service.
+func NewTombstoneCreator(client *neo4j.Client, scopeCtx models.ScopeContext, serviceName string) *TombstoneCreator {
 	return &TombstoneCreator{
-		client:   client,
-		scopeCtx: scopeCtx,
+		client:      client,
+		scopeCtx:    scopeCtx,
+		serviceName: serviceName,
 	}
 }
 
 // CreateFileDeletedTombstones creates tombstones for a deleted file and all its child definitions.
 // It queries the main scope for the file node and all nodes contained within it,
 // then creates Tombstone nodes in the PR scope for each.
+//
+// Lookup is anchored on the file's globally-unique nodeKey (which now embeds
+// serviceName). Children are reached via the Service→File→* CONTAINS chain
+// rather than by `n.filePath = $filePath`, since filePaths are module-relative
+// and not unique on their own.
 func (tc *TombstoneCreator) CreateFileDeletedTombstones(ctx context.Context, deletedPaths []string) (int, error) {
 	totalCreated := 0
 
 	for _, filePath := range deletedPaths {
-		fileNodeKey := models.FileNodeKey(filePath)
+		fileNodeKey := models.FileNodeKey(tc.serviceName, filePath)
 
 		// Create tombstone for the file itself
 		if err := tc.createTombstone(ctx, fileNodeKey, "File", models.TombstoneFileDeleted); err != nil {
@@ -39,14 +50,16 @@ func (tc *TombstoneCreator) CreateFileDeletedTombstones(ctx context.Context, del
 		}
 		totalCreated++
 
-		// Find all child definitions in main scope that belong to this file
+		// Find all child definitions in main scope reachable from the File node.
+		// Anchored on the file's nodeKey (service-disambiguated) and traversed
+		// through CONTAINS so we never tombstone another service's same-named file.
 		cypher := `
-			MATCH (n)
-			WHERE n.filePath = $filePath AND n.scopeId = 'main' AND n.nodeKey IS NOT NULL
-			RETURN n.nodeKey AS nodeKey, labels(n) AS labels
+			MATCH (f:File {nodeKey: $fileNodeKey, scopeId: 'main'})-[:CONTAINS*1..3]->(n)
+			WHERE n.scopeId = 'main' AND n.nodeKey IS NOT NULL
+			RETURN DISTINCT n.nodeKey AS nodeKey, labels(n) AS labels
 		`
 		results, err := tc.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"filePath": filePath,
+			"fileNodeKey": fileNodeKey,
 		})
 		if err != nil {
 			fmt.Printf("Warning: failed to query child nodes for %s: %v\n", filePath, err)

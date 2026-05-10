@@ -110,8 +110,8 @@ func TestRoutePathRegex(t *testing.T) {
 	for _, tc := range tests {
 		match := routePathRegex.FindStringSubmatch(tc.input)
 		got := ""
-		if len(match) > 1 {
-			got = match[1]
+		if len(match) > 2 {
+			got = match[2]
 		}
 		if got != tc.want {
 			t.Errorf("input %q: got %q, want %q", tc.input, got, tc.want)

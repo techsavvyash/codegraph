@@ -4,6 +4,11 @@ import (
 	"testing"
 )
 
+const (
+	svcA = "codegraph/apps/cli"
+	svcB = "codegraph/apps/mcp-server-go"
+)
+
 func TestServiceNodeKey(t *testing.T) {
 	key := ServiceNodeKey("codegraph")
 	if key != "svc:codegraph" {
@@ -16,9 +21,10 @@ func TestServiceNodeKey(t *testing.T) {
 }
 
 func TestFileNodeKey(t *testing.T) {
-	key := FileNodeKey("pkg/models/node.go")
-	if key != "file:pkg/models/node.go" {
-		t.Errorf("expected file:pkg/models/node.go, got %s", key)
+	key := FileNodeKey(svcA, "pkg/models/node.go")
+	expected := "file:codegraph/apps/cli:pkg/models/node.go"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
@@ -31,42 +37,44 @@ func TestSymbolNodeKey(t *testing.T) {
 }
 
 func TestFunctionNodeKey(t *testing.T) {
-	key := FunctionNodeKey("pkg/neo4j/client.go", "MergeNode(...)")
-	expected := "func:pkg/neo4j/client.go#MergeNode(...)"
+	key := FunctionNodeKey(svcA, "pkg/neo4j/client.go", "MergeNode(...)")
+	expected := "func:codegraph/apps/cli:pkg/neo4j/client.go#MergeNode(...)"
 	if key != expected {
 		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
 func TestMethodNodeKey(t *testing.T) {
-	key := MethodNodeKey("pkg/neo4j/client.go", "(*Client).Close()")
-	expected := "method:pkg/neo4j/client.go#(*Client).Close()"
+	key := MethodNodeKey(svcA, "pkg/neo4j/client.go", "(*Client).Close()")
+	expected := "method:codegraph/apps/cli:pkg/neo4j/client.go#(*Client).Close()"
 	if key != expected {
 		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
 func TestClassNodeKey(t *testing.T) {
-	// With FQN
-	key := ClassNodeKey("scip-go...TypeSymbol#", "", "")
+	// With FQN — service is ignored.
+	key := ClassNodeKey("scip-go...TypeSymbol#", svcA, "", "")
 	if key != "class:scip-go...TypeSymbol#" {
 		t.Errorf("expected class:scip-go...TypeSymbol#, got %s", key)
 	}
-	// Without FQN
-	key = ClassNodeKey("", "pkg/models/node.go", "BaseNode")
-	if key != "class:pkg/models/node.go#BaseNode" {
-		t.Errorf("expected class:pkg/models/node.go#BaseNode, got %s", key)
+	// Without FQN — service is part of the key.
+	key = ClassNodeKey("", svcA, "pkg/models/node.go", "BaseNode")
+	expected := "class:codegraph/apps/cli:pkg/models/node.go#BaseNode"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
 func TestInterfaceNodeKey(t *testing.T) {
-	key := InterfaceNodeKey("io.Reader", "", "")
+	key := InterfaceNodeKey("io.Reader", svcA, "", "")
 	if key != "iface:io.Reader" {
 		t.Errorf("expected iface:io.Reader, got %s", key)
 	}
-	key = InterfaceNodeKey("", "pkg/foo.go", "Handler")
-	if key != "iface:pkg/foo.go#Handler" {
-		t.Errorf("expected iface:pkg/foo.go#Handler, got %s", key)
+	key = InterfaceNodeKey("", svcA, "pkg/foo.go", "Handler")
+	expected := "iface:codegraph/apps/cli:pkg/foo.go#Handler"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
@@ -78,16 +86,16 @@ func TestModuleNodeKey(t *testing.T) {
 }
 
 func TestVariableNodeKey(t *testing.T) {
-	key := VariableNodeKey("pkg/neo4j/client.go", "driver", 21)
-	expected := "var:pkg/neo4j/client.go#driver:21"
+	key := VariableNodeKey(svcA, "pkg/neo4j/client.go", "driver", 21)
+	expected := "var:codegraph/apps/cli:pkg/neo4j/client.go#driver:21"
 	if key != expected {
 		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
 func TestParameterNodeKey(t *testing.T) {
-	key := ParameterNodeKey("pkg/neo4j/client.go", "MergeNode(...)", "ctx", 0)
-	expected := "param:pkg/neo4j/client.go#MergeNode(...):ctx:0"
+	key := ParameterNodeKey(svcA, "pkg/neo4j/client.go", "MergeNode(...)", "ctx", 0)
+	expected := "param:codegraph/apps/cli:pkg/neo4j/client.go#MergeNode(...):ctx:0"
 	if key != expected {
 		t.Errorf("expected %s, got %s", expected, key)
 	}
@@ -115,16 +123,18 @@ func TestAPIRouteNodeKey(t *testing.T) {
 }
 
 func TestCommentNodeKey(t *testing.T) {
-	key := CommentNodeKey("pkg/models/node.go", 10)
-	if key != "comment:pkg/models/node.go:10" {
-		t.Errorf("expected comment:pkg/models/node.go:10, got %s", key)
+	key := CommentNodeKey(svcA, "pkg/models/node.go", 10)
+	expected := "comment:codegraph/apps/cli:pkg/models/node.go:10"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
 func TestReferenceNodeKey(t *testing.T) {
-	key := ReferenceNodeKey("pkg/models/node.go", 42, 5)
-	if key != "ref:pkg/models/node.go:42:5" {
-		t.Errorf("expected ref:pkg/models/node.go:42:5, got %s", key)
+	key := ReferenceNodeKey(svcA, "pkg/models/node.go", 42, 5)
+	expected := "ref:codegraph/apps/cli:pkg/models/node.go:42:5"
+	if key != expected {
+		t.Errorf("expected %s, got %s", expected, key)
 	}
 }
 
@@ -173,21 +183,21 @@ func TestSDKCallNodeKey(t *testing.T) {
 
 func TestNodeKeysAreUnique(t *testing.T) {
 	keys := map[string]string{
-		"service":   ServiceNodeKey("codegraph"),
-		"file":      FileNodeKey("pkg/models/node.go"),
-		"function":  FunctionNodeKey("pkg/neo4j/client.go", "MergeNode(...)"),
-		"method":    MethodNodeKey("pkg/neo4j/client.go", "(*Client).Close()"),
-		"class":     ClassNodeKey("scip-go...Type#", "", ""),
-		"interface": InterfaceNodeKey("io.Reader", "", ""),
-		"module":    ModuleNodeKey("github.com/example/pkg"),
-		"variable":  VariableNodeKey("pkg/neo4j/client.go", "driver", 21),
-		"parameter": ParameterNodeKey("pkg/neo4j/client.go", "MergeNode(...)", "ctx", 0),
-		"document":  DocumentNodeKey("docs/README.md"),
-		"feature":   FeatureNodeKey("SCIP Indexing"),
-		"api":       APIRouteNodeKey("GET", "/api/users"),
-		"sdkcall":   SDKCallNodeKey("go-http-client.Get"),
-		"comment":   CommentNodeKey("pkg/models/node.go", 10),
-		"reference": ReferenceNodeKey("pkg/models/node.go", 42, 5),
+		"service":      ServiceNodeKey("codegraph"),
+		"file":         FileNodeKey(svcA, "pkg/models/node.go"),
+		"function":     FunctionNodeKey(svcA, "pkg/neo4j/client.go", "MergeNode(...)"),
+		"method":       MethodNodeKey(svcA, "pkg/neo4j/client.go", "(*Client).Close()"),
+		"class":        ClassNodeKey("scip-go...Type#", svcA, "", ""),
+		"interface":    InterfaceNodeKey("io.Reader", svcA, "", ""),
+		"module":       ModuleNodeKey("github.com/example/pkg"),
+		"variable":     VariableNodeKey(svcA, "pkg/neo4j/client.go", "driver", 21),
+		"parameter":    ParameterNodeKey(svcA, "pkg/neo4j/client.go", "MergeNode(...)", "ctx", 0),
+		"document":     DocumentNodeKey("docs/README.md"),
+		"feature":      FeatureNodeKey("SCIP Indexing"),
+		"api":          APIRouteNodeKey("GET", "/api/users"),
+		"sdkcall":      SDKCallNodeKey("go-http-client.Get"),
+		"comment":      CommentNodeKey(svcA, "pkg/models/node.go", 10),
+		"reference":    ReferenceNodeKey(svcA, "pkg/models/node.go", 42, 5),
 		"flow":         FlowNodeKey("api", "api:GET:/api/users"),
 		"pullrequest":  PullRequestNodeKey("123"),
 		"generateddoc": GeneratedDocNodeKey("pr_summary", "pr:123"),
@@ -224,8 +234,8 @@ func TestDocumentChunkNodeKey(t *testing.T) {
 
 func TestNodeKeyDeterminism(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		a := FunctionNodeKey("pkg/foo.go", "Bar()")
-		b := FunctionNodeKey("pkg/foo.go", "Bar()")
+		a := FunctionNodeKey(svcA, "pkg/foo.go", "Bar()")
+		b := FunctionNodeKey(svcA, "pkg/foo.go", "Bar()")
 		if a != b {
 			t.Fatal("FunctionNodeKey is not deterministic")
 		}
@@ -238,30 +248,30 @@ func TestNodeKeyDeterminism(t *testing.T) {
 func TestFunctionMethodPrefixIsolation(t *testing.T) {
 	filePath := "pkg/neo4j/client.go"
 	signature := "Close()"
-	funcKey := FunctionNodeKey(filePath, signature)
-	methKey := MethodNodeKey(filePath, signature)
+	funcKey := FunctionNodeKey(svcA, filePath, signature)
+	methKey := MethodNodeKey(svcA, filePath, signature)
 	if funcKey == methKey {
 		t.Errorf("FunctionNodeKey and MethodNodeKey must differ for same args: both = %q", funcKey)
 	}
-	if funcKey != "func:"+filePath+"#"+signature {
+	if funcKey != "func:"+svcA+":"+filePath+"#"+signature {
 		t.Errorf("FunctionNodeKey format wrong: got %q", funcKey)
 	}
-	if methKey != "method:"+filePath+"#"+signature {
+	if methKey != "method:"+svcA+":"+filePath+"#"+signature {
 		t.Errorf("MethodNodeKey format wrong: got %q", methKey)
 	}
 }
 
 // TestClassNodeKeyFallbackFQNPrecedence verifies that when fqn is non-empty the fqn
-// is used and the filePath/name arguments are ignored entirely.
+// is used and the serviceName/filePath/name arguments are ignored entirely.
 func TestClassNodeKeyFallbackFQNPrecedence(t *testing.T) {
-	// fqn present: filePath and name must be ignored
-	key := ClassNodeKey("scip-go...Foo#", "pkg/foo.go", "Foo")
+	// fqn present: serviceName, filePath, and name must be ignored
+	key := ClassNodeKey("scip-go...Foo#", svcA, "pkg/foo.go", "Foo")
 	if key != "class:scip-go...Foo#" {
 		t.Errorf("expected fqn to win, got %q", key)
 	}
-	// fqn absent: filePath+name used
-	key2 := ClassNodeKey("", "pkg/foo.go", "Foo")
-	if key2 != "class:pkg/foo.go#Foo" {
+	// fqn absent: serviceName+filePath+name used
+	key2 := ClassNodeKey("", svcA, "pkg/foo.go", "Foo")
+	if key2 != "class:codegraph/apps/cli:pkg/foo.go#Foo" {
 		t.Errorf("expected fallback format, got %q", key2)
 	}
 	// They must differ
@@ -273,13 +283,13 @@ func TestClassNodeKeyFallbackFQNPrecedence(t *testing.T) {
 // TestInterfaceNodeKeyFallbackFQNPrecedence mirrors TestClassNodeKeyFallbackFQNPrecedence
 // for InterfaceNodeKey.
 func TestInterfaceNodeKeyFallbackFQNPrecedence(t *testing.T) {
-	keyFQN := InterfaceNodeKey("io.Writer", "", "")
-	keyFallback := InterfaceNodeKey("", "pkg/foo.go", "Writer")
+	keyFQN := InterfaceNodeKey("io.Writer", svcA, "", "")
+	keyFallback := InterfaceNodeKey("", svcA, "pkg/foo.go", "Writer")
 	if keyFQN != "iface:io.Writer" {
 		t.Errorf("expected iface:io.Writer, got %q", keyFQN)
 	}
-	if keyFallback != "iface:pkg/foo.go#Writer" {
-		t.Errorf("expected iface:pkg/foo.go#Writer, got %q", keyFallback)
+	if keyFallback != "iface:codegraph/apps/cli:pkg/foo.go#Writer" {
+		t.Errorf("expected iface:codegraph/apps/cli:pkg/foo.go#Writer, got %q", keyFallback)
 	}
 	if keyFQN == keyFallback {
 		t.Error("fqn and fallback InterfaceNodeKey must differ")
@@ -289,12 +299,12 @@ func TestInterfaceNodeKeyFallbackFQNPrecedence(t *testing.T) {
 // TestVariableNodeKeyLineDiscrimination ensures that two variables with the same name
 // in the same file at different lines get different keys (line is part of the key).
 func TestVariableNodeKeyLineDiscrimination(t *testing.T) {
-	k1 := VariableNodeKey("pkg/foo.go", "err", 10)
-	k2 := VariableNodeKey("pkg/foo.go", "err", 20)
+	k1 := VariableNodeKey(svcA, "pkg/foo.go", "err", 10)
+	k2 := VariableNodeKey(svcA, "pkg/foo.go", "err", 20)
 	if k1 == k2 {
 		t.Error("VariableNodeKey must differ for different start lines")
 	}
-	if k1 != "var:pkg/foo.go#err:10" {
+	if k1 != "var:codegraph/apps/cli:pkg/foo.go#err:10" {
 		t.Errorf("unexpected key format: %q", k1)
 	}
 }
@@ -302,13 +312,109 @@ func TestVariableNodeKeyLineDiscrimination(t *testing.T) {
 // TestParameterNodeKeyIndexDiscrimination ensures positional parameters with the same
 // name at different indices in the same function produce different keys.
 func TestParameterNodeKeyIndexDiscrimination(t *testing.T) {
-	k0 := ParameterNodeKey("pkg/foo.go", "Bar()", "x", 0)
-	k1 := ParameterNodeKey("pkg/foo.go", "Bar()", "x", 1)
+	k0 := ParameterNodeKey(svcA, "pkg/foo.go", "Bar()", "x", 0)
+	k1 := ParameterNodeKey(svcA, "pkg/foo.go", "Bar()", "x", 1)
 	if k0 == k1 {
 		t.Error("ParameterNodeKey must differ for different indices")
 	}
-	if k0 != "param:pkg/foo.go#Bar():x:0" {
+	if k0 != "param:codegraph/apps/cli:pkg/foo.go#Bar():x:0" {
 		t.Errorf("unexpected key format: %q", k0)
+	}
+}
+
+// ── Cross-service uniqueness tests (B1 regression suite) ────────────────────
+//
+// These tests pin the property that a path-based nodeKey produced for one
+// service must never equal the same-shape key produced for a different
+// service. Before the fix, every pair below collided into a single Neo4j
+// node when SCIP-Go emitted module-relative paths.
+
+func TestFileNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := FileNodeKey(svcA, "main.go")
+	b := FileNodeKey(svcB, "main.go")
+	if a == b {
+		t.Fatalf("FileNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestFunctionNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := FunctionNodeKey(svcA, "main.go", "Execute()")
+	b := FunctionNodeKey(svcB, "main.go", "Execute()")
+	if a == b {
+		t.Fatalf("FunctionNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestMethodNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := MethodNodeKey(svcA, "store.go", "(*Client).Close()")
+	b := MethodNodeKey(svcB, "store.go", "(*Client).Close()")
+	if a == b {
+		t.Fatalf("MethodNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestVariableNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := VariableNodeKey(svcA, "main.go", "rootCmd", 25)
+	b := VariableNodeKey(svcB, "main.go", "rootCmd", 25)
+	if a == b {
+		t.Fatalf("VariableNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestParameterNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := ParameterNodeKey(svcA, "main.go", "Execute()", "ctx", 0)
+	b := ParameterNodeKey(svcB, "main.go", "Execute()", "ctx", 0)
+	if a == b {
+		t.Fatalf("ParameterNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestCommentNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := CommentNodeKey(svcA, "main.go", 12)
+	b := CommentNodeKey(svcB, "main.go", 12)
+	if a == b {
+		t.Fatalf("CommentNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestReferenceNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := ReferenceNodeKey(svcA, "main.go", 42, 5)
+	b := ReferenceNodeKey(svcB, "main.go", 42, 5)
+	if a == b {
+		t.Fatalf("ReferenceNodeKey collided across services: both = %q", a)
+	}
+}
+
+func TestClassFallbackNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := ClassNodeKey("", svcA, "models.go", "Client")
+	b := ClassNodeKey("", svcB, "models.go", "Client")
+	if a == b {
+		t.Fatalf("ClassNodeKey fallback collided across services: both = %q", a)
+	}
+}
+
+func TestInterfaceFallbackNodeKeyDistinctAcrossServices(t *testing.T) {
+	a := InterfaceNodeKey("", svcA, "models.go", "Store")
+	b := InterfaceNodeKey("", svcB, "models.go", "Store")
+	if a == b {
+		t.Fatalf("InterfaceNodeKey fallback collided across services: both = %q", a)
+	}
+}
+
+// TestSCIPSymbolBasedKeysIgnoreService confirms that when a SCIP symbol (FQN)
+// is provided for Class/Interface, the service argument is NOT mixed in —
+// SCIP symbols are already globally unique and re-prefixing them would break
+// cross-language joins through SymbolNodeKey.
+func TestSCIPSymbolBasedKeysIgnoreService(t *testing.T) {
+	a := ClassNodeKey("scip-go go example/pkg Foo#", svcA, "x.go", "X")
+	b := ClassNodeKey("scip-go go example/pkg Foo#", svcB, "y.go", "Y")
+	if a != b {
+		t.Errorf("ClassNodeKey with FQN must be service-independent: %q != %q", a, b)
+	}
+	a = InterfaceNodeKey("io.Reader", svcA, "x.go", "X")
+	b = InterfaceNodeKey("io.Reader", svcB, "y.go", "Y")
+	if a != b {
+		t.Errorf("InterfaceNodeKey with FQN must be service-independent: %q != %q", a, b)
 	}
 }
 
@@ -321,23 +427,23 @@ func TestAllNodeKeysDeterministicAcrossReindex(t *testing.T) {
 	}
 	calls := []call{
 		{"ServiceNodeKey", func() string { return ServiceNodeKey("svc") }},
-		{"FileNodeKey", func() string { return FileNodeKey("pkg/a.go") }},
+		{"FileNodeKey", func() string { return FileNodeKey(svcA, "pkg/a.go") }},
 		{"SymbolNodeKey", func() string { return SymbolNodeKey("scip-go go example/pkg Fn#") }},
-		{"FunctionNodeKey", func() string { return FunctionNodeKey("pkg/a.go", "Fn()") }},
-		{"MethodNodeKey", func() string { return MethodNodeKey("pkg/a.go", "(*T).Fn()") }},
-		{"ClassNodeKey-fqn", func() string { return ClassNodeKey("scip-go...T#", "", "") }},
-		{"ClassNodeKey-fallback", func() string { return ClassNodeKey("", "pkg/a.go", "T") }},
-		{"InterfaceNodeKey-fqn", func() string { return InterfaceNodeKey("io.Reader", "", "") }},
-		{"InterfaceNodeKey-fallback", func() string { return InterfaceNodeKey("", "pkg/a.go", "R") }},
+		{"FunctionNodeKey", func() string { return FunctionNodeKey(svcA, "pkg/a.go", "Fn()") }},
+		{"MethodNodeKey", func() string { return MethodNodeKey(svcA, "pkg/a.go", "(*T).Fn()") }},
+		{"ClassNodeKey-fqn", func() string { return ClassNodeKey("scip-go...T#", svcA, "", "") }},
+		{"ClassNodeKey-fallback", func() string { return ClassNodeKey("", svcA, "pkg/a.go", "T") }},
+		{"InterfaceNodeKey-fqn", func() string { return InterfaceNodeKey("io.Reader", svcA, "", "") }},
+		{"InterfaceNodeKey-fallback", func() string { return InterfaceNodeKey("", svcA, "pkg/a.go", "R") }},
 		{"ModuleNodeKey", func() string { return ModuleNodeKey("github.com/example/pkg") }},
-		{"VariableNodeKey", func() string { return VariableNodeKey("pkg/a.go", "v", 5) }},
-		{"ParameterNodeKey", func() string { return ParameterNodeKey("pkg/a.go", "Fn()", "p", 0) }},
+		{"VariableNodeKey", func() string { return VariableNodeKey(svcA, "pkg/a.go", "v", 5) }},
+		{"ParameterNodeKey", func() string { return ParameterNodeKey(svcA, "pkg/a.go", "Fn()", "p", 0) }},
 		{"DocumentNodeKey", func() string { return DocumentNodeKey("docs/x.md") }},
 		{"DocumentChunkNodeKey", func() string { return DocumentChunkNodeKey("doc:docs/x.md", 2) }},
 		{"FeatureNodeKey", func() string { return FeatureNodeKey("auth") }},
 		{"APIRouteNodeKey", func() string { return APIRouteNodeKey("POST", "/login") }},
-		{"CommentNodeKey", func() string { return CommentNodeKey("pkg/a.go", 7) }},
-		{"ReferenceNodeKey", func() string { return ReferenceNodeKey("pkg/a.go", 7, 3) }},
+		{"CommentNodeKey", func() string { return CommentNodeKey(svcA, "pkg/a.go", 7) }},
+		{"ReferenceNodeKey", func() string { return ReferenceNodeKey(svcA, "pkg/a.go", 7, 3) }},
 		{"FlowNodeKey", func() string { return FlowNodeKey("api", "api:GET:/x") }},
 		{"PullRequestNodeKey", func() string { return PullRequestNodeKey("7") }},
 		{"GeneratedDocNodeKey", func() string { return GeneratedDocNodeKey("summary", "pr:7") }},

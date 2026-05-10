@@ -23,6 +23,7 @@ type funcRange struct {
 	EndLine      int      // Body closing brace line
 	ParamTypes   []string // Fully-qualified parameter types (e.g., "net/http.ResponseWriter")
 	ReceiverType string   // Receiver type for methods (e.g., "*SCIPIndexer")
+	IsClosureVar bool     // true when this range comes from `var X = func(...){}` at package scope
 }
 
 // branchRange represents a conditional block (if/switch/select) span in a Go file.
@@ -241,6 +242,22 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	// Parse branch ranges for conditional metadata on CALLS edges.
 	branches, _ := parseBranchRanges(fullPath)
 
+	// Upgrade Variable nodes for top-level `var X = func(...){}` to also bear
+	// the :Function label. This makes them visible to graphNodesByName below
+	// AND to the directTarget filter used when resolving callers from other
+	// files (`buildManager(...)` becomes a real CALLS target).
+	closureNames := make([]string, 0)
+	for _, fr := range funcRanges {
+		if fr.IsClosureVar {
+			closureNames = append(closureNames, fr.Name)
+		}
+	}
+	if len(closureNames) > 0 {
+		if err := cg.upgradeClosureVarsToFunction(ctx, filePath, closureNames); err != nil {
+			fmt.Printf("Warning: upgrade closure vars in %s: %v\n", filePath, err)
+		}
+	}
+
 	// Load graph node IDs for functions in this file, keyed by base name.
 	// We filter to only functions whose SCIP signature matches this file's
 	// Go package path, so cross-package references stored as Function nodes
@@ -342,7 +359,14 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 
 		_, err := cg.client.MergeRelationship(ctx, caller.ID, targetID, string(models.CallsRel),
 			nil,
-			map[string]any{"line": refLine, "filePath": filePath, "branchDepth": depth, "isConditional": isCond})
+			map[string]any{
+				"line":          refLine,
+				"filePath":      filePath,
+				"branchDepth":   depth,
+				"isConditional": isCond,
+				"scope":         cg.scopeCtx.Scope,
+				"scopeId":       cg.scopeCtx.ScopeID,
+			})
 		if err != nil {
 			fmt.Printf("Warning: failed to create CALLS edge: %v\n", err)
 			continue
@@ -351,6 +375,31 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	}
 
 	return created, nil
+}
+
+// upgradeClosureVarsToFunction adds the :Function label to Variable nodes
+// whose source is `var X = func(...){}` at package scope. The Variable label
+// is preserved (multi-label); the added :Function label makes them visible to
+// graphNodesByName and to call-graph target resolution. Without this, calls
+// to `X(...)` from any file resolve to nothing and calls inside X's body are
+// never attributed to a caller.
+func (cg *SCIPCallGraphBuilder) upgradeClosureVarsToFunction(ctx context.Context, filePath string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	query := `
+		MATCH (v:Variable)
+		WHERE v.filePath = $filePath
+		  AND v.scopeId = $scopeId
+		  AND v.name IN $names
+		SET v:Function
+	`
+	_, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
+		"filePath": filePath,
+		"scopeId":  cg.scopeCtx.ScopeID,
+		"names":    names,
+	})
+	return err
 }
 
 // graphNodesByName returns a map of base function name -> element ID for
@@ -362,12 +411,21 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 	// "pkg/indexer/static/scip_indexer.go" -> "pkg/indexer/static").
 	pkgDir := filepath.Dir(filePath)
 
+	// Match concrete definitions ("().") and top-level callable vars
+	// (term descriptors at package scope, no "#" parent — these are
+	// `var X = func(...){}` upgraded with :Function via
+	// upgradeClosureVarsToFunction). Interface method nodes (signature ends
+	// in "." with a "#" parent) stay excluded — they collide with
+	// implementation method names in the same file and SCIP fans out to
+	// impls via IMPLEMENTS in processFile.
 	query := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method)
 		  AND f.filePath = $filePath
 		  AND f.scopeId = $scopeId
 		  AND f.signature CONTAINS $pkgDir
+		  AND (f.signature ENDS WITH '().'
+		       OR (f.signature ENDS WITH '.' AND NOT f.signature CONTAINS '#'))
 		RETURN elementId(f) AS id, f.name AS name
 	`
 
@@ -476,6 +534,54 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 			ParamTypes:   paramTypes,
 			ReceiverType: receiverType,
 		})
+	}
+
+	// Top-level `var X = func(...){}` and `var X func(...)` initialized to a
+	// FuncLit. scip-go classifies these as Variable kind, but they're callable
+	// and have a body. We treat them as funcRanges so calls inside the closure
+	// get attributed to the var (via the upgraded :Function label, see
+	// upgradeClosureVarsToFunction).
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if i >= len(vs.Values) {
+					continue
+				}
+				lit, ok := vs.Values[i].(*ast.FuncLit)
+				if !ok || lit.Body == nil {
+					continue
+				}
+				var paramTypes []string
+				if lit.Type.Params != nil {
+					for _, field := range lit.Type.Params.List {
+						typeName := resolveTypeName(field.Type, importMap)
+						count := len(field.Names)
+						if count == 0 {
+							count = 1
+						}
+						for range count {
+							paramTypes = append(paramTypes, typeName)
+						}
+					}
+				}
+				ranges = append(ranges, funcRange{
+					Name:         name.Name,
+					DeclLine:     fset.Position(name.Pos()).Line,
+					StartLine:    fset.Position(lit.Body.Lbrace).Line,
+					EndLine:      fset.Position(lit.Body.Rbrace).Line,
+					ParamTypes:   paramTypes,
+					IsClosureVar: true,
+				})
+			}
+		}
 	}
 
 	return ranges, nil

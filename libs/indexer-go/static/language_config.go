@@ -156,6 +156,67 @@ func parseGoWork(goWorkPath string) []string {
 	return paths
 }
 
+// parsePnpmWorkspace reads a pnpm-workspace.yaml file and returns the absolute
+// directory paths matched by its `packages:` globs (e.g. "apps/*"). We do not
+// pull in a YAML library for one stanza — the format we care about is a flat
+// list of strings, parsed line by line. Globs are expanded with filepath.Glob
+// rooted at workspaceRoot.
+func parsePnpmWorkspace(yamlPath, workspaceRoot string) []string {
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		return nil
+	}
+	var matches []string
+	inPackages := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		// New top-level key ends the packages: block.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && strings.HasSuffix(trimmed, ":") {
+			inPackages = trimmed == "packages:"
+			continue
+		}
+		if !inPackages {
+			continue
+		}
+		// Workspace entries are list items: `- "apps/*"` or `- apps/*`.
+		if !strings.HasPrefix(trimmed, "-") {
+			continue
+		}
+		entry := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		entry = strings.Trim(entry, "\"'")
+		if entry == "" || strings.HasPrefix(entry, "!") {
+			// Negation patterns are workspace-feature edge cases; ignore for now.
+			continue
+		}
+		globbed, err := filepath.Glob(filepath.Join(workspaceRoot, entry))
+		if err != nil {
+			continue
+		}
+		for _, m := range globbed {
+			info, statErr := os.Stat(m)
+			if statErr != nil || !info.IsDir() {
+				continue
+			}
+			matches = append(matches, filepath.Clean(m))
+		}
+	}
+	return matches
+}
+
+// workspacePackageLanguage classifies a workspace package directory by its
+// manifest. Returns LanguageTypeScript when a tsconfig.json is present
+// (preferred for typed projects), LanguageJavaScript when only package.json
+// exists, or "" when neither is present (skip).
+func workspacePackageLanguage(pkgDir string) Language {
+	if _, err := os.Stat(filepath.Join(pkgDir, "tsconfig.json")); err == nil {
+		return LanguageTypeScript
+	}
+	if _, err := os.Stat(filepath.Join(pkgDir, "package.json")); err == nil {
+		return LanguageJavaScript
+	}
+	return ""
+}
+
 // DetectAllLanguages walks the project directory tree and returns every
 // (language, directory) root found. It is monorepo-aware:
 //
@@ -219,6 +280,28 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 		}
 		// Claim the whole workspace root for Go so WalkDir skips nested go.mod dirs.
 		foundLangDirs[LanguageGo] = append(foundLangDirs[LanguageGo], absRoot)
+	}
+
+	// ── pnpm/npm/yarn workspace pre-processing ─────────────────────────────
+	// If pnpm-workspace.yaml exists at the project root, expand each package
+	// glob into its own TypeScript/JavaScript LanguageRoot and claim the
+	// workspace root for both languages. This prevents the root tsconfig from
+	// being detected as a single TS root that swallows every workspace package
+	// under one Service node (the chat-ui-rolled-into-codegraph symptom).
+	pnpmWorkspacePath := filepath.Join(absRoot, "pnpm-workspace.yaml")
+	if _, err := os.Stat(pnpmWorkspacePath); err == nil {
+		for _, pkgDir := range parsePnpmWorkspace(pnpmWorkspacePath, absRoot) {
+			lang := workspacePackageLanguage(pkgDir)
+			if lang == "" {
+				continue
+			}
+			roots = append(roots, LanguageRoot{Language: lang, Path: pkgDir})
+			foundLangDirs[lang] = append(foundLangDirs[lang], pkgDir)
+		}
+		// Claim the workspace root for TS/JS so WalkDir does not re-detect the
+		// empty root tsconfig as a phantom service.
+		foundLangDirs[LanguageTypeScript] = append(foundLangDirs[LanguageTypeScript], absRoot)
+		foundLangDirs[LanguageJavaScript] = append(foundLangDirs[LanguageJavaScript], absRoot)
 	}
 
 	const maxSeparators = 3 // walk up to 4 levels deep (0-indexed)
