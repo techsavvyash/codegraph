@@ -357,40 +357,35 @@ func (s *SystemTestSuite) TestEnhancedLocationMetadata() {
 		// Query for functions with location metadata
 		cypher := `
 			MATCH (f:Function)
-			WHERE f.startByte IS NOT NULL AND f.endByte IS NOT NULL 
+			WHERE f.startByte IS NOT NULL AND f.endByte IS NOT NULL
 				AND f.startLine IS NOT NULL AND f.endLine IS NOT NULL
-				AND f.linesOfCode IS NOT NULL
-			RETURN f.name AS name, f.filePath AS filePath, 
+			RETURN f.name AS name, f.filePath AS filePath,
 				   f.startByte AS startByte, f.endByte AS endByte,
-				   f.startLine AS startLine, f.endLine AS endLine,
-				   f.linesOfCode AS linesOfCode
+				   f.startLine AS startLine, f.endLine AS endLine
 			LIMIT 5
 		`
-		
+
 		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
 		require.NoError(t, err)
-		
+
 		assert.Greater(t, len(result), 0, "Should find functions with location metadata")
-		
+
 		for _, record := range result {
 			recordMap := record.AsMap()
-			
+
 			// Verify all location fields are present and valid
 			assert.NotEmpty(t, recordMap["name"], "Function name should not be empty")
 			assert.NotEmpty(t, recordMap["filePath"], "File path should not be empty")
-			
+
 			startByte := recordMap["startByte"].(int64)
 			endByte := recordMap["endByte"].(int64)
 			startLine := recordMap["startLine"].(int64)
 			endLine := recordMap["endLine"].(int64)
-			linesOfCode := recordMap["linesOfCode"].(int64)
-			
+
 			assert.Greater(t, startByte, int64(0), "Start byte should be positive")
 			assert.Greater(t, endByte, startByte, "End byte should be greater than start byte")
 			assert.Greater(t, startLine, int64(0), "Start line should be positive")
 			assert.GreaterOrEqual(t, endLine, startLine, "End line should be >= start line")
-			assert.Greater(t, linesOfCode, int64(0), "Lines of code should be positive")
-			assert.Equal(t, endLine-startLine+1, linesOfCode, "Lines of code should match line range")
 		}
 	})
 
@@ -400,24 +395,21 @@ func (s *SystemTestSuite) TestEnhancedLocationMetadata() {
 			MATCH (m:Method)
 			WHERE m.startByte IS NOT NULL AND m.endByte IS NOT NULL
 			RETURN m.name AS name, m.filePath AS filePath,
-				   m.startByte AS startByte, m.endByte AS endByte,
-				   m.linesOfCode AS linesOfCode
+				   m.startByte AS startByte, m.endByte AS endByte
 			LIMIT 3
 		`
-		
+
 		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
 		require.NoError(t, err)
-		
+
 		assert.Greater(t, len(result), 0, "Should find methods with location metadata")
-		
+
 		for _, record := range result {
 			recordMap := record.AsMap()
 			startByte := recordMap["startByte"].(int64)
 			endByte := recordMap["endByte"].(int64)
-			linesOfCode := recordMap["linesOfCode"].(int64)
-			
+
 			assert.Greater(t, endByte, startByte, "Method end byte > start byte")
-			assert.Greater(t, linesOfCode, int64(0), "Method should have positive LOC")
 		}
 	})
 }
@@ -534,37 +526,6 @@ func (s *SystemTestSuite) TestByteOffsetAccuracy() {
 			// Verify it contains function-like content
 			assert.Contains(t, directExtraction, "func", "Extracted code should contain func")
 			assert.Contains(t, directExtraction, functionName, "Extracted code should contain function name")
-		}
-	})
-}
-
-// TestLocationMetadataConsistency tests consistency across different indexing methods
-func (s *SystemTestSuite) TestLocationMetadataConsistency() {
-	s.T().Run("CompareASTAndSCIPMetadata", func(t *testing.T) {
-		// This test would be more comprehensive with both AST and SCIP data
-		// For now, verify internal consistency
-		cypher := `
-			MATCH (f:Function)
-			WHERE f.startLine IS NOT NULL AND f.endLine IS NOT NULL 
-				AND f.linesOfCode IS NOT NULL
-			RETURN f.name AS name, f.startLine AS startLine, f.endLine AS endLine,
-				   f.linesOfCode AS linesOfCode
-			LIMIT 10
-		`
-		
-		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
-		require.NoError(t, err)
-		
-		for _, record := range result {
-			recordMap := record.AsMap()
-			startLine := recordMap["startLine"].(int64)
-			endLine := recordMap["endLine"].(int64)
-			linesOfCode := recordMap["linesOfCode"].(int64)
-			
-			expectedLOC := endLine - startLine + 1
-			assert.Equal(t, expectedLOC, linesOfCode, 
-				"Lines of code should match calculated value for function %s", 
-				recordMap["name"])
 		}
 	})
 }

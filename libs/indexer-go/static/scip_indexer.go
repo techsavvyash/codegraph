@@ -843,11 +843,6 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 	}
 
 	if label == "Function" || label == "Method" {
-		if symbolInfo.EndLine > symbolInfo.StartLine {
-			props["linesOfCode"] = symbolInfo.EndLine - symbolInfo.StartLine + 1
-		} else {
-			props["linesOfCode"] = 1
-		}
 		if symbolInfo.FilePath != "" {
 			startByte, endByte := si.calculateByteOffsets(symbolInfo.FilePath,
 				symbolInfo.StartLine, symbolInfo.StartColumn,
@@ -863,7 +858,6 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 	case "Function", "Method":
 		props["returnType"] = ""
 		props["isExported"] = si.computeIsExported(symbolInfo.DisplayName)
-		props["complexity"] = 1
 		props["docstring"] = symbolInfo.Documentation
 		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
 	case "Class":

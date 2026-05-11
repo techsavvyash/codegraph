@@ -183,61 +183,6 @@ func (aqs *AdvancedQueryService) AnalyzeDependencies(ctx context.Context, req De
 	}, nil
 }
 
-// ComplexityAnalysisRequest represents a complexity analysis request
-type ComplexityAnalysisRequest struct {
-	ServiceName string `json:"serviceName,omitempty"`
-	FilePath    string `json:"filePath,omitempty"`
-}
-
-// ComplexityMetrics represents complexity metrics for a code element
-type ComplexityMetrics struct {
-	Name               string  `json:"name"`
-	Type               string  `json:"type"`
-	FilePath           string  `json:"filePath"`
-	CyclomaticComplexity int   `json:"cyclomaticComplexity"`
-	LinesOfCode        int     `json:"linesOfCode"`
-	ParameterCount     int     `json:"parameterCount"`
-	CallCount          int     `json:"callCount"`
-	ComplexityScore    float64 `json:"complexityScore"`
-}
-
-// ComplexityAnalysisResponse represents complexity analysis results
-type ComplexityAnalysisResponse struct {
-	ServiceName string               `json:"serviceName,omitempty"`
-	FilePath    string               `json:"filePath,omitempty"`
-	Functions   []*ComplexityMetrics `json:"functions"`
-	Classes     []*ComplexityMetrics `json:"classes"`
-	Summary     *ComplexitySummary   `json:"summary"`
-}
-
-// ComplexitySummary represents overall complexity summary
-type ComplexitySummary struct {
-	TotalFunctions     int     `json:"totalFunctions"`
-	AverageComplexity  float64 `json:"averageComplexity"`
-	MaxComplexity      int     `json:"maxComplexity"`
-	HighComplexityCount int    `json:"highComplexityCount"`
-}
-
-// AnalyzeComplexity analyzes code complexity metrics
-func (aqs *AdvancedQueryService) AnalyzeComplexity(ctx context.Context, req ComplexityAnalysisRequest) (*ComplexityAnalysisResponse, error) {
-	// This is a placeholder implementation
-	// In a full implementation, we would query the database for complexity metrics
-	// and calculate various complexity scores
-	
-	return &ComplexityAnalysisResponse{
-		ServiceName: req.ServiceName,
-		FilePath:    req.FilePath,
-		Functions:   []*ComplexityMetrics{},
-		Classes:     []*ComplexityMetrics{},
-		Summary: &ComplexitySummary{
-			TotalFunctions:      0,
-			AverageComplexity:   0.0,
-			MaxComplexity:       0,
-			HighComplexityCount: 0,
-		},
-	}, nil
-}
-
 // CallGraphRequest represents a call graph request
 type CallGraphRequest struct {
 	RootFunction string `json:"rootFunction"`

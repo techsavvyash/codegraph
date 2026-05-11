@@ -109,7 +109,6 @@ type Function struct {
 	EndLine     int    `json:"endLine" neo4j:"endLine"`
 	IsExported  bool   `json:"isExported" neo4j:"isExported"`
 	IsAsync     bool   `json:"isAsync" neo4j:"isAsync"`
-	Complexity  int    `json:"complexity" neo4j:"complexity"`
 	Docstring   string `json:"docstring" neo4j:"docstring"`
 }
 
@@ -126,7 +125,6 @@ type Method struct {
 	IsStatic       bool   `json:"isStatic" neo4j:"isStatic"`
 	IsAbstract     bool   `json:"isAbstract" neo4j:"isAbstract"`
 	IsOverride     bool   `json:"isOverride" neo4j:"isOverride"`
-	Complexity     int    `json:"complexity" neo4j:"complexity"`
 	Docstring      string `json:"docstring" neo4j:"docstring"`
 }
 

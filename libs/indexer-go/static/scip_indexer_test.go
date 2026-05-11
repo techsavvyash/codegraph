@@ -128,10 +128,8 @@ func TestComputeDefinitionProps(t *testing.T) {
 			wantLabel:     "Function",
 			wantKeyPrefix: "func:",
 			checkProps: func(t *testing.T, props map[string]any) {
-				assertProp(t, props, "linesOfCode", 11)
 				assertProp(t, props, "returnType", "")
 				assertProp(t, props, "isExported", true)
-				assertProp(t, props, "complexity", 1)
 				if _, ok := props["docstring"]; !ok {
 					t.Error("missing docstring prop")
 				}
@@ -151,7 +149,6 @@ func TestComputeDefinitionProps(t *testing.T) {
 			wantLabel:     "Method",
 			wantKeyPrefix: "method:",
 			checkProps: func(t *testing.T, props map[string]any) {
-				assertProp(t, props, "linesOfCode", 1)
 				assertProp(t, props, "returnType", "")
 			},
 		},

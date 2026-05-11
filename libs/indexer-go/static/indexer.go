@@ -377,10 +377,8 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 		"endColumn":   endPos.Column,
 		"startByte":   v.fset.Position(fn.Pos()).Offset,
 		"endByte":     v.fset.Position(fn.End()).Offset,
-		"linesOfCode": endPos.Line - startPos.Line + 1,
 		"isExported":  isExported,
 		"isAsync":     false, // Go doesn't have async functions like JS
-		"complexity":  1,     // TODO: Calculate cyclomatic complexity
 		"docstring":   v.extractDocstring(fn.Doc),
 		"createdAt":   time.Now().UTC().Unix(),
 		"updatedAt":   time.Now().UTC().Unix(),
@@ -468,7 +466,6 @@ func (v *astVisitor) indexStruct(name string, structType *ast.StructType, startP
 		"endColumn":      endPos.Column,
 		"startByte":      startPos.Offset,
 		"endByte":        endPos.Offset,
-		"linesOfCode":    endPos.Line - startPos.Line + 1,
 		"accessModifier": "public", // Go structs are public if capitalized
 		"isAbstract":     false,
 		"isInterface":    false,
@@ -520,7 +517,6 @@ func (v *astVisitor) indexInterfaceType(name string, interfaceType *ast.Interfac
 		"endColumn":   endPos.Column,
 		"startByte":   startPos.Offset,
 		"endByte":     endPos.Offset,
-		"linesOfCode": endPos.Line - startPos.Line + 1,
 		"docstring":   "", // TODO: Extract docstring
 		"createdAt":   time.Now().UTC().Unix(),
 		"updatedAt":   time.Now().UTC().Unix(),
