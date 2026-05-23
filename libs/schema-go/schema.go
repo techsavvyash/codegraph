@@ -133,24 +133,6 @@ func GetIndexes() []Index {
 			Properties: []string{"method"},
 			Type:       "BTREE",
 		},
-		{
-			Name:       "document_title_idx",
-			NodeLabel:  "Document",
-			Properties: []string{"title"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "document_type_idx",
-			NodeLabel:  "Document",
-			Properties: []string{"type"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "feature_name_idx",
-			NodeLabel:  "Feature",
-			Properties: []string{"name"},
-			Type:       "BTREE",
-		},
 		// Note: Full-text search requires Neo4j Enterprise
 		// Using regular BTREE indexes for basic search functionality
 		// (search_name_idx removed: duplicate of function_name_idx on Function.name)
@@ -241,18 +223,6 @@ func GetIndexes() []Index {
 			Type:       "BTREE",
 		},
 		{
-			Name:       "document_nodekey_idx",
-			NodeLabel:  "Document",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "feature_nodekey_idx",
-			NodeLabel:  "Feature",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
 			Name:       "reference_nodekey_idx",
 			NodeLabel:  "Reference",
 			Properties: []string{"nodeKey"},
@@ -313,18 +283,6 @@ func GetIndexes() []Index {
 			Properties: []string{"nodeKey", "scopeId"},
 			Type:       "BTREE",
 		},
-		{
-			Name:       "document_nodekey_scope_idx",
-			NodeLabel:  "Document",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "feature_nodekey_scope_idx",
-			NodeLabel:  "Feature",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
 		// Scope filter indexes for querying by scope (Phase 2)
 		{
 			Name:       "function_scope_idx",
@@ -350,31 +308,6 @@ func GetIndexes() []Index {
 			Properties: []string{"scope", "scopeId"},
 			Type:       "BTREE",
 		},
-		// DocumentChunk indexes (Task 4)
-		{
-			Name:       "docchunk_nodekey_idx",
-			NodeLabel:  "DocumentChunk",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "docchunk_nodekey_scope_idx",
-			NodeLabel:  "DocumentChunk",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "docchunk_dockey_scope_idx",
-			NodeLabel:  "DocumentChunk",
-			Properties: []string{"documentKey", "scopeId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "docchunk_texthash_idx",
-			NodeLabel:  "DocumentChunk",
-			Properties: []string{"textHash"},
-			Type:       "BTREE",
-		},
 		// Flow indexes (Task 9)
 		{
 			Name:       "flow_nodekey_idx",
@@ -398,50 +331,6 @@ func GetIndexes() []Index {
 			Name:       "flow_type_idx",
 			NodeLabel:  "Flow",
 			Properties: []string{"flowType"},
-			Type:       "BTREE",
-		},
-		// PullRequest indexes (Task 10)
-		{
-			Name:       "pr_nodekey_idx",
-			NodeLabel:  "PullRequest",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "pr_nodekey_scope_idx",
-			NodeLabel:  "PullRequest",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "pr_prid_idx",
-			NodeLabel:  "PullRequest",
-			Properties: []string{"prId"},
-			Type:       "BTREE",
-		},
-		// GeneratedDoc indexes (Task 10)
-		{
-			Name:       "gendoc_nodekey_idx",
-			NodeLabel:  "GeneratedDoc",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "gendoc_nodekey_scope_idx",
-			NodeLabel:  "GeneratedDoc",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "gendoc_type_idx",
-			NodeLabel:  "GeneratedDoc",
-			Properties: []string{"type"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "gendoc_sourcekey_idx",
-			NodeLabel:  "GeneratedDoc",
-			Properties: []string{"sourceKey"},
 			Type:       "BTREE",
 		},
 		// Tombstone indexes (Phase 3)
@@ -473,12 +362,6 @@ func GetIndexes() []Index {
 		{
 			Name:       "service_tenant_repo_idx",
 			NodeLabel:  "Service",
-			Properties: []string{"tenantId", "repoId"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "document_tenant_repo_idx",
-			NodeLabel:  "Document",
 			Properties: []string{"tenantId", "repoId"},
 			Type:       "BTREE",
 		},
@@ -559,6 +442,86 @@ func GetIndexes() []Index {
 			Name:       "method_istest_idx",
 			NodeLabel:  "Method",
 			Properties: []string{"isTestFunction"},
+			Type:       "BTREE",
+		},
+		// GRPCCall / HTTPCall / OutboxCall indexes (Phase 7 — cross-service RPC gap fix)
+		{
+			Name:       "grpccall_nodekey_idx",
+			NodeLabel:  "GRPCCall",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "grpccall_nodekey_scope_idx",
+			NodeLabel:  "GRPCCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "grpccall_caller_scope_idx",
+			NodeLabel:  "GRPCCall",
+			Properties: []string{"callerService", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "grpccall_target_scope_idx",
+			NodeLabel:  "GRPCCall",
+			Properties: []string{"targetService", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "httpcall_nodekey_idx",
+			NodeLabel:  "HTTPCall",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "httpcall_nodekey_scope_idx",
+			NodeLabel:  "HTTPCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "httpcall_caller_scope_idx",
+			NodeLabel:  "HTTPCall",
+			Properties: []string{"callerService", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "outboxcall_nodekey_idx",
+			NodeLabel:  "OutboxCall",
+			Properties: []string{"nodeKey"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "outboxcall_nodekey_scope_idx",
+			NodeLabel:  "OutboxCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "outboxcall_event_scope_idx",
+			NodeLabel:  "OutboxCall",
+			Properties: []string{"eventType", "scopeId"},
+			Type:       "BTREE",
+		},
+		// DBCall indexes (Phase 1 — DBCall Node & Relationship)
+		{
+			Name:       "dbcall_nodekey_scope_idx",
+			NodeLabel:  "DBCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "dbcall_table_service_idx",
+			NodeLabel:  "DBCall",
+			Properties: []string{"table", "serviceName"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "dbcall_operation_idx",
+			NodeLabel:  "DBCall",
+			Properties: []string{"operation"},
 			Type:       "BTREE",
 		},
 	}

@@ -288,9 +288,9 @@ func (cge *CallGraphExtractor) ExtractDataFlows(ctx context.Context, funcDecl *a
 	return nil
 }
 
-// createDataFlowRelationship creates FLOWS_TO relationships
+// createDataFlowRelationship is a placeholder for future data-flow analysis.
+// FLOWS_TO and NEXT_EXECUTION are excluded from the call-graph pipeline (see
+// noiseRelTypes in scip_indexer.go); do not write them here.
 func (cge *CallGraphExtractor) createDataFlowRelationship(ctx context.Context, sourceID, varName, flowType string) {
-	// This is a placeholder for data flow analysis
-	// A full implementation would track actual variable usage across functions
 	log.Printf("Data flow: %s returns %s (%s)", sourceID, varName, flowType)
 }

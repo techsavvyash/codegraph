@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
 	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
@@ -137,6 +140,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 	fileNodes := make(map[string]string) // filePath -> nodeID mapping
 	for _, file := range files {
+		if isNoisyFilePath(file.Path) {
+			continue
+		}
 		fileID, err := si.createFileNode(ctx, file, serviceID)
 		if err != nil {
 			fmt.Printf("Warning: failed to create file node for %s: %v\n", file.Path, err)
@@ -158,6 +164,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	if err != nil {
 		return fmt.Errorf("failed to extract symbols: %w", err)
 	}
+	// Filter out symbols defined in test files and strip test-file references.
+	symbolDefs = filterTestSymbols(symbolDefs)
 	if si.timer != nil {
 		si.timer.Stop(len(symbolDefs), fmt.Sprintf("%d symbols", len(symbolDefs)))
 	}
@@ -186,7 +194,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		fmt.Printf("Extracted %d SCIP relationships (%d implementation)\n", len(scipRels), implCount)
 
-		if implCount > 0 {
+		if implCount > 0 && !isNoiseRelType(models.ImplementsRel) {
 			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey)
 			if len(batch) > 0 {
 				if err := si.client.CreateRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
@@ -258,6 +266,27 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")
+	}
+
+	// Step 9b: Detect cross-service RPC call sites.
+	// For Go: use AST-based detection (fast, no Reference nodes needed).
+	// For other languages: fall back to SCIP graph traversal (needs Reference nodes).
+	if si.language == LanguageGo {
+		fmt.Println("Detecting cross-service RPC call sites via Go AST...")
+		if err := si.runASTRPCDetection(ctx, projectPath); err != nil {
+			fmt.Printf("Warning: AST RPC detection failed: %v\n", err)
+		}
+	} else {
+		fmt.Println("Detecting cross-service RPC call sites via SCIP symbols...")
+		rpcDetector := NewSCIPRPCDetector(si.client, si.serviceName, si.scopeCtx)
+		if svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID); idxErr == nil {
+			rpcDetector.SetServiceIndex(svcIdx)
+		} else {
+			fmt.Printf("Warning: failed to preload service index for SCIP detector: %v\n", idxErr)
+		}
+		if err := rpcDetector.DetectRPCCalls(ctx); err != nil {
+			fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+		}
 	}
 
 	// Step 10b: API analysis (depends on body ranges from call graph step above)
@@ -765,6 +794,34 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 
 const batchSize = 500
 
+// noiseNodeLabels lists node labels that must never be written by the
+// call-graph indexing pipeline. These types belong to other subsystems
+// (document indexer, generated-context) and inflate write volume without
+// contributing to any RPC context query.
+var noiseNodeLabels = map[string]bool{
+	"Document":             true,
+	"DocumentChunk":        true,
+	"Feature":              true,
+	"PullRequest":          true,
+	"GeneratedDoc":         true,
+	"GenerationDiagnostic": true,
+}
+
+// noiseRelTypes lists relationship types that must never be written by the
+// call-graph indexing pipeline. REFERENCES volume is too high (~50K per service)
+// and is not used in any RPC traversal query. INHERITS_FROM and SCHEDULED_BY
+// are not in any RPC traversal path and contribute no signal to cross-service context.
+var noiseRelTypes = map[models.RelationshipType]bool{
+	models.ReferencesRel:   true,
+	models.InheritsFromRel: true,
+	models.ScheduledByRel:  true,
+}
+
+// isNoiseRelType returns true if rt must not be written by the call-graph pipeline.
+func isNoiseRelType(rt models.RelationshipType) bool {
+	return noiseRelTypes[rt]
+}
+
 // dedupeByNodeKey keeps only the last item for each nodeKey, preventing
 // UNWIND MERGE race conditions when duplicate keys appear in the same batch.
 func dedupeByNodeKey(items []map[string]any) []map[string]any {
@@ -889,6 +946,9 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	defIDs := make(map[string]string) // defNodeKey → elementId
 	t = time.Now()
 	for lbl, batch := range labelGroups {
+		if noiseNodeLabels[lbl] {
+			continue
+		}
 		batch = dedupeByNodeKey(batch)
 		ids, err := si.client.MergeNodesBatch(ctx, lbl, batch, batchSize)
 		if err != nil {
@@ -975,6 +1035,9 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	var refItems []refItem
 
 	for _, sd := range symbolDefs {
+		if sd.Info == nil || !isFunctionReferenceKind(sd.Info.Kind) {
+			continue
+		}
 		symNK := models.SymbolNodeKey(sd.Info.Symbol.String())
 		if _, exists := symbolIDs[symNK]; !exists {
 			continue
@@ -1009,6 +1072,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			})
 		}
 	}
+	fmt.Printf("  Built %d reference items from %d symbols\n", len(refItems), len(symbolDefs))
 
 	// 1. Batch merge all Reference nodes (deduplicated)
 	refBatch := make([]map[string]any, len(refItems))
@@ -1020,6 +1084,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		}
 	}
 	refBatch = dedupeByNodeKey(refBatch)
+	fmt.Printf("  After dedup: %d unique Reference nodes to merge (batchSize=%d, batches=%d)\n",
+		len(refBatch), batchSize, (len(refBatch)+batchSize-1)/batchSize)
 
 	t = time.Now()
 	refIDs, err := si.client.MergeNodesBatch(ctx, "Reference", refBatch, batchSize)
@@ -1028,7 +1094,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		fmt.Printf("Warning: batch merge Reference nodes failed: %v\n", err)
 		refIDs = make(map[string]string)
 	}
-	fmt.Printf("Merged %d Reference nodes\n", len(refIDs))
+	fmt.Printf("  Merged %d Reference nodes in %s\n", len(refIDs), tMergeRef)
 
 	// 2. Batch create REFERENCES rels (refID → symbolID)
 	var referencesRels []map[string]any
@@ -1043,12 +1109,17 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			})
 		}
 	}
-
-	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
+	tRelReferences := time.Duration(0)
+	if !isNoiseRelType(models.ReferencesRel) {
+		fmt.Printf("  Creating %d REFERENCES rels (%d batches)...\n",
+			len(referencesRels), (len(referencesRels)+batchSize-1)/batchSize)
+		t = time.Now()
+		if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
+			fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
+		}
+		tRelReferences = time.Since(t)
+		fmt.Printf("  Created REFERENCES rels in %s\n", tRelReferences)
 	}
-	tRelReferences := time.Since(t)
 
 	// 3. Batch create CONTAINS rels (fileID → refID)
 	var refContainsRels []map[string]any
@@ -1063,12 +1134,15 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			})
 		}
 	}
+	fmt.Printf("  Creating %d CONTAINS rels for refs (%d batches)...\n",
+		len(refContainsRels), (len(refContainsRels)+batchSize-1)/batchSize)
 
 	t = time.Now()
 	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
 		fmt.Printf("Warning: batch create ref CONTAINS rels failed: %v\n", err)
 	}
 	tRelRefContains := time.Since(t)
+	fmt.Printf("  Created CONTAINS rels for refs in %s\n", tRelRefContains)
 
 	if si.timer != nil {
 		si.timer.Stop(len(refItems), fmt.Sprintf("%d refs", len(refItems)))
@@ -1170,7 +1244,6 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	return nil
 }
 
-
 // SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
 func (si *SCIPIndexer) SetSCIPBinary(binary string) {
 	si.langConfig.SCIPBinary = binary
@@ -1244,6 +1317,208 @@ func (si *SCIPIndexer) SetTextStore(store textindex.TextIndexStore) {
 // GetLanguage returns the language this indexer is configured for
 func (si *SCIPIndexer) GetLanguage() Language {
 	return si.language
+}
+
+// runASTRPCDetection walks all Go source files in projectPath, parses each
+// function's AST, and runs the AST-based RPC detector. This requires Function
+// nodes to already exist in Neo4j (created during symbol indexing) but does NOT
+// require Reference nodes — making it fast and timeout-proof.
+func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath string) error {
+	// Batch-load all Function/Method node IDs for this service into memory.
+	funcIDs, err := si.loadFunctionIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load function IDs: %w", err)
+	}
+	fmt.Printf("  Loaded %d function/method IDs from Neo4j\n", len(funcIDs))
+
+	svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID)
+	if idxErr != nil {
+		fmt.Printf("Warning: failed to preload service index for AST detector: %v\n", idxErr)
+	}
+
+	callBuffer := newCallNodeBuffer(si.scopeCtx.ScopeID)
+	rpcDet := NewRPCCallDetector(si.client, si.serviceName, si.scopeCtx)
+	rpcDet.SetCallNodeBuffer(callBuffer)
+	rpcDet.SetServiceIndex(svcIdx)
+
+	eventDet := NewEventCallDetector(si.client, si.serviceName, si.scopeCtx)
+	eventDet.SetCallNodeBuffer(callBuffer)
+
+	dbDet := NewDBCallDetector(si.client, si.serviceName, si.scopeCtx)
+	dbDet.SetCallNodeBuffer(callBuffer)
+
+	detected, skipped := 0, 0
+	err = filepath.Walk(projectPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		if !strings.HasSuffix(path, ".go") || isNoisyFilePath(path) {
+			return nil
+		}
+
+		fset := token.NewFileSet()
+		astFile, parseErr := goparser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return nil
+		}
+
+		for _, decl := range astFile.Decls {
+			funcDecl, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if isObservabilityFunction(funcDecl.Name.Name, path) {
+				continue
+			}
+			funcID := funcIDs[path+":"+funcDecl.Name.Name]
+			if funcID == "" {
+				skipped++
+				continue
+			}
+			_ = rpcDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
+			_ = eventDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
+			_ = dbDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
+			detected++
+		}
+		return nil
+	})
+
+	fmt.Printf("  AST RPC scan complete: %d functions processed, %d skipped (no Neo4j ID)\n", detected, skipped)
+	if err != nil {
+		return err
+	}
+	if flushErr := callBuffer.flush(ctx, si.client); flushErr != nil {
+		return fmt.Errorf("failed to flush call-node buffer: %w", flushErr)
+	}
+	return nil
+}
+
+// loadFunctionIDs returns a map of "filePath:funcName" → Neo4j elementId for all
+// Function and Method nodes belonging to this service scope.
+func (si *SCIPIndexer) loadFunctionIDs(ctx context.Context) (map[string]string, error) {
+	query := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND fn.scopeId = $scopeId
+		RETURN fn.filePath AS filePath, fn.name AS name, elementId(fn) AS id
+	`
+	results, err := si.client.ExecuteQuery(ctx, query, map[string]any{
+		"scopeId": si.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(results))
+	for _, rec := range results {
+		data := rec.AsMap()
+		fp, _ := data["filePath"].(string)
+		name, _ := data["name"].(string)
+		id, _ := data["id"].(string)
+		if fp != "" && name != "" && id != "" {
+			m[fp+":"+name] = id
+		}
+	}
+	return m, nil
+}
+
+// isTestFilePath returns true if the file path belongs to a test file across
+// Go, Python, and TypeScript/JavaScript conventions.
+func isTestFilePath(path string) bool {
+	p := strings.ToLower(path)
+	return strings.HasSuffix(p, "_test.go") ||
+		strings.HasSuffix(p, "_test.py") ||
+		strings.HasSuffix(p, "test_.py") ||
+		strings.HasSuffix(p, ".test.ts") ||
+		strings.HasSuffix(p, ".spec.ts") ||
+		strings.HasSuffix(p, ".test.js") ||
+		strings.HasSuffix(p, ".spec.js") ||
+		strings.HasSuffix(p, ".test.tsx") ||
+		strings.HasSuffix(p, ".spec.tsx") ||
+		strings.Contains(p, "/tests/") ||
+		strings.Contains(p, "/__tests__/")
+}
+
+// isGeneratedFilePath returns true for machine-generated source files that
+// should be excluded from Reference indexing (protobuf, gRPC stubs, etc.).
+func isGeneratedFilePath(path string) bool {
+	p := strings.ToLower(path)
+	return strings.HasSuffix(p, ".pb.go") ||
+		strings.Contains(p, "/gen/") ||
+		strings.HasPrefix(p, "gen/") ||
+		strings.Contains(p, "/generated/") ||
+		strings.HasPrefix(p, "generated/") ||
+		strings.Contains(p, "/vendor/") ||
+		strings.HasPrefix(p, "vendor/")
+}
+
+// isNoisyFilePath returns true for files that should be skipped during indexing
+// (test files and generated/vendor files).
+func isNoisyFilePath(path string) bool {
+	return isTestFilePath(path) || isGeneratedFilePath(path)
+}
+
+func isFunctionReferenceKind(kind models.SymbolKind) bool {
+	switch kind {
+	case models.FunctionSymbol, models.MethodSymbol:
+		return true
+	default:
+		return false
+	}
+}
+
+// isObservabilityFunction returns true for metric/telemetry helper functions that
+// add noise to the call graph without representing real business logic or RPC calls.
+// Patterns: increment*/decrement*/observe*/record*/emit* + Metric suffix,
+// plus common telemetry file names.
+func isObservabilityFunction(funcName, filePath string) bool {
+	n := strings.ToLower(funcName)
+	// Name-based: metric counter/gauge/histogram helpers
+	if strings.HasSuffix(n, "metric") || strings.HasSuffix(n, "metrics") {
+		return true
+	}
+	// Telemetry span/trace helpers
+	if strings.HasSuffix(n, "span") || strings.HasSuffix(n, "trace") {
+		return true
+	}
+	// Logging helpers (logError, logRequest etc.) — distinct from business log calls
+	if (strings.HasPrefix(n, "log") || strings.HasPrefix(n, "emit")) &&
+		len(funcName) > 3 {
+		return true
+	}
+	// File-based: entire metrics/telemetry files
+	base := strings.ToLower(filepath.Base(filePath))
+	return base == "metrics.go" || base == "metric.go" ||
+		base == "telemetry.go" || base == "instrumentation.go" ||
+		base == "observability.go" || strings.Contains(base, "metrics_")
+}
+
+// filterTestSymbols removes symbols whose definition lives in a noisy file
+// (test or generated) or is an observability helper, and strips noisy-file
+// references from surviving symbols.
+func filterTestSymbols(defs []*models.SymbolDefinition) []*models.SymbolDefinition {
+	out := defs[:0]
+	for _, sd := range defs {
+		if sd.Info == nil {
+			continue
+		}
+		if isNoisyFilePath(sd.Info.FilePath) {
+			continue
+		}
+		if (sd.Info.Kind == models.FunctionSymbol || sd.Info.Kind == models.MethodSymbol) &&
+			isObservabilityFunction(sd.Info.DisplayName, sd.Info.FilePath) {
+			continue
+		}
+		// Strip references that point into noisy files.
+		kept := sd.Refs[:0]
+		for _, ref := range sd.Refs {
+			if !isNoisyFilePath(ref.FilePath) {
+				kept = append(kept, ref)
+			}
+		}
+		sd.Refs = kept
+		out = append(out, sd)
+	}
+	return out
 }
 
 // isTestFunction determines if a function is a test function based on its name

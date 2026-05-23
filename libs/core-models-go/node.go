@@ -18,15 +18,22 @@ const (
 	VariableNode  NodeType = "Variable"
 	ParameterNode NodeType = "Parameter"
 	SymbolNode    NodeType = "Symbol"
-	APIRouteNode  NodeType = "APIRoute"
-	CommentNode   NodeType = "Comment"
-	DocumentNode      NodeType = "Document"
-	DocumentChunkNode NodeType = "DocumentChunk"
-	FlowNode          NodeType = "Flow"
-	FeatureNode       NodeType = "Feature"
-	PullRequestNode   NodeType = "PullRequest"
-	GeneratedDocNode            NodeType = "GeneratedDoc"
-	GenerationDiagnosticNode    NodeType = "GenerationDiagnostic"
+	APIRouteNode   NodeType = "APIRoute"
+	GRPCCallNode   NodeType = "GRPCCall"
+	HTTPCallNode   NodeType = "HTTPCall"
+	OutboxCallNode NodeType = "OutboxCall"
+	DBCallNode     NodeType = "DBCall"
+	CommentNode NodeType = "Comment"
+	FlowNode    NodeType = "Flow"
+
+	// Deprecated: noise — not written during call-graph indexing.
+	// Kept for document-indexer and generated-context compatibility.
+	DocumentNode             NodeType = "Document"
+	DocumentChunkNode        NodeType = "DocumentChunk"
+	FeatureNode              NodeType = "Feature"
+	PullRequestNode          NodeType = "PullRequest"
+	GeneratedDocNode         NodeType = "GeneratedDoc"
+	GenerationDiagnosticNode NodeType = "GenerationDiagnostic"
 )
 
 // BaseNode represents common properties for all nodes
@@ -173,6 +180,51 @@ type APIRoute struct {
 	Version      string `json:"version" neo4j:"version"`
 }
 
+// GRPCCall represents a gRPC outbound call site within a function body.
+type GRPCCall struct {
+	BaseNode
+	CallerService string `json:"callerService" neo4j:"callerService"`
+	TargetService string `json:"targetService" neo4j:"targetService"`
+	TargetMethod  string `json:"targetMethod"  neo4j:"targetMethod"`
+	ProtoPackage  string `json:"protoPackage"  neo4j:"protoPackage"`
+	FilePath      string `json:"filePath"      neo4j:"filePath"`
+	Line          int    `json:"line"          neo4j:"line"`
+}
+
+// HTTPCall represents an outbound HTTP call site within a function body.
+type HTTPCall struct {
+	BaseNode
+	CallerService string `json:"callerService" neo4j:"callerService"`
+	TargetService string `json:"targetService" neo4j:"targetService"`
+	URL           string `json:"url"           neo4j:"url"`
+	Method        string `json:"method"        neo4j:"method"`
+	FilePath      string `json:"filePath"      neo4j:"filePath"`
+	Line          int    `json:"line"          neo4j:"line"`
+}
+
+// OutboxCall represents a message publish/enqueue site (outbox, SQS, Kafka, NATS, etc.).
+type OutboxCall struct {
+	BaseNode
+	CallerService string `json:"callerService"  neo4j:"callerService"`
+	Transport     string `json:"transport"      neo4j:"transport"`
+	EventType     string `json:"eventType"      neo4j:"eventType"`
+	QueueOrTopic  string `json:"queueOrTopic"   neo4j:"queueOrTopic"`
+	FilePath      string `json:"filePath"       neo4j:"filePath"`
+	Line          int    `json:"line"           neo4j:"line"`
+}
+
+// DBCall represents a database query call site within a function body.
+// NodeKey pattern: dbcall:{scopeId}:{serviceName}:{filePath}:{line}
+type DBCall struct {
+	BaseNode
+	Table        string `json:"table" neo4j:"table"`
+	Operation    string `json:"operation" neo4j:"operation"` // SELECT, INSERT, UPDATE, DELETE
+	QueryPattern string `json:"queryPattern" neo4j:"queryPattern"`
+	ServiceName  string `json:"serviceName" neo4j:"serviceName"`
+	FilePath     string `json:"filePath" neo4j:"filePath"`
+	Line         int    `json:"line" neo4j:"line"`
+}
+
 // Comment represents code comments and docstrings
 type Comment struct {
 	BaseNode
@@ -308,6 +360,22 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case APIRouteNode:
 		return &APIRoute{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case GRPCCallNode:
+		return &GRPCCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case HTTPCallNode:
+		return &HTTPCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case OutboxCallNode:
+		return &OutboxCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case DBCallNode:
+		return &DBCall{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case CommentNode:

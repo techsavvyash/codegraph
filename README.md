@@ -19,11 +19,27 @@ CodeGraph transforms your codebase into a queryable knowledge graph that enables
 
 ## 🏗️ Architecture
 
-The platform consists of three main pipelines:
+The current implementation exposes four production indexing paths:
 
-1. **Static Indexing Pipeline**: Comprehensive indexing of stable codebases using SCIP protocol
-2. **Incremental Indexing Pipeline**: Real-time updates using tree-sitter (planned)
-3. **Document Indexing Pipeline**: Integration with business documents and specifications (planned)
+1. **SCIP Indexing Pipeline (default)**: Multi-language indexing via `codegraph index scip` (single-language or polyglot auto-detect).
+2. **AST Indexing Pipeline (Go legacy)**: Go-only AST indexing via `codegraph index project` and `codegraph index incremental`.
+3. **Enrichment Pipeline**: End-to-end flow via `codegraph index pipeline` / `codegraph index replay` (code ingest, flow generation, doc linking, context generation).
+4. **Document Indexing Pipeline**: Document + chunk indexing via `codegraph index docs`, including optional vector/BM25 indexing and code linking.
+
+### Go + gRPC Flow (Current)
+
+```mermaid
+flowchart LR
+    A[Go + gRPC Source] --> B["codegraph index pipeline"]
+    B --> C["Stage: IngestCode (SCIP)"]
+    C --> D["SCIP Symbols + References in Neo4j"]
+    D --> E["SCIPCallGraphBuilder (Go AST body ranges + CALLS)"]
+    E --> F["SCIPRPCDetector"]
+    F --> G1["GRPCCall / HTTPCall / OutboxCall Nodes"]
+    G1 --> G2["CALLS_API edges (Function -> Call Node)"]
+    G2 --> G3["CALLS_SERVICE edges (Call Node -> Service)"]
+    G3 --> H["Flow Spines + Context Docs + Retrieval Indexes"]
+```
 
 ## Quick Start (Monorepo)
 
@@ -44,7 +60,7 @@ This starts Neo4j + Qdrant + OpenSearch and builds the CLI.
 ### 2. Run unit tests (no infra needed)
 
 ```bash
-go test ./pkg/... ./libs/... ./test/...
+make test
 ```
 
 ### 3. Run with Nx task orchestration
@@ -200,10 +216,10 @@ make index-self-scip
 
 ```bash
 # Search for symbols
-go run ./cmd/codegraph query search "Client"
+go run ./apps/cli query search "Client"
 
 # Check connection status
-go run ./cmd/codegraph status
+go run ./apps/cli status
 ```
 
 ## 📋 Detailed Setup
@@ -227,7 +243,7 @@ go run ./cmd/codegraph status
 
 4. **Index a Project**:
    ```bash
-   ./bin/codegraph index project . --service="my-service" --version="v1.0.0"
+   ./bin/codegraph index scip . --service="my-service" --version="v1.0.0"
    ```
 
 ### Configuration
@@ -286,9 +302,15 @@ codegraph index project ./my-go-project --service="legacy-service"
 codegraph query search "OrderService"
 codegraph query search "calculateTotal"
 
-# Advanced queries (planned)
-codegraph query impact-analysis --function="processPayment"
-codegraph query dependencies --service="order-service"
+# Service dependency query (CALLS_SERVICE edges)
+codegraph query deps --service="order-service"
+
+# Flow spine query/generation
+codegraph query flows
+codegraph query flows --generate --max-depth=3
+
+# Fetch exact source from indexed locations
+codegraph query source "ProcessPayment"
 ```
 
 ### Programmatic Usage
@@ -300,8 +322,8 @@ import (
     "context"
     "log"
     
-    "github.com/context-maximiser/code-graph/pkg/neo4j"
-    "github.com/context-maximiser/code-graph/pkg/query"
+    "github.com/context-maximiser/code-graph/libs/neo4j-go"
+    "github.com/context-maximiser/code-graph/libs/query-go"
 )
 
 func main() {
@@ -322,7 +344,7 @@ func main() {
     
     // Find symbol definition
     resp, err := lsp.GoToDefinition(context.Background(), query.GoToDefinitionRequest{
-        Symbol: "scip-go go github.com/context-maximiser/code-graph v1.0.0 pkg/neo4j/Client#",
+        Symbol: "NewClient",
     })
     if err != nil {
         log.Fatal(err)
@@ -344,7 +366,7 @@ CodeGraph provides a Model Context Protocol (MCP) server that exposes code intel
 Add the MCP server to Claude Code using the `claude mcp add` command:
 
 ```bash
-claude mcp add codegraph /Users/techsavvyash/Documents/sweatAndBlood/sabbatical/context-maximiser/mcp-server/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=password123
+claude mcp add codegraph /absolute/path/to/codegraph/bin/codegraph-mcp NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=password123
 ```
 
 Replace the path with your actual CodeGraph installation directory.
@@ -356,12 +378,17 @@ The MCP server provides the following tools for AI assistants:
 **Code Intelligence:**
 - `codegraph_search` - Search for symbols across the codebase
 - `codegraph_get_source` - Get function source code with syntax highlighting
+- `codegraph_find_references` - Find symbol references
 - `codegraph_analyze_function` - Analyze function with callers, callees, and complexity
+- `codegraph_hybrid_search` - Hybrid lexical + vector search
+- `codegraph_vector_search` - Pure vector similarity search
 
 **Document Intelligence:**
 - `codegraph_index_documents` - Index documents and link to code
-- `codegraph_show_document` - Show document content with linked code
-- `codegraph_link_features` - Link feature descriptions to code using LLMs
+- `codegraph_search_docs` - Search indexed documents/chunks
+- `codegraph_search_by_comment` - Semantic comment/docstring search
+- `codegraph_link_docs_to_code` - Rule-based doc-to-code linking
+- `codegraph_intelligent_link` - LLM-assisted linking
 
 **Service Architecture:**
 - `codegraph_list_services` - List all services with metadata
@@ -370,12 +397,15 @@ The MCP server provides the following tools for AI assistants:
 - `codegraph_service_api_calls` - Show API calls made by a service
 - `codegraph_cross_service_calls` - Find call chains between services
 - `codegraph_service_architecture` - Complete architecture overview with dependency graph
+- `codegraph_get_entry_points` - Discover architectural entry points
+- `codegraph_generate_flows` - Generate/rebuild flow spines
+- `codegraph_cross_service_flow` - Multi-hop cross-service flow tracing
+- `codegraph_trace_call_graph` - Call graph path tracing
 
 ### Building the MCP Server
 
 ```bash
-cd mcp-server
-go build -o codegraph-mcp .
+go build -o bin/codegraph-mcp ./apps/mcp-server-go
 ```
 
 ## 🗄️ Graph Schema
@@ -392,8 +422,10 @@ The Neo4j database uses a rich schema based on the Code Property Graph model:
 - **Variable/Parameter**: Data containers
 - **Symbol**: Canonical definitions using SCIP format
 - **APIRoute**: Network endpoints
-- **Document**: Business/technical documents (planned)
-- **Feature**: Requirements/capabilities (planned)
+- **GRPCCall/HTTPCall/OutboxCall**: Outbound cross-service/API call sites
+- **Document/DocumentChunk/Feature**: Business + technical context graph
+- **Flow**: Generated execution/request flow spines
+- **PullRequest/GeneratedDoc**: PR overlays and generated context artifacts
 
 ### Relationship Types
 
@@ -401,9 +433,12 @@ The Neo4j database uses a rich schema based on the Code Property Graph model:
 - **CALLS**: Function/method invocations
 - **DEFINES/REFERENCES**: Symbol definitions and usages
 - **INHERITS_FROM/IMPLEMENTS**: OOP relationships
+- **EXPOSES_API**: Code handlers to API routes
+- **CALLS_API/CALLS_SERVICE**: Runtime API call edges and service-to-service linkage
+- **DESCRIBES/MENTIONS**: Documentation linkage to code/flows
+- **CONSUMES_FROM/SCHEDULED_BY**: Async consumer and scheduling semantics
 - **FLOWS_TO**: Data dependencies (planned)
 - **NEXT_EXECUTION**: Control flow (planned)
-- **EXPOSES_API**: API endpoint handlers (planned)
 
 ### Example Queries
 
@@ -439,7 +474,7 @@ make dev-teardown       # Clean up development environment
 
 # Building
 make build              # Build CLI
-make build-server       # Build API server (planned)
+make build-mcp          # Build MCP server binary
 
 # Testing
 make test               # Run unit tests
@@ -460,33 +495,35 @@ make format             # Format code
 ### Project Structure
 
 ```
-context-maximiser/
-├── cmd/
-│   └── codegraph/          # CLI application
-├── pkg/
-│   ├── models/             # Graph data models
-│   ├── neo4j/              # Neo4j client and queries  
-│   ├── schema/             # Schema management
-│   ├── indexer/
-│   │   └── static/         # Go AST indexer
-│   └── query/              # Query services (LSP, advanced)
+codegraph/
+├── apps/
+│   ├── cli/                # CLI application
+│   └── mcp-server-go/      # MCP server
+├── libs/
+│   ├── core-models-go/     # Node/relationship models
+│   ├── neo4j-go/           # Neo4j client and query helpers
+│   ├── schema-go/          # Schema management
+│   ├── indexer-go/         # SCIP + AST + pipeline indexers
+│   ├── query-go/           # Query services (LSP/flows/deps)
+│   └── search-go/          # Hybrid/vector/doc linking
+├── services/
+│   ├── indexing-go/        # Indexing service layer
+│   └── retrieval-go/       # Retrieval service layer
 ├── docs/
-│   ├── rfc/                # Technical RFCs
-│   ├── architecture/       # Architecture documentation
-│   └── schema/             # Schema documentation
+│   └── ...                 # Guides, architecture, schema
 ├── test/
 │   └── integration/        # Integration tests
 ├── docker-compose.yml      # Neo4j setup
-└── Makefile               # Development commands
+└── Makefile                # Development commands
 ```
 
 ### Adding New Features
 
-1. **New Node Types**: Add to `pkg/models/node.go`
-2. **New Relationships**: Add to `pkg/models/relationship.go`
-3. **Schema Changes**: Update `pkg/schema/schema.go`
-4. **Indexing Logic**: Extend `pkg/indexer/static/indexer.go`
-5. **Query Patterns**: Add to `pkg/query/` services
+1. **New Node Types**: Add to `libs/core-models-go/node.go`
+2. **New Relationships**: Add to `libs/core-models-go/relationship.go`
+3. **Schema Changes**: Update `libs/schema-go/schema.go`
+4. **Indexing Logic**: Extend `libs/indexer-go/static/` or `libs/indexer-go/pipeline/`
+5. **Query Patterns**: Add to `libs/query-go/` and MCP handlers in `apps/mcp-server-go/main.go`
 
 ## 🔧 Configuration
 
@@ -494,7 +531,7 @@ context-maximiser/
 
 - `DEBUG=true` - Enable debug logging
 - `NEO4J_URI` - Neo4j connection URI
-- `NEO4J_USERNAME` - Neo4j username  
+- `NEO4J_USER` - Neo4j username  
 - `NEO4J_PASSWORD` - Neo4j password
 - `NEO4J_DATABASE` - Neo4j database name
 
@@ -569,6 +606,10 @@ export LLM_BASE_URL="https://api.openai.com/v1"
 ### Phase 1 (Current)
 - ✅ Neo4j integration and schema
 - ✅ Go AST indexing
+- ✅ SCIP indexing (single-language + polyglot auto-detect)
+- ✅ Cross-service call modeling (`CALLS_API`, `CALLS_SERVICE`, `GRPCCall`/`HTTPCall`/`OutboxCall`)
+- ✅ Document indexing + chunk linking
+- ✅ Enrichment pipeline (`index pipeline`, `index replay`)
 - ✅ Basic CLI interface
 - ✅ LSP-like queries
 - ✅ LLM provider abstraction (Gemini, LiteLLM, OpenAI)
@@ -579,10 +620,9 @@ export LLM_BASE_URL="https://api.openai.com/v1"
 - [ ] Incremental indexing with tree-sitter
 - [ ] API server with REST/GraphQL endpoints
 - [ ] Web UI for graph visualization
-- [ ] Support for additional languages (Java, Python, TypeScript)
+- [ ] Deeper language-specific semantic extraction and framework coverage
 
 ### Phase 3 (Future)
-- [ ] Document indexing and analysis
 - [ ] Feature-to-code traceability
 - [ ] Real-time collaboration features
 - [ ] IDE plugins and integrations

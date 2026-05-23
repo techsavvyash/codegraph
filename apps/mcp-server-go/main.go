@@ -558,6 +558,29 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 			},
 		},
 		{
+			Name:        "codegraph_cross_service_flow",
+			Description: "Trace multi-hop cross-service call flows starting from a service (or function). Performs BFS across CALLS_API→CALLS_SERVICE edges to show how a request propagates through the system.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"start_service": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the service to start tracing from",
+					},
+					"start_function": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional function name within start_service to narrow the starting point",
+					},
+					"max_hops": map[string]interface{}{
+						"type":        "number",
+						"description": "Maximum number of service boundary crossings to trace (1–5, default: 3)",
+						"default":     3,
+					},
+				},
+				"required": []string{"start_service"},
+			},
+		},
+		{
 			Name:        "codegraph_trace_call_graph",
 			Description: "Traverse the call graph from a specific function, showing what it calls (downstream) or what calls it (upstream). Returns a tree-formatted call chain with file locations.",
 			InputSchema: map[string]interface{}{
@@ -588,6 +611,48 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 					},
 				},
 				"required": []string{"function_name"},
+			},
+		},
+		{
+			Name:        "codegraph_rpc_dependencies",
+			Description: "Get all dependencies for a single RPC handler: DB tables touched, downstream gRPC/HTTP services called, and async events published. Requires DBCall nodes (indexed via SCIP pipeline).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service": map[string]interface{}{
+						"type":        "string",
+						"description": "Service name containing the RPC handler",
+					},
+					"rpc": map[string]interface{}{
+						"type":        "string",
+						"description": "Handler function name or exposed endpoint path (e.g. 'CreatePayment' or '/v1/payments')",
+					},
+					"scope": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"service", "rpc"},
+			},
+		},
+		{
+			Name:        "codegraph_service_dependency_map",
+			Description: "Get the full dependency manifest for every exposed RPC in a service: which DB tables each handler touches and which downstream services it depends on. Useful for architecture review and change-impact analysis.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service": map[string]interface{}{
+						"type":        "string",
+						"description": "Service name to map dependencies for",
+					},
+					"scope": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"service"},
 			},
 		},
 	}
@@ -643,6 +708,8 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleServiceAPICallsTool(ctx, toolCall.Arguments)
 	case "codegraph_cross_service_calls":
 		response = s.handleCrossServiceCallsTool(ctx, toolCall.Arguments)
+	case "codegraph_cross_service_flow":
+		response = s.handleCrossServiceFlowTool(ctx, toolCall.Arguments)
 	case "codegraph_service_architecture":
 		response = s.handleServiceArchitectureTool(ctx, toolCall.Arguments)
 	case "codegraph_get_entry_points":
@@ -651,6 +718,10 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleGenerateFlowsTool(ctx, toolCall.Arguments)
 	case "codegraph_trace_call_graph":
 		response = s.handleTraceCallGraphTool(ctx, toolCall.Arguments)
+	case "codegraph_rpc_dependencies":
+		response = s.handleRPCDependenciesTool(ctx, toolCall.Arguments)
+	case "codegraph_service_dependency_map":
+		response = s.handleServiceDependencyMapTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -1994,7 +2065,7 @@ func (s *CodeGraphMCPServer) handleListServicesTool(ctx context.Context, args ma
 	}
 }
 
-// handleServiceDependenciesTool gets dependencies of a service
+// handleServiceDependenciesTool gets dependencies of a service (6d: augmented with runtime CALLS_SERVICE evidence)
 func (s *CodeGraphMCPServer) handleServiceDependenciesTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	serviceName, ok := args["service_name"].(string)
 	if !ok {
@@ -2004,18 +2075,19 @@ func (s *CodeGraphMCPServer) handleServiceDependenciesTool(ctx context.Context, 
 		}
 	}
 
-	query := `
+	params := map[string]interface{}{"serviceName": serviceName}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# Dependencies for %s\n\n", serviceName))
+
+	// Static import-based dependencies (DEPENDS_ON)
+	staticQuery := `
 		MATCH (s:Service {name: $serviceName})-[d:DEPENDS_ON]->(target:Service)
 		RETURN target.name AS targetService, target.packageName AS packageName,
 		       d.importCount AS importCount, d.packageName AS importedPackage
 		ORDER BY importCount DESC
 	`
-
-	params := map[string]interface{}{
-		"serviceName": serviceName,
-	}
-
-	result, err := s.client.ExecuteQuery(ctx, query, params)
+	staticResult, err := s.client.ExecuteQuery(ctx, staticQuery, params)
 	if err != nil {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
@@ -2023,24 +2095,58 @@ func (s *CodeGraphMCPServer) handleServiceDependenciesTool(ctx context.Context, 
 		}
 	}
 
-	var output strings.Builder
-	output.WriteString(fmt.Sprintf("# Dependencies for %s\n\n", serviceName))
-
-	if len(result) == 0 {
-		output.WriteString("No dependencies found.\n")
-	} else {
+	if len(staticResult) > 0 {
+		output.WriteString("## Static Import Dependencies\n\n")
 		output.WriteString("| Target Service | Package Name | Import Count | Imported Package |\n")
 		output.WriteString("|----------------|--------------|--------------|------------------|\n")
-		for _, record := range result {
-			recordMap := record.AsMap()
-			targetService := getStringFromRecord(recordMap, "targetService")
-			packageName := getStringFromRecord(recordMap, "packageName")
-			importCount := getIntFromRecord(recordMap, "importCount")
-			importedPackage := getStringFromRecord(recordMap, "importedPackage")
-
+		for _, record := range staticResult {
+			m := record.AsMap()
 			output.WriteString(fmt.Sprintf("| %s | %s | %d | %s |\n",
-				targetService, packageName, importCount, importedPackage))
+				getStringFromRecord(m, "targetService"),
+				getStringFromRecord(m, "packageName"),
+				getIntFromRecord(m, "importCount"),
+				getStringFromRecord(m, "importedPackage")))
 		}
+		output.WriteString("\n")
+	}
+
+	// Runtime call-based dependencies (CALLS_SERVICE via CALLS_API edges)
+	runtimeQuery := `
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(target:Service)
+		WHERE s <> target
+		RETURN target.name AS targetService,
+		       count(DISTINCT call) AS callCount,
+		       collect(DISTINCT CASE WHEN call:GRPCCall THEN 'gRPC'
+		                             WHEN call:HTTPCall THEN 'HTTP'
+		                             WHEN call:OutboxCall THEN 'Outbox'
+		                             ELSE 'Unknown' END) AS protocols
+		ORDER BY callCount DESC
+	`
+	runtimeResult, err := s.client.ExecuteQuery(ctx, runtimeQuery, params)
+	if err == nil && len(runtimeResult) > 0 {
+		output.WriteString("## Runtime Call Dependencies (indexed RPC/HTTP/Outbox calls)\n\n")
+		output.WriteString("| Target Service | Call Count | Protocols |\n")
+		output.WriteString("|----------------|------------|------------|\n")
+		for _, record := range runtimeResult {
+			m := record.AsMap()
+			protocols := []string{}
+			if ps, ok := m["protocols"].([]interface{}); ok {
+				for _, p := range ps {
+					if pStr, ok := p.(string); ok {
+						protocols = append(protocols, pStr)
+					}
+				}
+			}
+			output.WriteString(fmt.Sprintf("| %s | %d | %s |\n",
+				getStringFromRecord(m, "targetService"),
+				getIntFromRecord(m, "callCount"),
+				strings.Join(protocols, ", ")))
+		}
+		output.WriteString("\n")
+	}
+
+	if len(staticResult) == 0 && (err != nil || len(runtimeResult) == 0) {
+		output.WriteString("No dependencies found.\n")
 	}
 
 	return ToolCallResponse{
@@ -2102,7 +2208,7 @@ func (s *CodeGraphMCPServer) handleServiceAPIEndpointsTool(ctx context.Context, 
 	}
 }
 
-// handleServiceAPICallsTool gets API calls made by a service
+// handleServiceAPICallsTool gets API calls made by a service (6a: fixed node types, 2-hop traversal)
 func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	serviceName, ok := args["service_name"].(string)
 	if !ok {
@@ -2112,20 +2218,36 @@ func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args
 		}
 	}
 
+	limit := 50
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	// 2-hop traversal (Service→File→Function) — avoids expensive CONTAINS*
+	// Matches GRPCCall, HTTPCall, OutboxCall — SDKCall does not exist in the schema
 	query := `
-		MATCH (s:Service {name: $serviceName})-[:CONTAINS*]->(f:Function)-[c:CALLS_API]->(call)
-		WHERE call:HTTPCall OR call:SDKCall
-		OPTIONAL MATCH (call)-[:TARGETS_SERVICE]->(target:Service)
-		RETURN f.name AS functionName,
-		       CASE WHEN call:HTTPCall THEN 'HTTP' ELSE 'SDK' END AS callType,
-		       call.url AS url, call.method AS method, call.target AS target,
-		       target.name AS targetService,
-		       f.file AS filePath
-		ORDER BY callType, target
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)
+		WHERE call:GRPCCall OR call:HTTPCall OR call:OutboxCall
+		OPTIONAL MATCH (call)-[:CALLS_SERVICE]->(svcTarget:Service)
+		RETURN fn.name AS functionName,
+		       CASE WHEN call:GRPCCall THEN 'gRPC'
+		            WHEN call:HTTPCall THEN 'HTTP'
+		            ELSE 'Outbox' END AS callType,
+		       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod, '')
+		            WHEN call:HTTPCall THEN coalesce(call.url, '')
+		            ELSE coalesce(call.eventType, '') END AS callTarget,
+		       CASE WHEN call:GRPCCall THEN coalesce(call.protoPackage, '')
+		            WHEN call:HTTPCall THEN coalesce(call.method, 'GET')
+		            ELSE coalesce(call.transport, '') END AS method,
+		       coalesce(svcTarget.name, '') AS targetService,
+		       coalesce(fn.filePath, '') AS filePath
+		ORDER BY callType, callTarget
+		LIMIT $limit
 	`
 
 	params := map[string]interface{}{
 		"serviceName": serviceName,
+		"limit":       limit,
 	}
 
 	result, err := s.client.ExecuteQuery(ctx, query, params)
@@ -2140,21 +2262,19 @@ func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args
 	output.WriteString(fmt.Sprintf("# API Calls from %s\n\n", serviceName))
 
 	if len(result) == 0 {
-		output.WriteString("No API calls found.\n")
+		output.WriteString("No API calls found. (Run `codegraph index scip` to populate cross-service call nodes.)\n")
 	} else {
-		output.WriteString("| Type | Target | Method/SDK | URL/Call | Target Service | Function |\n")
-		output.WriteString("|------|--------|------------|----------|----------------|----------|\n")
+		output.WriteString("| Type | Target | Method | Target Service | Function | File |\n")
+		output.WriteString("|------|--------|--------|----------------|----------|------|\n")
 		for _, record := range result {
-			recordMap := record.AsMap()
-			callType := getStringFromRecord(recordMap, "callType")
-			target := getStringFromRecord(recordMap, "target")
-			method := getStringFromRecord(recordMap, "method")
-			url := getStringFromRecord(recordMap, "url")
-			targetService := getStringFromRecord(recordMap, "targetService")
-			functionName := getStringFromRecord(recordMap, "functionName")
-
+			m := record.AsMap()
 			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
-				callType, target, method, url, targetService, functionName))
+				getStringFromRecord(m, "callType"),
+				getStringFromRecord(m, "callTarget"),
+				getStringFromRecord(m, "method"),
+				getStringFromRecord(m, "targetService"),
+				getStringFromRecord(m, "functionName"),
+				getStringFromRecord(m, "filePath")))
 		}
 	}
 
@@ -2163,39 +2283,49 @@ func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args
 	}
 }
 
-// handleCrossServiceCallsTool gets cross-service call chains
+// handleCrossServiceCallsTool gets cross-service call chains (6b: directed CALLS_API→CALLS_SERVICE traversal)
 func (s *CodeGraphMCPServer) handleCrossServiceCallsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
-	sourceService, sourceOk := args["source_service"].(string)
-	targetService, targetOk := args["target_service"].(string)
-
-	if !sourceOk || !targetOk {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: "Error: source_service and target_service are required"}},
-			IsError: true,
-		}
+	// Accept both from_service/to_service (tool schema) and source_service/target_service (legacy)
+	fromService := getOptionalStringArg(args, "from_service")
+	if fromService == "" {
+		fromService = getOptionalStringArg(args, "source_service")
+	}
+	toService := getOptionalStringArg(args, "to_service")
+	if toService == "" {
+		toService = getOptionalStringArg(args, "target_service")
 	}
 
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	// Directed traversal: Service→File→Function→CALLS_API→call→CALLS_SERVICE→Service
+	// Both from/to are optional filters — omitting shows all cross-service calls
 	query := `
-		MATCH (source:Service {name: $sourceService})
-		MATCH (target:Service {name: $targetService})
-		MATCH path = shortestPath((source)-[*..10]-(target))
-		RETURN [node in nodes(path) |
-		          CASE
-		            WHEN 'Service' IN labels(node) THEN node.name
-		            WHEN 'Function' IN labels(node) THEN node.name
-		            WHEN 'HTTPCall' IN labels(node) THEN node.url
-		            WHEN 'SDKCall' IN labels(node) THEN node.target
-		            ELSE ''
-		          END
-		       ] AS nodePath,
-		       [rel in relationships(path) | type(rel)] AS relPath,
-		       length(path) AS pathLength
-		LIMIT 10
+		MATCH (callerSvc:Service)-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
+		WHERE callerSvc <> targetSvc
+		  AND ($fromService = '' OR callerSvc.name = $fromService)
+		  AND ($toService = '' OR targetSvc.name = $toService)
+		RETURN callerSvc.name AS callerService,
+		       fn.name AS functionName,
+		       coalesce(fn.filePath, '') AS filePath,
+		       CASE WHEN call:GRPCCall THEN 'gRPC'
+		            WHEN call:HTTPCall THEN 'HTTP'
+		            WHEN call:OutboxCall THEN 'Outbox'
+		            ELSE 'Unknown' END AS callType,
+		       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod, '')
+		            WHEN call:HTTPCall THEN coalesce(call.url, '')
+		            ELSE coalesce(call.eventType, '') END AS callTarget,
+		       targetSvc.name AS targetService
+		ORDER BY callerService, targetService, callType
+		LIMIT $limit
 	`
 
 	params := map[string]interface{}{
-		"sourceService": sourceService,
-		"targetService": targetService,
+		"fromService": fromService,
+		"toService":   toService,
+		"limit":       limit,
 	}
 
 	result, err := s.client.ExecuteQuery(ctx, query, params)
@@ -2207,34 +2337,30 @@ func (s *CodeGraphMCPServer) handleCrossServiceCallsTool(ctx context.Context, ar
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("# Call Chains: %s → %s\n\n", sourceService, targetService))
+	title := "# Cross-Service Calls"
+	if fromService != "" && toService != "" {
+		title = fmt.Sprintf("# Cross-Service Calls: %s → %s", fromService, toService)
+	} else if fromService != "" {
+		title = fmt.Sprintf("# Cross-Service Calls from %s", fromService)
+	} else if toService != "" {
+		title = fmt.Sprintf("# Cross-Service Calls to %s", toService)
+	}
+	output.WriteString(title + "\n\n")
 
 	if len(result) == 0 {
-		output.WriteString("No paths found between these services.\n")
+		output.WriteString("No cross-service calls found. (Run `codegraph index scip` to populate CALLS_SERVICE edges.)\n")
 	} else {
-		for i, record := range result {
-			recordMap := record.AsMap()
-			pathLength := getIntFromRecord(recordMap, "pathLength")
-			nodePath := []interface{}{}
-			if np, ok := recordMap["nodePath"].([]interface{}); ok {
-				nodePath = np
-			}
-			relPath := []interface{}{}
-			if rp, ok := recordMap["relPath"].([]interface{}); ok {
-				relPath = rp
-			}
-
-			output.WriteString(fmt.Sprintf("## Path %d (length: %d)\n\n", i+1, pathLength))
-
-			for j := 0; j < len(nodePath); j++ {
-				node := nodePath[j].(string)
-				output.WriteString(fmt.Sprintf("%s", node))
-				if j < len(relPath) {
-					rel := relPath[j].(string)
-					output.WriteString(fmt.Sprintf(" -[%s]→ ", rel))
-				}
-			}
-			output.WriteString("\n\n")
+		output.WriteString("| Caller Service | Function | Type | Call Target | Target Service | File |\n")
+		output.WriteString("|----------------|----------|------|-------------|----------------|------|\n")
+		for _, record := range result {
+			m := record.AsMap()
+			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+				getStringFromRecord(m, "callerService"),
+				getStringFromRecord(m, "functionName"),
+				getStringFromRecord(m, "callType"),
+				getStringFromRecord(m, "callTarget"),
+				getStringFromRecord(m, "targetService"),
+				getStringFromRecord(m, "filePath")))
 		}
 	}
 
@@ -2255,9 +2381,9 @@ func (s *CodeGraphMCPServer) handleServiceArchitectureTool(ctx context.Context, 
 		OPTIONAL MATCH (s)-[:CONTAINS*]->(f:Function)-[:EXPOSES_API]->(api:APIRoute)
 		WITH s, dependencies, count(DISTINCT api) AS apiCount
 
-		// Get API calls
-		OPTIONAL MATCH (s)-[:CONTAINS*]->(f2:Function)-[:CALLS_API]->(call)
-		WHERE call:HTTPCall OR call:SDKCall
+		// Get API calls (2-hop traversal; GRPCCall/HTTPCall/OutboxCall)
+		OPTIONAL MATCH (s)-[:CONTAINS]->(file2:File)-[:CONTAINS]->(f2:Function)-[:CALLS_API]->(call)
+		WHERE call:GRPCCall OR call:HTTPCall OR call:OutboxCall
 		WITH s, dependencies, apiCount, count(DISTINCT call) AS callCount
 
 		RETURN s.name AS name, s.packageName AS packageName,
@@ -2802,6 +2928,49 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 		}
 	}
 
+	// Cross-service hops: what services does this function (or any callee) reach via CALLS_API?
+	if direction == "downstream" || direction == "both" {
+		output.WriteString("### Cross-Service Calls (outbound)\n\n")
+		crossCypher := fmt.Sprintf(`
+			MATCH (root {nodeKey: $rootKey})
+			OPTIONAL MATCH (root)-[:CALLS*0..%d]->(fn)
+			WHERE fn:Function OR fn:Method
+			WITH collect(DISTINCT fn) + [root] AS reachable
+			UNWIND reachable AS caller
+			MATCH (caller)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
+			RETURN caller.name AS callerName,
+			       coalesce(caller.filePath, '') AS callerFile,
+			       CASE WHEN call:GRPCCall THEN 'gRPC'
+			            WHEN call:HTTPCall THEN 'HTTP'
+			            WHEN call:OutboxCall THEN 'Outbox'
+			            ELSE 'Unknown' END AS callType,
+			       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod, '')
+			            WHEN call:HTTPCall THEN coalesce(call.url, '')
+			            ELSE coalesce(call.eventType, '') END AS callTarget,
+			       targetSvc.name AS targetService
+			ORDER BY callerName, callType
+			LIMIT 50`, maxDepth)
+
+		crossRecords, crossErr := s.client.ExecuteQuery(ctx, crossCypher, map[string]any{
+			"rootKey": root.NodeKey,
+		})
+		if crossErr != nil {
+			output.WriteString(fmt.Sprintf("Error: %v\n\n", crossErr))
+		} else if len(crossRecords) == 0 {
+			output.WriteString("No cross-service calls found from this call chain.\n\n")
+		} else {
+			for _, r := range crossRecords {
+				m := r.AsMap()
+				callerName := getStringFromRecord(m, "callerName")
+				callType := getStringFromRecord(m, "callType")
+				callTarget := getStringFromRecord(m, "callTarget")
+				targetSvc := getStringFromRecord(m, "targetService")
+				output.WriteString(fmt.Sprintf("  `%s` →[%s]→ `%s` @ **%s**\n", callerName, callType, callTarget, targetSvc))
+			}
+			output.WriteString("\n")
+		}
+	}
+
 	// Upstream: what calls this function?
 	if direction == "upstream" || direction == "both" {
 		output.WriteString("### Upstream (callers)\n\n")
@@ -2857,6 +3026,388 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 
 	return ToolCallResponse{
 		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleCrossServiceFlowTool traces multi-hop cross-service call flows via BFS (Phase 6e)
+func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	startService, ok := args["start_service"].(string)
+	if !ok || startService == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: start_service is required"}},
+			IsError: true,
+		}
+	}
+	startFunction := getOptionalStringArg(args, "start_function")
+	maxHops := 3
+	if h, ok := args["max_hops"].(float64); ok && h >= 1 && h <= 5 {
+		maxHops = int(h)
+	}
+
+	type crossCall struct {
+		CallerService string
+		FunctionName  string
+		CallType      string
+		CallTarget    string
+		TargetService string
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# Cross-Service Flow from **%s**\n\n", startService))
+	if startFunction != "" {
+		output.WriteString(fmt.Sprintf("_Starting function filter: `%s`_\n\n", startFunction))
+	}
+	output.WriteString(fmt.Sprintf("_Max service hops: %d_\n\n", maxHops))
+
+	visited := map[string]bool{startService: true}
+	frontier := []string{startService}
+
+	for hop := 1; hop <= maxHops && len(frontier) > 0; hop++ {
+		output.WriteString(fmt.Sprintf("## Hop %d\n\n", hop))
+
+		var cypher string
+		var params map[string]interface{}
+
+		if hop == 1 && startFunction != "" {
+			cypher = `
+				MATCH (callerSvc:Service {name: $startService})-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
+				WHERE callerSvc <> targetSvc
+				  AND toLower(fn.name) CONTAINS toLower($startFunction)
+				RETURN callerSvc.name AS callerService, fn.name AS functionName,
+				       CASE WHEN call:GRPCCall THEN 'gRPC' WHEN call:HTTPCall THEN 'HTTP' WHEN call:OutboxCall THEN 'Outbox' ELSE 'Unknown' END AS callType,
+				       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod,'')
+				            WHEN call:HTTPCall THEN coalesce(call.url,'')
+				            ELSE coalesce(call.eventType,'') END AS callTarget,
+				       targetSvc.name AS targetService
+				ORDER BY callerService, callType LIMIT 50`
+			params = map[string]interface{}{"startService": startService, "startFunction": startFunction}
+		} else {
+			cypher = `
+				MATCH (callerSvc:Service)-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
+				WHERE callerSvc.name IN $frontier AND callerSvc <> targetSvc
+				RETURN callerSvc.name AS callerService, fn.name AS functionName,
+				       CASE WHEN call:GRPCCall THEN 'gRPC' WHEN call:HTTPCall THEN 'HTTP' WHEN call:OutboxCall THEN 'Outbox' ELSE 'Unknown' END AS callType,
+				       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod,'')
+				            WHEN call:HTTPCall THEN coalesce(call.url,'')
+				            ELSE coalesce(call.eventType,'') END AS callTarget,
+				       targetSvc.name AS targetService
+				ORDER BY callerService, callType LIMIT 50`
+			params = map[string]interface{}{"frontier": frontier}
+		}
+
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
+		if err != nil {
+			output.WriteString(fmt.Sprintf("Error querying hop %d: %v\n\n", hop, err))
+			break
+		}
+
+		nextFrontier := []string{}
+		var calls []crossCall
+		for _, r := range records {
+			m := r.AsMap()
+			c := crossCall{
+				CallerService: getStringFromRecord(m, "callerService"),
+				FunctionName:  getStringFromRecord(m, "functionName"),
+				CallType:      getStringFromRecord(m, "callType"),
+				CallTarget:    getStringFromRecord(m, "callTarget"),
+				TargetService: getStringFromRecord(m, "targetService"),
+			}
+			calls = append(calls, c)
+			if !visited[c.TargetService] {
+				visited[c.TargetService] = true
+				nextFrontier = append(nextFrontier, c.TargetService)
+			}
+		}
+
+		if len(calls) == 0 {
+			output.WriteString("_No outbound cross-service calls found._\n\n")
+			break
+		}
+
+		output.WriteString("| Caller | Function | Type | Call Target | Target Service |\n")
+		output.WriteString("|--------|----------|------|-------------|----------------|\n")
+		for _, c := range calls {
+			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+				c.CallerService, c.FunctionName, c.CallType, c.CallTarget, c.TargetService))
+		}
+		output.WriteString("\n")
+
+		frontier = nextFrontier
+	}
+
+	if len(visited) > 1 {
+		svcList := make([]string, 0, len(visited))
+		for svc := range visited {
+			svcList = append(svcList, svc)
+		}
+		sort.Strings(svcList)
+		output.WriteString(fmt.Sprintf("**Services reached**: %s\n", strings.Join(svcList, " → ")))
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleRPCDependenciesTool returns all dependencies for a single named RPC handler.
+func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	service, ok := args["service"].(string)
+	if !ok || service == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: service is required"}},
+			IsError: true,
+		}
+	}
+	rpc, ok := args["rpc"].(string)
+	if !ok || rpc == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: rpc is required"}},
+			IsError: true,
+		}
+	}
+	scope := "main"
+	if s, ok := args["scope"].(string); ok && s != "" {
+		scope = s
+	}
+
+	// Locate handler, then fan out to DB/gRPC/HTTP/event edges with depth cap.
+	// Split the optional matches per edge type to avoid cross-join explosion.
+	cypher := `
+		MATCH (svc:Service {name: $service})
+		WHERE svc.scopeId = $scope OR svc.scopeId = 'main'
+		MATCH (svc)-[:CONTAINS*1..4]->(handler:Function)
+		WHERE handler.name = $rpc OR handler.exposedAs = $rpc
+		WITH handler LIMIT 1
+
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c1:Function)-[:CALLS_DB]->(db:DBCall)
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c2:Function)-[:CALLS_API]->(grpc:GRPCCall)-[:CALLS_SERVICE]->(tGRPC:Service)
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c3:Function)-[:CALLS_API]->(http:HTTPCall)-[:CALLS_SERVICE]->(tHTTP:Service)
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c4:Function)-[:CALLS_API]->(event:OutboxCall)
+
+		RETURN
+		  handler.name AS handlerName,
+		  handler.filePath AS handlerFile,
+		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, line: db.line} ELSE null END) AS dbCalls,
+		  COLLECT(DISTINCT CASE WHEN tGRPC IS NOT NULL THEN {service: tGRPC.name, method: grpc.targetMethod} ELSE null END) AS grpcCalls,
+		  COLLECT(DISTINCT CASE WHEN tHTTP IS NOT NULL THEN {service: tHTTP.name, url: http.url} ELSE null END) AS httpCalls,
+		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {event: event.eventType, transport: event.transport} ELSE null END) AS events
+		LIMIT 1
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"service": service,
+		"rpc":     rpc,
+		"scope":   scope,
+	})
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+	if len(result) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No handler found for rpc=%q in service=%q", rpc, service)}},
+		}
+	}
+
+	m := result[0].AsMap()
+	handlerName := getStringFromRecord(m, "handlerName")
+	handlerFile := getStringFromRecord(m, "handlerFile")
+
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("# RPC Dependencies: `%s` in **%s**\n\n", rpc, service))
+	out.WriteString(fmt.Sprintf("**Handler**: `%s`", handlerName))
+	if handlerFile != "" {
+		out.WriteString(fmt.Sprintf(" — `%s`", handlerFile))
+	}
+	out.WriteString("\n\n")
+
+	writeListSection := func(title string, items []interface{}, render func(map[string]interface{}) string) {
+		out.WriteString(fmt.Sprintf("## %s\n\n", title))
+		written := 0
+		for _, raw := range items {
+			if raw == nil {
+				continue
+			}
+			row, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			line := render(row)
+			if line == "" {
+				continue
+			}
+			out.WriteString(fmt.Sprintf("- %s\n", line))
+			written++
+		}
+		if written == 0 {
+			out.WriteString("_None detected_\n")
+		}
+		out.WriteString("\n")
+	}
+
+	dbCalls, _ := m["dbCalls"].([]interface{})
+	writeListSection("DB Tables", dbCalls, func(r map[string]interface{}) string {
+		table := getStringFromRecord(r, "table")
+		if table == "" {
+			return ""
+		}
+		op := getStringFromRecord(r, "op")
+		line := getIntFromRecord(r, "line")
+		if op != "" && line > 0 {
+			return fmt.Sprintf("`%s` — %s (line %d)", table, op, line)
+		} else if op != "" {
+			return fmt.Sprintf("`%s` — %s", table, op)
+		}
+		return fmt.Sprintf("`%s`", table)
+	})
+
+	grpcCalls, _ := m["grpcCalls"].([]interface{})
+	writeListSection("gRPC Calls", grpcCalls, func(r map[string]interface{}) string {
+		svcName := getStringFromRecord(r, "service")
+		if svcName == "" {
+			return ""
+		}
+		method := getStringFromRecord(r, "method")
+		if method != "" {
+			return fmt.Sprintf("**%s** — `%s`", svcName, method)
+		}
+		return fmt.Sprintf("**%s**", svcName)
+	})
+
+	httpCalls, _ := m["httpCalls"].([]interface{})
+	writeListSection("HTTP Calls", httpCalls, func(r map[string]interface{}) string {
+		svcName := getStringFromRecord(r, "service")
+		if svcName == "" {
+			return ""
+		}
+		url := getStringFromRecord(r, "url")
+		if url != "" {
+			return fmt.Sprintf("**%s** — `%s`", svcName, url)
+		}
+		return fmt.Sprintf("**%s**", svcName)
+	})
+
+	events, _ := m["events"].([]interface{})
+	writeListSection("Events Published", events, func(r map[string]interface{}) string {
+		eventType := getStringFromRecord(r, "event")
+		if eventType == "" {
+			return ""
+		}
+		transport := getStringFromRecord(r, "transport")
+		if transport != "" {
+			return fmt.Sprintf("`%s` via %s", eventType, transport)
+		}
+		return fmt.Sprintf("`%s`", eventType)
+	})
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: out.String()}},
+	}
+}
+
+// handleServiceDependencyMapTool returns the full dependency manifest for every exposed RPC in a service.
+func (s *CodeGraphMCPServer) handleServiceDependencyMapTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	service, ok := args["service"].(string)
+	if !ok || service == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: service is required"}},
+			IsError: true,
+		}
+	}
+	scope := "main"
+	if sv, ok := args["scope"].(string); ok && sv != "" {
+		scope = sv
+	}
+
+	// Two separate optional matches to avoid cross-product between DB and service edges.
+	cypher := `
+		MATCH (svc:Service {name: $service})
+		WHERE svc.scopeId = $scope OR svc.scopeId = 'main'
+		MATCH (svc)-[:CONTAINS*1..4]->(handler:Function)
+		WHERE handler.exposedAs IS NOT NULL
+
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(:Function)-[:CALLS_DB]->(db:DBCall)
+		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(dep:Service)
+		WHERE call:GRPCCall OR call:HTTPCall
+
+		RETURN handler.name AS rpc,
+		       handler.exposedAs AS endpoint,
+		       COLLECT(DISTINCT db.table) AS tables,
+		       COLLECT(DISTINCT dep.name) AS dependsOn
+		ORDER BY rpc
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"service": service,
+		"scope":   scope,
+	})
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("# Dependency Map for **%s**\n\n", service))
+
+	if len(result) == 0 {
+		out.WriteString("No exposed RPC handlers found. Ensure the service has been indexed and handlers have `exposedAs` set.\n")
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: out.String()}},
+		}
+	}
+
+	out.WriteString(fmt.Sprintf("_Showing %d exposed RPC handler(s)_\n\n", len(result)))
+	out.WriteString("| RPC / Handler | Endpoint | DB Tables | Downstream Services |\n")
+	out.WriteString("|---------------|----------|-----------|---------------------|\n")
+
+	for _, record := range result {
+		m := record.AsMap()
+		rpc := getStringFromRecord(m, "rpc")
+		endpoint := getStringFromRecord(m, "endpoint")
+
+		var tables []string
+		if raw, ok := m["tables"].([]interface{}); ok {
+			for _, t := range raw {
+				if ts, ok := t.(string); ok && ts != "" {
+					tables = append(tables, ts)
+				}
+			}
+		}
+
+		var deps []string
+		if raw, ok := m["dependsOn"].([]interface{}); ok {
+			for _, d := range raw {
+				if ds, ok := d.(string); ok && ds != "" {
+					deps = append(deps, ds)
+				}
+			}
+		}
+
+		tablesStr := "_none_"
+		if len(tables) > 0 {
+			sort.Strings(tables)
+			quoted := make([]string, len(tables))
+			for i, t := range tables {
+				quoted[i] = "`" + t + "`"
+			}
+			tablesStr = strings.Join(quoted, ", ")
+		}
+
+		depsStr := "_none_"
+		if len(deps) > 0 {
+			sort.Strings(deps)
+			depsStr = strings.Join(deps, ", ")
+		}
+
+		out.WriteString(fmt.Sprintf("| `%s` | `%s` | %s | %s |\n", rpc, endpoint, tablesStr, depsStr))
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: out.String()}},
 	}
 }
 

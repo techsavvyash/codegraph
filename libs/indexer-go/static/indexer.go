@@ -30,6 +30,8 @@ type StaticIndexer struct {
 	embeddingService search.EmbeddingService   // Optional embedding service
 	vectorSearch     *search.VectorSearchManager
 	callGraphExtractor *CallGraphExtractor     // Call graph analysis
+	rpcDetector        *RPCCallDetector        // gRPC / HTTP outbound call detection
+	eventDetector      *EventCallDetector      // Async event publish / consume detection
 	fset             *token.FileSet            // File set for position tracking
 }
 
@@ -46,6 +48,8 @@ func NewStaticIndexer(client *neo4j.Client, serviceName, version, repoURL string
 		embeddingService: nil,
 		vectorSearch:     nil,
 		callGraphExtractor: NewCallGraphExtractor(client),
+		rpcDetector:        NewRPCCallDetector(client, serviceName, models.DefaultScope()),
+		eventDetector:      NewEventCallDetector(client, serviceName, models.DefaultScope()),
 	}
 }
 
@@ -431,7 +435,7 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 	}
 
 	// Extract call graph relationships from function body
-	if err := v.indexer.extractCallGraph(v.ctx, fn, funcID); err != nil {
+	if err := v.indexer.extractCallGraph(v.ctx, fn, funcID, v.filePath); err != nil {
 		log.Printf("Warning: failed to extract call graph for function %s: %v", fn.Name.Name, err)
 	}
 }
@@ -979,19 +983,31 @@ func (v *astVisitor) indexInterface(interfaceType *ast.InterfaceType) {
 	// The actual interface indexing is handled in indexInterfaceType
 }
 
-// extractCallGraph analyzes a function for call graph relationships
-func (si *StaticIndexer) extractCallGraph(ctx context.Context, funcDecl *ast.FuncDecl, funcID string) error {
-	if si.callGraphExtractor == nil {
-		return nil // Skip if no call graph extractor
+// extractCallGraph analyzes a function for both intra-service call edges and
+// outbound RPC call sites.
+func (si *StaticIndexer) extractCallGraph(ctx context.Context, funcDecl *ast.FuncDecl, funcID, filePath string) error {
+	packageName := si.serviceName
+
+	if si.callGraphExtractor != nil {
+		if err := si.callGraphExtractor.ExtractCallsFromFunction(ctx, funcDecl, funcID,
+			si.fset, packageName, filePath); err != nil {
+			log.Printf("Warning: call graph extraction for %s: %v", funcID, err)
+		}
 	}
 
-	// Extract calls from the function using current visitor context
-	// We need to pass the current package and file context
-	packageName := si.serviceName // Use service name as package for now
-	filePath := "" // File path would need to be tracked in visitor
+	if si.rpcDetector != nil {
+		if err := si.rpcDetector.DetectInFunction(ctx, funcDecl, funcID, filePath, si.fset); err != nil {
+			log.Printf("Warning: RPC detection for %s: %v", funcID, err)
+		}
+	}
 
-	return si.callGraphExtractor.ExtractCallsFromFunction(ctx, funcDecl, funcID,
-		si.fset, packageName, filePath)
+	if si.eventDetector != nil {
+		if err := si.eventDetector.DetectInFunction(ctx, funcDecl, funcID, filePath, si.fset); err != nil {
+			log.Printf("Warning: event detection for %s: %v", funcID, err)
+		}
+	}
+
+	return nil
 }
 
 // Helper field to track current fset (needed for call graph extraction)

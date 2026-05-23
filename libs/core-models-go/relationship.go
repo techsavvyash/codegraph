@@ -5,8 +5,9 @@ type RelationshipType string
 
 const (
 	// Structural Relationships
-	ContainsRel   RelationshipType = "CONTAINS"
-	DefinesRel    RelationshipType = "DEFINES"
+	ContainsRel RelationshipType = "CONTAINS"
+	DefinesRel  RelationshipType = "DEFINES"
+	// Deprecated: noise — not written during call-graph indexing; volume too high and not in any RPC traversal query
 	ReferencesRel RelationshipType = "REFERENCES"
 
 	// Behavioral Relationships
@@ -15,6 +16,7 @@ const (
 	NextExecRel   RelationshipType = "NEXT_EXECUTION"
 
 	// Object-Oriented Relationships
+	// Deprecated: noise — not written during call-graph indexing; class inheritance is not in any RPC traversal
 	InheritsFromRel RelationshipType = "INHERITS_FROM"
 	ImplementsRel   RelationshipType = "IMPLEMENTS"
 
@@ -32,7 +34,11 @@ const (
 
 	// Async / Message Queue Relationships
 	ConsumesFromRel RelationshipType = "CONSUMES_FROM"
-	ScheduledByRel  RelationshipType = "SCHEDULED_BY"
+	// Deprecated: noise — not written during call-graph indexing; cron trigger has no value in RPC context
+	ScheduledByRel RelationshipType = "SCHEDULED_BY"
+
+	// DB Relationships
+	CallsDBRel RelationshipType = "CALLS_DB"
 )
 
 // BaseRelationship represents common properties for all relationships
@@ -121,6 +127,12 @@ type DependsOnRelationship struct {
 	IsDirect bool   `json:"isDirect" neo4j:"isDirect"`
 }
 
+// CallsServiceRelationship connects a GRPCCall/HTTPCall/OutboxCall node to a target Service node.
+type CallsServiceRelationship struct {
+	BaseRelationship
+	Protocol string `json:"protocol" neo4j:"protocol"` // "grpc", "http", "outbox", "sqs", "kafka"
+}
+
 // DescribesRelationship connects documents to features or code elements
 type DescribesRelationship struct {
 	BaseRelationship
@@ -130,6 +142,12 @@ type DescribesRelationship struct {
 type MentionsRelationship struct {
 	BaseRelationship
 	Context string `json:"context" neo4j:"context"`
+}
+
+// CallsDBRelationship connects a function to a DBCall node.
+type CallsDBRelationship struct {
+	BaseRelationship
+	Line int `json:"line" neo4j:"line"`
 }
 
 // RelationshipFactory creates relationships from type and properties
@@ -162,12 +180,16 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &ExposesAPIRelationship{BaseRelationship: base}
 	case CallsAPIRel:
 		return &CallsAPIRelationship{BaseRelationship: base}
+	case CallsServiceRel:
+		return &CallsServiceRelationship{BaseRelationship: base}
 	case DependsOnRel:
 		return &DependsOnRelationship{BaseRelationship: base}
 	case DescribesRel:
 		return &DescribesRelationship{BaseRelationship: base}
 	case MentionsRel:
 		return &MentionsRelationship{BaseRelationship: base}
+	case CallsDBRel:
+		return &CallsDBRelationship{BaseRelationship: base}
 	default:
 		return &BaseRelationship{
 			Type:       relType,

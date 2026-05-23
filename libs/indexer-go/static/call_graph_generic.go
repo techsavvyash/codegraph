@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
@@ -54,6 +56,33 @@ type genericFuncInfo struct {
 	EndLine   int
 }
 
+type degreeAccumulator struct {
+	in   map[string]int
+	out  map[string]int
+	seen map[string]bool
+}
+
+func newDegreeAccumulator() *degreeAccumulator {
+	return &degreeAccumulator{
+		in:   make(map[string]int),
+		out:  make(map[string]int),
+		seen: make(map[string]bool),
+	}
+}
+
+func (d *degreeAccumulator) add(fromID, toID string) {
+	if d == nil || fromID == "" || toID == "" {
+		return
+	}
+	key := fromID + "->" + toID
+	if d.seen[key] {
+		return
+	}
+	d.seen[key] = true
+	d.out[fromID]++
+	d.in[toID]++
+}
+
 // BuildCallGraph infers CALLS relationships for all source files in the service.
 func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	fmt.Println("Building call graph from SCIP references (language-agnostic)...")
@@ -63,9 +92,15 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 		return fmt.Errorf("failed to list files: %w", err)
 	}
 
+	functionsByFile, err := cg.getServiceFunctionsByFile(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to preload service functions: %w", err)
+	}
+
+	degrees := newDegreeAccumulator()
 	totalCalls := 0
 	for _, filePath := range files {
-		n, err := cg.processFile(ctx, filePath)
+		n, err := cg.processFile(ctx, filePath, functionsByFile[filePath], degrees)
 		if err != nil {
 			fmt.Printf("Warning: call graph for %s: %v\n", filePath, err)
 			continue
@@ -75,8 +110,8 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 
 	fmt.Printf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
 
-	// Compute degree properties.
-	if err := cg.computeDegreeProperties(ctx); err != nil {
+	// Write inDegree/outDegree from in-memory edge counts.
+	if err := cg.writeDegreeProperties(ctx, functionsByFile, degrees); err != nil {
 		fmt.Printf("Warning: degree computation failed: %v\n", err)
 	}
 
@@ -110,11 +145,13 @@ func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, err
 
 // processFile computes function body ranges from declaration order,
 // then maps references to enclosing callers and creates CALLS edges.
-func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath string) (int, error) {
-	// Step 1: Get all Function/Method nodes in this file with their declaration lines.
-	funcs, err := cg.getFunctionsInFile(ctx, filePath)
-	if err != nil || len(funcs) == 0 {
-		return 0, err
+func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath string, funcs []genericFuncInfo, degrees *degreeAccumulator) (int, error) {
+	if isNoisyFilePath(filePath) {
+		return 0, nil
+	}
+	// Step 1: Use preloaded Function/Method nodes for this file.
+	if len(funcs) == 0 {
+		return 0, nil
 	}
 
 	// Step 2: Compute body ranges from declaration order.
@@ -168,43 +205,81 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 		if err != nil {
 			continue
 		}
+		degrees.add(caller.ID, ref.targetID)
 		created++
+	}
+
+	// Step 6: Cross-service pass — find references that resolve to functions owned by a
+	// different indexed Service. These are cross-service calls; write GRPCCall/HTTPCall
+	// nodes instead of CALLS edges so the service boundary is explicit in the graph.
+	crossRefs, err := cg.getCrossServiceRefsInFile(ctx, filePath)
+	if err != nil {
+		fmt.Printf("Warning: cross-service ref query for %s: %v\n", filePath, err)
+	} else {
+		seenCross := map[string]bool{}
+		for _, ref := range crossRefs {
+			caller := findEnclosingGenericFunc(funcs, ref.line)
+			if caller == nil {
+				continue
+			}
+			key := fmt.Sprintf("%s:%s:%d", caller.ID, ref.symbol, ref.line)
+			if seenCross[key] {
+				continue
+			}
+			seenCross[key] = true
+			if err := cg.writeCrossServiceCall(ctx, caller.ID, ref, filePath); err != nil {
+				fmt.Printf("Warning: cross-service call node for %s: %v\n", filePath, err)
+			}
+		}
 	}
 
 	return created, nil
 }
 
-// getFunctionsInFile returns all Function/Method nodes in a file with their IDs and declaration lines.
-func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, filePath string) ([]genericFuncInfo, error) {
+// getServiceFunctionsByFile loads all Function/Method nodes for the service in one query.
+func (cg *GenericCallGraphBuilder) getServiceFunctionsByFile(ctx context.Context) (map[string][]genericFuncInfo, error) {
 	query := `
-		MATCH (f:File {path: $filePath, scopeId: $scopeId})-[:CONTAINS]->(fn)
+		MATCH (svc:Service {name: $serviceName, scopeId: $scopeId})-[:CONTAINS*1..3]->(fn)
 		WHERE (fn:Function OR fn:Method)
 		  AND fn.startLine IS NOT NULL
-		RETURN elementId(fn) AS id, fn.startLine AS startLine
-		ORDER BY fn.startLine
+		MATCH (fn)<-[:CONTAINS]-(file:File)
+		WHERE file.scopeId = $scopeId
+		RETURN file.path AS filePath,
+		       elementId(fn) AS id,
+		       fn.startLine AS startLine
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath": filePath,
-		"scopeId":  cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
+		"scopeId":     cg.scopeCtx.ScopeID,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	funcs := make([]genericFuncInfo, 0, len(results))
+	rows := make([]map[string]any, 0, len(results))
 	for _, rec := range results {
-		rm := rec.AsMap()
+		rows = append(rows, rec.AsMap())
+	}
+	return groupFunctionsByFile(rows), nil
+}
+
+// groupFunctionsByFile transforms flat query rows to filePath -> function list.
+func groupFunctionsByFile(rows []map[string]any) map[string][]genericFuncInfo {
+	out := make(map[string][]genericFuncInfo)
+	for _, rm := range rows {
+		filePath := getStringFromMap(rm, "filePath")
 		id := getStringFromMap(rm, "id")
 		startLine := int(getInt64FromMap(rm, "startLine"))
-		if id != "" && startLine > 0 {
-			funcs = append(funcs, genericFuncInfo{
-				ID:        id,
-				StartLine: startLine,
-				EndLine:   startLine, // will be computed
-			})
+		if filePath == "" || id == "" || startLine <= 0 {
+			continue
 		}
+		out[filePath] = append(out[filePath], genericFuncInfo{
+			ID:        id,
+			StartLine: startLine,
+			EndLine:   startLine,
+		})
 	}
-	return funcs, nil
+	return out
 }
 
 // refInfo holds a reference's line and the target function's element ID.
@@ -264,6 +339,202 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 	return refs, nil
 }
 
+// crossServiceRefInfo holds a cross-service reference with target service identity.
+type crossServiceRefInfo struct {
+	line            int
+	symbol          string
+	displayName     string
+	targetService   string
+	targetServiceID string
+}
+
+// getCrossServiceRefsInFile queries references in this file where the resolved Symbol
+// is defined by a Function/Method that belongs to a DIFFERENT indexed Service.
+// This avoids the third-party noise problem: only symbols owned by an already-indexed
+// Service node are returned, so stdlib and vendor calls are silently ignored.
+func (cg *GenericCallGraphBuilder) getCrossServiceRefsInFile(ctx context.Context, filePath string) ([]crossServiceRefInfo, error) {
+	// The `NOT signature CONTAINS $packageName` guard excludes intra-service symbols so
+	// there is no overlap with the existing CALLS edge pass.
+	query := `
+		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
+		      -[:REFERENCES]->(sym:Symbol)
+		      <-[:DEFINES]-(target)
+		WHERE (target:Function OR target:Method)
+		  AND NOT target.signature CONTAINS $packageName
+		MATCH (targetFile:File)-[:CONTAINS]->(target)
+		MATCH (targetSvc:Service)-[:CONTAINS]->(targetFile)
+		WHERE targetSvc.name <> $serviceName
+		RETURN ref.startLine AS refLine,
+		       sym.symbol AS symbol,
+		       coalesce(sym.displayName, '') AS displayName,
+		       targetSvc.name AS targetService,
+		       elementId(targetSvc) AS targetServiceId
+		LIMIT 500
+	`
+	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
+		"filePath":    filePath,
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"packageName": cg.packageName,
+		"serviceName": cg.serviceName,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	refs := make([]crossServiceRefInfo, 0, len(results))
+	for _, rec := range results {
+		rm := rec.AsMap()
+		line := int(getInt64FromMap(rm, "refLine"))
+		sym := getStringFromMap(rm, "symbol")
+		dn := getStringFromMap(rm, "displayName")
+		svcName := getStringFromMap(rm, "targetService")
+		svcID := getStringFromMap(rm, "targetServiceId")
+		if line > 0 && sym != "" && svcName != "" {
+			refs = append(refs, crossServiceRefInfo{
+				line:            line,
+				symbol:          sym,
+				displayName:     dn,
+				targetService:   svcName,
+				targetServiceID: svcID,
+			})
+		}
+	}
+	return refs, nil
+}
+
+// writeCrossServiceCall writes a GRPCCall or HTTPCall node for a detected cross-service
+// reference, plus CALLS_API and CALLS_SERVICE edges.
+func (cg *GenericCallGraphBuilder) writeCrossServiceCall(
+	ctx context.Context,
+	callerID string,
+	ref crossServiceRefInfo,
+	filePath string,
+) error {
+	if isGRPCLikeSymbol(ref.symbol) {
+		return cg.writeGenericGRPCCall(ctx, callerID, ref, filePath)
+	}
+	return cg.writeGenericHTTPCall(ctx, callerID, ref, filePath)
+}
+
+// writeGenericGRPCCall creates a GRPCCall node and edges for a cross-service gRPC reference.
+func (cg *GenericCallGraphBuilder) writeGenericGRPCCall(
+	ctx context.Context,
+	callerID string,
+	ref crossServiceRefInfo,
+	filePath string,
+) error {
+	targetSvcName, methodName := parseGRPCSymbol(ref.symbol, ref.displayName)
+	if targetSvcName == "" {
+		targetSvcName = ref.targetService
+	}
+
+	nodeKey := fmt.Sprintf("grpccall:generic:%s:%s:%s.%s:%d",
+		cg.serviceName, filePath, targetSvcName, methodName, ref.line)
+
+	mergeProps := map[string]any{"nodeKey": nodeKey}
+	setProps := map[string]any{
+		"nodeKey":       nodeKey,
+		"callerService": cg.serviceName,
+		"targetService": ref.targetService,
+		"targetMethod":  targetSvcName + "." + methodName,
+		"protoPackage":  extractProtoPackage(ref.symbol),
+		"filePath":      filePath,
+		"line":          ref.line,
+		"createdAt":     currentUnixTime(),
+		"updatedAt":     currentUnixTime(),
+	}
+	for k, v := range cg.scopeCtx.Props() {
+		setProps[k] = v
+	}
+
+	grpcCallID, err := cg.client.MergeNode(ctx, []string{"GRPCCall"}, mergeProps, setProps)
+	if err != nil {
+		return fmt.Errorf("merge GRPCCall: %w", err)
+	}
+
+	if _, err := cg.client.MergeRelationship(ctx, callerID, grpcCallID,
+		string(models.CallsAPIRel), map[string]any{}, map[string]any{"line": ref.line},
+	); err != nil {
+		fmt.Printf("Warning: generic gRPC CALLS_API: %v\n", err)
+	}
+
+	if ref.targetServiceID != "" {
+		if _, err := cg.client.MergeRelationship(ctx, grpcCallID, ref.targetServiceID,
+			string(models.CallsServiceRel), map[string]any{}, map[string]any{"protocol": "grpc"},
+		); err != nil {
+			fmt.Printf("Warning: generic gRPC CALLS_SERVICE: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// writeGenericHTTPCall creates an HTTPCall node and edges for a cross-service HTTP reference.
+func (cg *GenericCallGraphBuilder) writeGenericHTTPCall(
+	ctx context.Context,
+	callerID string,
+	ref crossServiceRefInfo,
+	filePath string,
+) error {
+	method := inferHTTPMethodFromSymbol(ref.symbol, ref.displayName)
+
+	nodeKey := fmt.Sprintf("httpcall:generic:%s:%s:%s:%d",
+		cg.serviceName, filePath, method, ref.line)
+
+	mergeProps := map[string]any{"nodeKey": nodeKey}
+	setProps := map[string]any{
+		"nodeKey":       nodeKey,
+		"callerService": cg.serviceName,
+		"targetService": ref.targetService,
+		"url":           "dynamic",
+		"method":        method,
+		"filePath":      filePath,
+		"line":          ref.line,
+		"createdAt":     currentUnixTime(),
+		"updatedAt":     currentUnixTime(),
+	}
+	for k, v := range cg.scopeCtx.Props() {
+		setProps[k] = v
+	}
+
+	httpCallID, err := cg.client.MergeNode(ctx, []string{"HTTPCall"}, mergeProps, setProps)
+	if err != nil {
+		return fmt.Errorf("merge HTTPCall: %w", err)
+	}
+
+	if _, err := cg.client.MergeRelationship(ctx, callerID, httpCallID,
+		string(models.CallsAPIRel), map[string]any{}, map[string]any{"line": ref.line},
+	); err != nil {
+		fmt.Printf("Warning: generic HTTP CALLS_API: %v\n", err)
+	}
+
+	if ref.targetServiceID != "" {
+		if _, err := cg.client.MergeRelationship(ctx, httpCallID, ref.targetServiceID,
+			string(models.CallsServiceRel), map[string]any{}, map[string]any{"protocol": "http"},
+		); err != nil {
+			fmt.Printf("Warning: generic HTTP CALLS_SERVICE: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// isGRPCLikeSymbol returns true when a SCIP symbol FQN suggests a gRPC call site.
+func isGRPCLikeSymbol(symbol string) bool {
+	lsym := strings.ToLower(symbol)
+	for _, indicator := range []string{"/grpc/", "/grpcv1", "/pb/", "/proto/", "_pb2_grpc", "@grpc/grpc-js"} {
+		if strings.Contains(lsym, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// currentUnixTime returns the current UTC Unix timestamp as int64.
+func currentUnixTime() int64 {
+	return time.Now().UTC().Unix()
+}
+
 // updateBodyRanges writes computed endLine values back to Neo4j.
 func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs []genericFuncInfo) error {
 	updates := make([]map[string]any, len(funcs))
@@ -282,26 +553,28 @@ func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs [
 	return err
 }
 
-// computeDegreeProperties sets inDegree and outDegree on Function/Method nodes.
-func (cg *GenericCallGraphBuilder) computeDegreeProperties(ctx context.Context) error {
-	// Scope to service functions only to avoid cross-service contamination.
+// writeDegreeProperties sets inDegree/outDegree using already-built CALLS pairs.
+func (cg *GenericCallGraphBuilder) writeDegreeProperties(
+	ctx context.Context,
+	functionsByFile map[string][]genericFuncInfo,
+	degrees *degreeAccumulator,
+) error {
+	updates := make([]map[string]any, 0, len(functionsByFile)*2)
+	for _, funcs := range functionsByFile {
+		for _, fn := range funcs {
+			updates = append(updates, map[string]any{
+				"id":        fn.ID,
+				"inDegree":  degrees.in[fn.ID],
+				"outDegree": degrees.out[fn.ID],
+			})
+		}
+	}
 	cypher := `
-		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(:File)-[:CONTAINS]->(fn)
-		WHERE (fn:Function OR fn:Method)
-		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
-		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
-		WHERE (caller:Function OR caller:Method)
-		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
-		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
-		WHERE (callee:Function OR callee:Method)
-		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
-		WITH fn, count(DISTINCT caller) AS inD, count(DISTINCT callee) AS outD
-		SET fn.inDegree = inD, fn.outDegree = outD
+		UNWIND $updates AS u
+		MATCH (fn) WHERE elementId(fn) = u.id
+		SET fn.inDegree = u.inDegree, fn.outDegree = u.outDegree
 	`
-	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId":     cg.scopeCtx.ScopeID,
-		"serviceName": cg.serviceName,
-	})
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}
