@@ -50,6 +50,12 @@ type SCIPIndexer struct {
 	vectorStore         search.VectorStore
 	textStore           textindex.TextIndexStore
 	skipSecondaryStores bool // true for sub-indexers in polyglot mode
+
+	// hybrid mode: set by IndexGoService to partition responsibilities between passes.
+	skipCallGraph     bool
+	skipRPCDetection  bool
+	skipAPIAnalysis   bool
+	skipSemanticEdges bool
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -238,89 +244,97 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	// Step 10: Build call graph (Go only, requires AST for function body ranges).
 	// Must run before API analysis so that Function/Method nodes have correct
 	// startLine/endLine body ranges for findContainingFunction lookups.
-	if si.timer != nil {
-		si.timer.Start("Call graph")
-	}
-	if si.language == LanguageGo {
-		fmt.Println("Building call graph from SCIP references + Go AST...")
-		cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
-		cgBuilder.SetScope(si.scopeCtx)
-		cgBuilder.SetServiceName(si.serviceName)
-		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+	if !si.skipCallGraph {
+		if si.timer != nil {
+			si.timer.Start("Call graph")
 		}
-	} else {
-		fmt.Println("Building call graph from SCIP references (language-agnostic)...")
-		cgBuilder := NewGenericCallGraphBuilder(si.client)
-		cgBuilder.SetScope(si.scopeCtx)
-		cgBuilder.SetServiceName(si.serviceName)
-		// Use the NPM package name or service name for target filtering.
-		pkgName := si.extractNPMPackageName(projectPath)
-		if pkgName == "" {
-			pkgName = si.serviceName
+		if si.language == LanguageGo {
+			fmt.Println("Building call graph from SCIP references + Go AST...")
+			cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
+			cgBuilder.SetScope(si.scopeCtx)
+			cgBuilder.SetServiceName(si.serviceName)
+			if err := cgBuilder.BuildCallGraph(ctx); err != nil {
+				fmt.Printf("Warning: call graph construction failed: %v\n", err)
+			}
+		} else {
+			fmt.Println("Building call graph from SCIP references (language-agnostic)...")
+			cgBuilder := NewGenericCallGraphBuilder(si.client)
+			cgBuilder.SetScope(si.scopeCtx)
+			cgBuilder.SetServiceName(si.serviceName)
+			// Use the NPM package name or service name for target filtering.
+			pkgName := si.extractNPMPackageName(projectPath)
+			if pkgName == "" {
+				pkgName = si.serviceName
+			}
+			cgBuilder.SetPackageName(pkgName)
+			if err := cgBuilder.BuildCallGraph(ctx); err != nil {
+				fmt.Printf("Warning: call graph construction failed: %v\n", err)
+			}
 		}
-		cgBuilder.SetPackageName(pkgName)
-		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+		if si.timer != nil {
+			si.timer.Stop(0, "")
 		}
-	}
-	if si.timer != nil {
-		si.timer.Stop(0, "")
 	}
 
 	// Step 9b: Detect cross-service RPC call sites.
 	// For Go: use AST-based detection (fast, no Reference nodes needed).
 	// For other languages: fall back to SCIP graph traversal (needs Reference nodes).
-	if si.language == LanguageGo {
-		fmt.Println("Detecting cross-service RPC call sites via Go AST...")
-		if err := si.runASTRPCDetection(ctx, projectPath); err != nil {
-			fmt.Printf("Warning: AST RPC detection failed: %v\n", err)
-		}
-	} else {
-		fmt.Println("Detecting cross-service RPC call sites via SCIP symbols...")
-		rpcDetector := NewSCIPRPCDetector(si.client, si.serviceName, si.scopeCtx)
-		if svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID); idxErr == nil {
-			rpcDetector.SetServiceIndex(svcIdx)
+	if !si.skipRPCDetection {
+		if si.language == LanguageGo {
+			fmt.Println("Detecting cross-service RPC call sites via Go AST...")
+			if err := si.runASTRPCDetection(ctx, projectPath); err != nil {
+				fmt.Printf("Warning: AST RPC detection failed: %v\n", err)
+			}
 		} else {
-			fmt.Printf("Warning: failed to preload service index for SCIP detector: %v\n", idxErr)
-		}
-		if err := rpcDetector.DetectRPCCalls(ctx); err != nil {
-			fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+			fmt.Println("Detecting cross-service RPC call sites via SCIP symbols...")
+			rpcDetector := NewSCIPRPCDetector(si.client, si.serviceName, si.scopeCtx)
+			if svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID); idxErr == nil {
+				rpcDetector.SetServiceIndex(svcIdx)
+			} else {
+				fmt.Printf("Warning: failed to preload service index for SCIP detector: %v\n", idxErr)
+			}
+			if err := rpcDetector.DetectRPCCalls(ctx); err != nil {
+				fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+			}
 		}
 	}
 
 	// Step 10b: API analysis (depends on body ranges from call graph step above)
-	if si.timer != nil {
-		si.timer.Start("API analysis")
-	}
-	if si.language == LanguageGo {
-		// Structural API surface detection — zero framework catalogs.
-		fmt.Println("Detecting API surface via graph-structural signals...")
-		modulePath := readModulePath(projectPath)
-		apiDetector := NewAPISurfaceDetector(si.client, modulePath)
-		apiDetector.SetScope(si.scopeCtx)
-		if err := apiDetector.Detect(ctx); err != nil {
-			fmt.Printf("Warning: structural API surface detection failed: %v\n", err)
+	if !si.skipAPIAnalysis {
+		if si.timer != nil {
+			si.timer.Start("API analysis")
 		}
-	} else {
-		// Fallback: framework-pattern-based detection for non-Go languages.
-		fmt.Println("Analyzing API patterns via SCIP symbol matching...")
-		symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
-		symAnalyzer.SetScope(si.scopeCtx)
-		if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
-			fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+		if si.language == LanguageGo {
+			// Structural API surface detection — zero framework catalogs.
+			fmt.Println("Detecting API surface via graph-structural signals...")
+			modulePath := readModulePath(projectPath)
+			apiDetector := NewAPISurfaceDetector(si.client, modulePath)
+			apiDetector.SetScope(si.scopeCtx)
+			if err := apiDetector.Detect(ctx); err != nil {
+				fmt.Printf("Warning: structural API surface detection failed: %v\n", err)
+			}
+		} else {
+			// Fallback: framework-pattern-based detection for non-Go languages.
+			fmt.Println("Analyzing API patterns via SCIP symbol matching...")
+			symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
+			symAnalyzer.SetScope(si.scopeCtx)
+			if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
+				fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+			}
 		}
-	}
-	if si.timer != nil {
-		si.timer.Stop(0, "")
+		if si.timer != nil {
+			si.timer.Stop(0, "")
+		}
 	}
 
 	// Step 10a: Detect semantic edges (message consumers, scheduled functions)
-	fmt.Println("Detecting semantic edges...")
-	sed := NewSemanticEdgeDetector(si.client)
-	sed.SetScope(si.scopeCtx)
-	if err := sed.DetectSemanticEdges(ctx); err != nil {
-		fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
+	if !si.skipSemanticEdges {
+		fmt.Println("Detecting semantic edges...")
+		sed := NewSemanticEdgeDetector(si.client)
+		sed.SetScope(si.scopeCtx)
+		if err := sed.DetectSemanticEdges(ctx); err != nil {
+			fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
+		}
 	}
 
 	// Step 10b: Populate secondary stores (Qdrant + OpenSearch)
@@ -447,7 +461,21 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 
 		if err := sub.IndexProject(ctx, r.Path); err != nil {
 			fmt.Printf("Warning: %s indexing at %s failed: %v\n", cfg.DisplayName, rel, err)
-			errs = append(errs, fmt.Errorf("%s@%s: %w", r.Language, rel, err))
+			// For Go, fall back to the AST indexer when scip-go can't resolve module
+			// dependencies (e.g. private deps not in the local module cache).
+			if r.Language == LanguageGo {
+				fmt.Printf("Falling back to AST indexer for Go at %s...\n", rel)
+				astIdx := NewStaticIndexer(si.client, subServiceName, si.version, si.repoURL)
+				if astErr := astIdx.IndexProject(ctx, r.Path); astErr != nil {
+					fmt.Printf("Warning: AST fallback also failed at %s: %v\n", rel, astErr)
+					errs = append(errs, fmt.Errorf("%s@%s: scip: %w; ast: %v", r.Language, rel, err, astErr))
+				} else {
+					fmt.Printf("AST fallback succeeded for Go at %s\n", rel)
+					// Don't count this root as failed — AST indexing worked.
+				}
+			} else {
+				errs = append(errs, fmt.Errorf("%s@%s: %w", r.Language, rel, err))
+			}
 		}
 	}
 
@@ -493,8 +521,21 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	switch si.language {
 	case LanguageGo:
 		// scip-go --module-name <name> --module-version <version> --output <file>
+		// Use the actual module path from go.mod so scip-go can resolve versions correctly.
+		moduleName := readGoModuleName(absPath)
+		if moduleName == "" {
+			moduleName = si.serviceName
+		}
+		// Warm the module cache so scip-go can resolve all dependency versions.
+		// Ignore errors: if a private dep can't be downloaded the cache may be
+		// partially warm enough, and scip-go will emit the real error if not.
+		dlCmd := exec.Command("go", "mod", "download")
+		dlCmd.Dir = absPath
+		if out, err := dlCmd.CombinedOutput(); err != nil {
+			fmt.Printf("Warning: go mod download failed (continuing): %v\n%s\n", err, strings.TrimSpace(string(out)))
+		}
 		cmd = exec.Command(si.langConfig.SCIPBinary,
-			"--module-name", si.serviceName,
+			"--module-name", moduleName,
 			"--module-version", si.version,
 			"--output", outputFile,
 		)
@@ -1589,4 +1630,20 @@ func (si *SCIPIndexer) calculateByteOffsets(filePath string, startLine, startCol
 	endByte += endColumn
 
 	return startByte, endByte
+}
+
+// readGoModuleName reads the module path from the go.mod file in dir.
+// Returns empty string if go.mod is absent or the module line cannot be parsed.
+func readGoModuleName(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.SplitN(string(data), "\n", 20) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+		}
+	}
+	return ""
 }
