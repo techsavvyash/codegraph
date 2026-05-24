@@ -23,8 +23,14 @@ const (
 	HTTPCallNode   NodeType = "HTTPCall"
 	OutboxCallNode NodeType = "OutboxCall"
 	DBCallNode     NodeType = "DBCall"
-	CommentNode NodeType = "Comment"
-	FlowNode    NodeType = "Flow"
+	CommentNode          NodeType = "Comment"
+	FlowNode             NodeType = "Flow"
+	ControlFlowScopeNode NodeType = "ControlFlowScope"
+	CallEdgeNode         NodeType = "CallEdge"
+	ConcurrentScopeNode  NodeType = "ConcurrentScope"
+	TxScopeNode          NodeType = "TxScope"
+	ProtoContractNode    NodeType = "ProtoContract"
+	ProtoMethodNode      NodeType = "ProtoMethod"
 
 	// Deprecated: noise — not written during call-graph indexing.
 	// Kept for document-indexer and generated-context compatibility.
@@ -260,10 +266,13 @@ type DocumentChunk struct {
 // Flow represents a first-class execution flow (e.g., an API request path, consumer pipeline).
 type Flow struct {
 	BaseNode
-	Name           string `json:"name" neo4j:"name"`
-	EntrypointKey  string `json:"entrypointKey" neo4j:"entrypointKey"`
-	FlowType       string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
-	MaxDepth       int    `json:"maxDepth" neo4j:"maxDepth"`
+	Name               string `json:"name" neo4j:"name"`
+	EntrypointKey      string `json:"entrypointKey" neo4j:"entrypointKey"`
+	FlowType           string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
+	MaxDepth           int    `json:"maxDepth" neo4j:"maxDepth"`
+	// Spine cache (Change #7): pre-computed at index time so MCP consumers avoid re-traversal.
+	BehavioralSummary  string `json:"behavioralSummary,omitempty" neo4j:"behavioralSummary"`
+	SpineHash          string `json:"spineHash,omitempty" neo4j:"spineHash"`
 }
 
 // Feature represents a specific feature or capability
@@ -311,6 +320,78 @@ type GenerationDiagnostic struct {
 	RejectionReasons  []string `json:"rejectionReasons" neo4j:"rejectionReasons"`
 	UnsupportedClaims []int    `json:"unsupportedClaims" neo4j:"unsupportedClaims"`
 	Content           string   `json:"content" neo4j:"content"`                     // Draft content that failed verification
+}
+
+// ControlFlowScope represents a single conditional/loop block that encloses one or more calls.
+type ControlFlowScope struct {
+	BaseNode
+	Kind           string `json:"kind" neo4j:"kind"`                     // if, else, switch, switch_case, for, range, select, select_case
+	Condition      string `json:"condition" neo4j:"condition"`           // raw source text ≤200 chars
+	FilePath       string `json:"filePath" neo4j:"filePath"`
+	StartLine      int    `json:"startLine" neo4j:"startLine"`
+	EndLine        int    `json:"endLine" neo4j:"endLine"`
+	Depth          int    `json:"depth" neo4j:"depth"`                   // 1-based nesting level
+	ParentScopeKey string `json:"parentScopeKey" neo4j:"parentScopeKey"` // nodeKey of enclosing scope, empty for top-level
+}
+
+// CallEdge is the reified form of a CALLS relationship for calls that are nested inside
+// a ControlFlowScope, ConcurrentScope, or TxScope. Linked to its enclosing scopes via
+// UNDER_CONTROL_FLOW, IN_PARALLEL_WITH, and IN_TX respectively.
+type CallEdge struct {
+	BaseNode
+	CallerID       string   `json:"callerID" neo4j:"callerID"`
+	CalleeID       string   `json:"calleeID" neo4j:"calleeID"`
+	FilePath       string   `json:"filePath" neo4j:"filePath"`
+	Line           int      `json:"line" neo4j:"line"`
+	TargetName     string   `json:"targetName" neo4j:"targetName"`
+	BranchDepth    int      `json:"branchDepth" neo4j:"branchDepth"`
+	OrderIndex     int      `json:"orderIndex,omitempty" neo4j:"orderIndex,omitempty"`
+	LiteralArgs    []string `json:"literalArgs,omitempty" neo4j:"literalArgs,omitempty"`
+	NearestComment string   `json:"nearestComment,omitempty" neo4j:"nearestComment,omitempty"`
+	ReceiverChain  []string `json:"receiverChain,omitempty" neo4j:"receiverChain,omitempty"`
+}
+
+// ConcurrentScope represents a `go func()`, `errgroup.Go` body, or similar concurrent
+// dispatch site. All calls whose source position falls inside its range execute in
+// parallel with the enclosing caller's normal sequence.
+type ConcurrentScope struct {
+	BaseNode
+	Kind              string `json:"kind" neo4j:"kind"` // goroutine | errgroup | waitgroup | channel_send
+	EnclosingFunction string `json:"enclosingFunction" neo4j:"enclosingFunction"`
+	FilePath          string `json:"filePath" neo4j:"filePath"`
+	StartLine         int    `json:"startLine" neo4j:"startLine"`
+	EndLine           int    `json:"endLine" neo4j:"endLine"`
+}
+
+// TxScope represents a transaction boundary. Calls inside its range share the same
+// transactional context.
+type TxScope struct {
+	BaseNode
+	Kind              string `json:"kind" neo4j:"kind"` // pgx_begintx | with_tx_func | gorm_transaction
+	EnclosingFunction string `json:"enclosingFunction" neo4j:"enclosingFunction"`
+	FilePath          string `json:"filePath" neo4j:"filePath"`
+	StartLine         int    `json:"startLine" neo4j:"startLine"`
+	EndLine           int    `json:"endLine" neo4j:"endLine"`
+	Isolation         string `json:"isolation,omitempty" neo4j:"isolation,omitempty"`
+}
+
+// ProtoContract represents a gRPC service definition from a .proto file.
+// It acts as the rendezvous point between callers (GRPCCall nodes) and
+// handlers (Function nodes) indexed in separate service runs.
+type ProtoContract struct {
+	BaseNode
+	ProtoPackage string `json:"protoPackage" neo4j:"protoPackage"` // e.g. "fxsvcpb"
+	ProtoService string `json:"protoService" neo4j:"protoService"` // e.g. "FXService"
+	ProtoFile    string `json:"protoFile" neo4j:"protoFile"`       // relative path to .proto file
+	ServiceName  string `json:"serviceName" neo4j:"serviceName"`   // owning service (--service flag)
+}
+
+// ProtoMethod represents a single RPC method defined in a proto service.
+type ProtoMethod struct {
+	BaseNode
+	Name         string `json:"name" neo4j:"name"`
+	RequestType  string `json:"requestType" neo4j:"requestType"`
+	ResponseType string `json:"responseType" neo4j:"responseType"`
 }
 
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
@@ -408,6 +489,30 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case GenerationDiagnosticNode:
 		return &GenerationDiagnostic{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ControlFlowScopeNode:
+		return &ControlFlowScope{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case CallEdgeNode:
+		return &CallEdge{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ConcurrentScopeNode:
+		return &ConcurrentScope{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case TxScopeNode:
+		return &TxScope{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ProtoContractNode:
+		return &ProtoContract{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ProtoMethodNode:
+		return &ProtoMethod{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	default:

@@ -65,6 +65,31 @@ func (s *InferServiceDepsStage) Run(ctx context.Context, cfg *PipelineConfig) (i
 	return 0, nil
 }
 
+// --- Stage: ResolveCrossServiceHandlers ---
+
+type ResolveCrossServiceHandlersStage struct{}
+
+func (s *ResolveCrossServiceHandlersStage) Name() StageName { return StageResolveCrossServiceHandlers }
+func (s *ResolveCrossServiceHandlersStage) Optional() bool  { return false }
+
+// Run finds all GRPCCall/HTTPCall nodes with a CALLS_SERVICE edge to an indexed Service
+// and writes RESOLVES_TO edges to the concrete handler Function in that service.
+// It is a no-op when only one service is indexed (no matching call sites found).
+func (s *ResolveCrossServiceHandlersStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	// Skip gracefully when only one service is in scope — nothing to resolve.
+	serviceCountCypher := `MATCH (s:Service) WHERE s.scopeId = $scopeId RETURN count(s) AS cnt`
+	rows, err := cfg.Client.ExecuteQuery(ctx, serviceCountCypher, map[string]any{"scopeId": cfg.ScopeCtx.ScopeID})
+	if err == nil && len(rows) > 0 {
+		if cnt, _ := rows[0].AsMap()["cnt"].(int64); cnt < 2 {
+			log.Printf("[ResolveCrossServiceHandlers] Only %d service(s) in scope, skipping", cnt)
+			return 0, nil
+		}
+	}
+	resolver := NewCrossServiceHandlerResolver(cfg.Client)
+	resolver.SetScope(cfg.ScopeCtx)
+	return resolver.Resolve(ctx)
+}
+
 // --- Stage 3: GenerateFlowSpines ---
 
 type GenerateFlowSpinesStage struct{}
@@ -86,6 +111,26 @@ func (s *GenerateFlowSpinesStage) Run(ctx context.Context, cfg *PipelineConfig) 
 		return 0, fmt.Errorf("GenerateFlowSpines: %w", err)
 	}
 	return len(results), nil
+}
+
+// --- Stage: GenerateBehavioralSummaries ---
+
+type GenerateBehavioralSummariesStage struct{}
+
+func (s *GenerateBehavioralSummariesStage) Name() StageName { return StageGenerateBehavioralSummaries }
+func (s *GenerateBehavioralSummariesStage) Optional() bool  { return true }
+
+// Run computes and caches a compact behavioral summary string on every Flow node in scope.
+// Flows whose spine hash has not changed since the last run are skipped, making repeated
+// indexing of unchanged services nearly free.
+func (s *GenerateBehavioralSummariesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	gen := query.NewBehavioralSummaryGenerator(cfg.Client)
+	gen.SetScope(cfg.ScopeCtx)
+	n, err := gen.GenerateSummaries(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("GenerateBehavioralSummaries: %w", err)
+	}
+	return n, nil
 }
 
 // --- Stage 4: IngestDocuments ---
@@ -186,7 +231,7 @@ func (s *GenerateContextDocsStage) Optional() bool  { return false }
 
 func (s *GenerateContextDocsStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
 	if cfg.Generator == nil {
-		return 0, fmt.Errorf("GenerateContextDocs: generator is required but was nil")
+		return 0, fmt.Errorf("GenerateContextDocs: generator is required but was nil — pass --api-key (or LLM_API_KEY) to enable this stage")
 	}
 	ctxGen := generated.NewContextGenerator(cfg.Client)
 	ctxGen.SetScope(cfg.ScopeCtx)

@@ -25,11 +25,25 @@ type funcRange struct {
 	ReceiverType string   // Receiver type for methods (e.g., "*SCIPIndexer")
 }
 
-// branchRange represents a conditional block (if/switch/select) span in a Go file.
-type branchRange struct {
-	StartLine int
-	EndLine   int
-	Depth     int // nesting level (1-based)
+// callEdgeData holds the data needed to create a reified CallEdge node for a
+// call that sits inside a ControlFlowScope, ConcurrentScope, or TxScope.
+// Each scope key, when non-empty, is already scope-prefixed (see processFile).
+type callEdgeData struct {
+	NodeKey            string
+	CallerID           string
+	CalleeID           string
+	FilePath           string
+	Line               int
+	TargetName         string
+	BranchDepth        int
+	ScopeKey           string // ControlFlowScope nodeKey (empty when call is not under a CFS)
+	ConcurrentScopeKey string // ConcurrentScope nodeKey (empty when not in a goroutine/errgroup)
+	ConcurrentForkLine int    // line where the concurrent scope opens
+	TxScopeKey         string // TxScope nodeKey (empty when not in a transaction)
+	OrderIndex         int
+	LiteralArgs        []string
+	NearestComment     string
+	ReceiverChain      []string
 }
 
 // SCIPCallGraphBuilder infers CALLS relationships between Functions/Methods
@@ -238,8 +252,31 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		return 0, nil
 	}
 
-	// Parse branch ranges for conditional metadata on CALLS edges.
-	branches, _ := parseBranchRanges(fullPath)
+	// Parse control flow scopes for conditional metadata and ControlFlowScope node creation.
+	cfScopes, _ := parseControlFlowScopes(fullPath)
+	// Prefix nodeKeys and parentScopeKeys with scopeId for graph uniqueness.
+	scopeIDPrefix := cg.scopeCtx.ScopeID + ":"
+	for i := range cfScopes {
+		cfScopes[i].NodeKey = scopeIDPrefix + cfScopes[i].NodeKey
+		if cfScopes[i].ParentScopeKey != "" {
+			cfScopes[i].ParentScopeKey = scopeIDPrefix + cfScopes[i].ParentScopeKey
+		}
+	}
+
+	// Parse concurrent (goroutine / errgroup) and transactional scopes so calls
+	// inside them can be tagged via IN_PARALLEL_WITH / IN_TX (Change #3).
+	concScopes, txScopes, _ := parseConcurrentAndTxScopes(fullPath)
+	for i := range concScopes {
+		concScopes[i].NodeKey = scopeIDPrefix + concScopes[i].NodeKey
+	}
+	for i := range txScopes {
+		txScopes[i].NodeKey = scopeIDPrefix + txScopes[i].NodeKey
+	}
+
+	// Parse AST-derived enrichment (order index, literal args, nearest
+	// comment, receiver chain) keyed by "<line>:<methodName>". Best-effort:
+	// a parse failure here only loses enrichment, not the edge itself.
+	callMetadata, _ := parseCallMetadata(fullPath)
 
 	// Load graph node IDs for functions in this file, keyed by base name.
 	// We filter to only functions whose SCIP signature matches this file's
@@ -306,7 +343,8 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		       ELSE [directTarget]
 		  END AS target
 		RETURN ref.startLine AS refLine,
-		       elementId(target) AS targetId
+		       elementId(target) AS targetId,
+		       target.name AS targetName
 	`
 
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -320,11 +358,13 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 
 	created := 0
 	seen := map[string]bool{}
+	var conditionalCalls []callEdgeData
 
 	for _, rec := range results {
 		rm := rec.AsMap()
 		refLine := int(getInt64FromMap(rm, "refLine"))
 		targetID := getStringFromMap(rm, "targetId")
+		targetName := strings.TrimSuffix(getStringFromMap(rm, "targetName"), "().")
 
 		caller := findEnclosingCaller(callers, refLine)
 		if caller == nil {
@@ -337,17 +377,107 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		}
 		seen[pairKey] = true
 
-		// Compute branch metadata for this call site.
-		depth, isCond := branchDepthAtLine(branches, refLine)
+		// Compute control-flow / concurrent / tx scopes for this call site.
+		innerScope := findInnermostScope(cfScopes, refLine)
+		innerConc := findInnermostConcurrentScope(concScopes, refLine)
+		innerTx := findInnermostTxScope(txScopes, refLine)
+		var depth int
+		var isCond bool
+		if innerScope != nil {
+			depth = innerScope.Depth
+			isCond = true
+		}
+
+		setProps := map[string]any{
+			"line":          refLine,
+			"filePath":      filePath,
+			"branchDepth":   depth,
+			"isConditional": isCond,
+			"isParallel":    innerConc != nil,
+			"isInTx":        innerTx != nil,
+		}
+
+		// Attach AST-derived enrichment when the parsed metadata has a
+		// matching entry for this (line, targetName). Unknown keys fall
+		// through with only the base properties — preserving prior behaviour.
+		var meta callMeta
+		var hasMeta bool
+		if m, ok := callMetadata[fmt.Sprintf("%d:%s", refLine, targetName)]; ok {
+			meta = m
+			hasMeta = true
+			if meta.OrderIndex > 0 {
+				setProps["orderIndex"] = meta.OrderIndex
+			}
+			if len(meta.LiteralArgs) > 0 {
+				setProps["literalArgs"] = meta.LiteralArgs
+			}
+			if meta.NearestComment != "" {
+				setProps["nearestComment"] = meta.NearestComment
+			}
+			if len(meta.ReceiverChain) > 0 {
+				setProps["receiverChain"] = meta.ReceiverChain
+			}
+		}
 
 		_, err := cg.client.MergeRelationship(ctx, caller.ID, targetID, string(models.CallsRel),
-			nil,
-			map[string]any{"line": refLine, "filePath": filePath, "branchDepth": depth, "isConditional": isCond})
+			nil, setProps)
 		if err != nil {
 			fmt.Printf("Warning: failed to create CALLS edge: %v\n", err)
 			continue
 		}
 		created++
+
+		// Reify the call as a CallEdge whenever it belongs to *any* scope
+		// (control-flow, concurrent, or transactional). The scope keys that
+		// don't apply remain empty, and the upsert step only links the ones
+		// that are set.
+		if innerScope != nil || innerConc != nil || innerTx != nil {
+			ced := callEdgeData{
+				NodeKey:     fmt.Sprintf("calledge:%s:%s:%d:%s", cg.scopeCtx.ScopeID, filePath, refLine, targetName),
+				CallerID:    caller.ID,
+				CalleeID:    targetID,
+				FilePath:    filePath,
+				Line:        refLine,
+				TargetName:  targetName,
+				BranchDepth: depth,
+			}
+			if innerScope != nil {
+				ced.ScopeKey = innerScope.NodeKey
+			}
+			if innerConc != nil {
+				ced.ConcurrentScopeKey = innerConc.NodeKey
+				ced.ConcurrentForkLine = innerConc.StartLine
+			}
+			if innerTx != nil {
+				ced.TxScopeKey = innerTx.NodeKey
+			}
+			if hasMeta {
+				ced.OrderIndex = meta.OrderIndex
+				ced.LiteralArgs = meta.LiteralArgs
+				ced.NearestComment = meta.NearestComment
+				ced.ReceiverChain = meta.ReceiverChain
+			}
+			conditionalCalls = append(conditionalCalls, ced)
+		}
+	}
+
+	// Upsert ControlFlowScope / ConcurrentScope / TxScope nodes and CallEdge
+	// reifications for this file. Only fire scope upserts when at least one
+	// CallEdge in the batch references that scope kind — keeps the graph thin
+	// for files that don't actually need any reification.
+	if len(conditionalCalls) > 0 {
+		if err := cg.upsertControlFlowScopes(ctx, cfScopes); err != nil {
+			fmt.Printf("Warning: upsertControlFlowScopes for %s: %v\n", filePath, err)
+		}
+		if err := cg.upsertConcurrentScopes(ctx, concScopes); err != nil {
+			fmt.Printf("Warning: upsertConcurrentScopes for %s: %v\n", filePath, err)
+		}
+		if err := cg.upsertTxScopes(ctx, txScopes); err != nil {
+			fmt.Printf("Warning: upsertTxScopes for %s: %v\n", filePath, err)
+		}
+		if err := cg.upsertCallEdges(ctx, conditionalCalls); err != nil {
+			fmt.Printf("Warning: upsertCallEdges for %s: %v\n", filePath, err)
+		}
 	}
 
 	return created, nil
@@ -559,80 +689,194 @@ func exprTypeName(expr ast.Expr) string {
 	return ""
 }
 
-// parseBranchRanges extracts line ranges for conditional blocks (if/switch/select)
-// from a Go source file. Each range includes its nesting depth.
-func parseBranchRanges(filePath string) ([]branchRange, error) {
-	src, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
+// upsertControlFlowScopes batch-merges ControlFlowScope nodes into Neo4j.
+func (cg *SCIPCallGraphBuilder) upsertControlFlowScopes(ctx context.Context, scopes []controlFlowScope) error {
+	if len(scopes) == 0 {
+		return nil
 	}
-
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filePath, src, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	var ranges []branchRange
-	var walk func(node ast.Node, depth int)
-	walk = func(node ast.Node, depth int) {
-		if node == nil {
-			return
-		}
-		switch n := node.(type) {
-		case *ast.IfStmt:
-			start := fset.Position(n.Pos()).Line
-			end := fset.Position(n.End()).Line
-			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
-			ast.Inspect(n.Body, func(child ast.Node) bool {
-				if child == n.Body {
-					return true
-				}
-				walk(child, depth+1)
-				return false
-			})
-			if n.Else != nil {
-				walk(n.Else, depth)
-			}
-			return
-		case *ast.SwitchStmt:
-			start := fset.Position(n.Pos()).Line
-			end := fset.Position(n.End()).Line
-			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
-			return
-		case *ast.TypeSwitchStmt:
-			start := fset.Position(n.Pos()).Line
-			end := fset.Position(n.End()).Line
-			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
-			return
-		case *ast.SelectStmt:
-			start := fset.Position(n.Pos()).Line
-			end := fset.Position(n.End()).Line
-			ranges = append(ranges, branchRange{StartLine: start, EndLine: end, Depth: depth + 1})
-			return
+	params := make([]map[string]any, len(scopes))
+	for i, s := range scopes {
+		params[i] = map[string]any{
+			"nodeKey":        s.NodeKey,
+			"scopeId":        cg.scopeCtx.ScopeID,
+			"kind":           s.Kind,
+			"condition":      s.Condition,
+			"filePath":       s.FilePath,
+			"startLine":      s.StartLine,
+			"endLine":        s.EndLine,
+			"depth":          s.Depth,
+			"parentScopeKey": s.ParentScopeKey,
 		}
 	}
-
-	ast.Inspect(f, func(node ast.Node) bool {
-		walk(node, 0)
-		return true
-	})
-
-	return ranges, nil
+	cypher := `
+		UNWIND $scopes AS s
+		MERGE (cfs:ControlFlowScope {nodeKey: s.nodeKey, scopeId: s.scopeId})
+		SET cfs.kind           = s.kind,
+		    cfs.condition      = s.condition,
+		    cfs.filePath       = s.filePath,
+		    cfs.startLine      = s.startLine,
+		    cfs.endLine        = s.endLine,
+		    cfs.depth          = s.depth,
+		    cfs.parentScopeKey = s.parentScopeKey
+	`
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"scopes": params})
+	return err
 }
 
-// branchDepthAtLine returns the maximum nesting depth of conditional blocks
-// enclosing the given line, and whether the line is inside any conditional block.
-func branchDepthAtLine(branches []branchRange, line int) (int, bool) {
-	maxDepth := 0
-	for _, b := range branches {
-		if line >= b.StartLine && line <= b.EndLine {
-			if b.Depth > maxDepth {
-				maxDepth = b.Depth
-			}
+// upsertConcurrentScopes batch-merges ConcurrentScope nodes into Neo4j.
+func (cg *SCIPCallGraphBuilder) upsertConcurrentScopes(ctx context.Context, scopes []concurrentScope) error {
+	if len(scopes) == 0 {
+		return nil
+	}
+	params := make([]map[string]any, len(scopes))
+	for i, s := range scopes {
+		params[i] = map[string]any{
+			"nodeKey":           s.NodeKey,
+			"scopeId":           cg.scopeCtx.ScopeID,
+			"kind":              s.Kind,
+			"enclosingFunction": s.EnclosingFunction,
+			"filePath":          s.FilePath,
+			"startLine":         s.StartLine,
+			"endLine":           s.EndLine,
 		}
 	}
-	return maxDepth, maxDepth > 0
+	cypher := `
+		UNWIND $scopes AS s
+		MERGE (csc:ConcurrentScope {nodeKey: s.nodeKey, scopeId: s.scopeId})
+		SET csc.kind              = s.kind,
+		    csc.enclosingFunction = s.enclosingFunction,
+		    csc.filePath          = s.filePath,
+		    csc.startLine         = s.startLine,
+		    csc.endLine           = s.endLine
+	`
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"scopes": params})
+	return err
+}
+
+// upsertTxScopes batch-merges TxScope nodes into Neo4j.
+func (cg *SCIPCallGraphBuilder) upsertTxScopes(ctx context.Context, scopes []txScope) error {
+	if len(scopes) == 0 {
+		return nil
+	}
+	params := make([]map[string]any, len(scopes))
+	for i, s := range scopes {
+		params[i] = map[string]any{
+			"nodeKey":           s.NodeKey,
+			"scopeId":           cg.scopeCtx.ScopeID,
+			"kind":              s.Kind,
+			"enclosingFunction": s.EnclosingFunction,
+			"filePath":          s.FilePath,
+			"startLine":         s.StartLine,
+			"endLine":           s.EndLine,
+			"isolation":         s.Isolation,
+		}
+	}
+	cypher := `
+		UNWIND $scopes AS s
+		MERGE (tx:TxScope {nodeKey: s.nodeKey, scopeId: s.scopeId})
+		SET tx.kind              = s.kind,
+		    tx.enclosingFunction = s.enclosingFunction,
+		    tx.filePath          = s.filePath,
+		    tx.startLine         = s.startLine,
+		    tx.endLine           = s.endLine,
+		    tx.isolation         = s.isolation
+	`
+	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"scopes": params})
+	return err
+}
+
+// upsertCallEdges batch-creates CallEdge reification nodes, HAS_CALL_EDGE edges from
+// the caller Function/Method, and per-scope link edges (UNDER_CONTROL_FLOW,
+// IN_PARALLEL_WITH, IN_TX) for whichever scope kinds the call falls inside.
+func (cg *SCIPCallGraphBuilder) upsertCallEdges(ctx context.Context, calls []callEdgeData) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	params := make([]map[string]any, len(calls))
+	for i, c := range calls {
+		params[i] = map[string]any{
+			"nodeKey":            c.NodeKey,
+			"scopeId":            cg.scopeCtx.ScopeID,
+			"callerID":           c.CallerID,
+			"calleeID":           c.CalleeID,
+			"filePath":           c.FilePath,
+			"line":               c.Line,
+			"targetName":         c.TargetName,
+			"branchDepth":        c.BranchDepth,
+			"scopeKey":           c.ScopeKey,
+			"concurrentScopeKey": c.ConcurrentScopeKey,
+			"concurrentForkLine": c.ConcurrentForkLine,
+			"txScopeKey":         c.TxScopeKey,
+			"orderIndex":         c.OrderIndex,
+			"literalArgs":        c.LiteralArgs,
+			"nearestComment":     c.NearestComment,
+			"receiverChain":      c.ReceiverChain,
+		}
+	}
+	// Step 1: Upsert CallEdge nodes.
+	cypher1 := `
+		UNWIND $calls AS c
+		MERGE (ce:CallEdge {nodeKey: c.nodeKey, scopeId: c.scopeId})
+		SET ce.callerID       = c.callerID,
+		    ce.calleeID       = c.calleeID,
+		    ce.filePath       = c.filePath,
+		    ce.line           = c.line,
+		    ce.targetName     = c.targetName,
+		    ce.branchDepth    = c.branchDepth,
+		    ce.orderIndex     = c.orderIndex,
+		    ce.literalArgs    = c.literalArgs,
+		    ce.nearestComment = c.nearestComment,
+		    ce.receiverChain  = c.receiverChain
+	`
+	if _, err := cg.client.ExecuteQuery(ctx, cypher1, map[string]any{"calls": params}); err != nil {
+		return fmt.Errorf("upsert CallEdge nodes: %w", err)
+	}
+	// Step 2: HAS_CALL_EDGE from caller.
+	cypher2 := `
+		UNWIND $calls AS c
+		MATCH (ce:CallEdge {nodeKey: c.nodeKey, scopeId: c.scopeId})
+		MATCH (caller) WHERE elementId(caller) = c.callerID
+		MERGE (caller)-[:HAS_CALL_EDGE]->(ce)
+	`
+	if _, err := cg.client.ExecuteQuery(ctx, cypher2, map[string]any{"calls": params}); err != nil {
+		return fmt.Errorf("link caller to CallEdge: %w", err)
+	}
+	// Step 3: UNDER_CONTROL_FLOW only when the CallEdge has a CFS key.
+	cypher3 := `
+		UNWIND $calls AS c
+		WITH c WHERE c.scopeKey <> ''
+		MATCH (ce:CallEdge {nodeKey: c.nodeKey, scopeId: c.scopeId})
+		MATCH (cfs:ControlFlowScope {nodeKey: c.scopeKey, scopeId: c.scopeId})
+		MERGE (ce)-[:UNDER_CONTROL_FLOW {branchDepth: c.branchDepth}]->(cfs)
+	`
+	if _, err := cg.client.ExecuteQuery(ctx, cypher3, map[string]any{"calls": params}); err != nil {
+		return fmt.Errorf("link CallEdge to CFS: %w", err)
+	}
+	// Step 4: IN_PARALLEL_WITH only when the CallEdge has a ConcurrentScope key.
+	cypher4 := `
+		UNWIND $calls AS c
+		WITH c WHERE c.concurrentScopeKey <> ''
+		MATCH (ce:CallEdge {nodeKey: c.nodeKey, scopeId: c.scopeId})
+		MATCH (csc:ConcurrentScope {nodeKey: c.concurrentScopeKey, scopeId: c.scopeId})
+		MERGE (ce)-[:IN_PARALLEL_WITH {forkPoint: c.concurrentForkLine}]->(csc)
+	`
+	if _, err := cg.client.ExecuteQuery(ctx, cypher4, map[string]any{"calls": params}); err != nil {
+		return fmt.Errorf("link CallEdge to ConcurrentScope: %w", err)
+	}
+	// Step 5: IN_TX only when the CallEdge has a TxScope key. Order is the
+	// call's orderIndex within its enclosing function — gives consumers a
+	// stable sequence for "what writes are in the same tx" queries.
+	cypher5 := `
+		UNWIND $calls AS c
+		WITH c WHERE c.txScopeKey <> ''
+		MATCH (ce:CallEdge {nodeKey: c.nodeKey, scopeId: c.scopeId})
+		MATCH (tx:TxScope {nodeKey: c.txScopeKey, scopeId: c.scopeId})
+		MERGE (ce)-[:IN_TX {order: c.orderIndex}]->(tx)
+	`
+	if _, err := cg.client.ExecuteQuery(ctx, cypher5, map[string]any{"calls": params}); err != nil {
+		return fmt.Errorf("link CallEdge to TxScope: %w", err)
+	}
+	return nil
 }
 
 // exprName extracts the type name from a receiver expression, handling

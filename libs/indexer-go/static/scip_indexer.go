@@ -849,11 +849,14 @@ var noiseNodeLabels = map[string]bool{
 }
 
 // noiseRelTypes lists relationship types that must never be written by the
-// call-graph indexing pipeline. REFERENCES volume is too high (~50K per service)
-// and is not used in any RPC traversal query. INHERITS_FROM and SCHEDULED_BY
-// are not in any RPC traversal path and contribute no signal to cross-service context.
+// call-graph indexing pipeline. INHERITS_FROM and SCHEDULED_BY are not in any
+// RPC traversal path and contribute no signal to cross-service context.
+// NOTE: ReferencesRel is intentionally NOT suppressed here — REFERENCES edges
+// are required by SCIPCallGraphBuilder and SCIPRPCDetector to traverse from
+// Reference nodes to their target Symbol nodes. The ~50K volume concern is
+// mitigated by the isFunctionReferenceKind filter applied before this point,
+// which restricts refs to function/method call occurrences only.
 var noiseRelTypes = map[models.RelationshipType]bool{
-	models.ReferencesRel:   true,
 	models.InheritsFromRel: true,
 	models.ScheduledByRel:  true,
 }

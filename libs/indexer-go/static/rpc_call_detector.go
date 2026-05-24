@@ -222,6 +222,8 @@ func (d *RPCCallDetector) processCallExpr(
 		"targetService": "",
 		"targetMethod":  targetMethod,
 		"protoPackage":  protoPackage,
+		"protoService":  serviceName,
+		"protoMethod":   methodName,
 		"filePath":      filePath,
 		"line":          line,
 		"createdAt":     time.Now().UTC().Unix(),
@@ -233,7 +235,7 @@ func (d *RPCCallDetector) processCallExpr(
 		d.callBuffer.addGRPCCall(nodeKey, setProps)
 		d.callBuffer.addCallsAPIEdge(callerFuncID, nodeKey, map[string]any{"line": line})
 
-		targetServiceID := d.resolveTargetService(ctx, serviceName)
+		targetServiceID := d.resolveTargetServiceFull(ctx, serviceName, protoPackage)
 		if targetServiceID != "" {
 			d.callBuffer.addCallsServiceEdge(nodeKey, targetServiceID, map[string]any{"protocol": "grpc"})
 		}
@@ -256,7 +258,7 @@ func (d *RPCCallDetector) processCallExpr(
 	}
 
 	// Attempt service resolution and write CALLS_SERVICE if found.
-	targetServiceID := d.resolveTargetService(ctx, serviceName)
+	targetServiceID := d.resolveTargetServiceFull(ctx, serviceName, protoPackage)
 	if targetServiceID != "" {
 		if _, err := d.client.MergeRelationship(ctx,
 			grpcCallID, targetServiceID,
@@ -293,6 +295,17 @@ func (d *RPCCallDetector) resolveTargetService(ctx context.Context, serviceName 
 	}
 	id, _ := results[0].AsMap()["id"].(string)
 	return id
+}
+
+// resolveTargetServiceFull tries proto-aware resolution first (via serviceIdx.resolveByProto),
+// then falls back to resolveTargetService name-based lookup.
+func (d *RPCCallDetector) resolveTargetServiceFull(ctx context.Context, serviceName, protoPackage string) string {
+	if d.serviceIdx != nil && protoPackage != "" {
+		if id := d.serviceIdx.resolveByProto(protoPackage); id != "" {
+			return id
+		}
+	}
+	return d.resolveTargetService(ctx, serviceName)
 }
 
 // deriveServiceName strips common client suffixes to produce a bare service name.

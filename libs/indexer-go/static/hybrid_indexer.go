@@ -100,6 +100,22 @@ func runASTPass(ctx context.Context, cfg IndexConfig) error {
 		fmt.Printf("Warning: AST RPC/DB/event detection failed: %v\n", err)
 	}
 
+	// SCIP-based RPC detection for Go — catches cross-service calls made through
+	// wrapper constructors (e.g. grpcclient.GetXxxService()) that the AST detector
+	// misses because they don't follow the New*Client() pattern. Runs after the AST
+	// pass so REFERENCES edges created in the SCIP pass are available. Uses MERGE
+	// nodeKeys prefixed with "scip:" to avoid colliding with AST-detected nodes.
+	fmt.Println("[hybrid] Stage 2b: SCIP-based RPC detection for Go...")
+	scipRPCDet := NewSCIPRPCDetector(cfg.Client, cfg.ServiceName, cfg.ScopeCtx)
+	if svcIdx, idxErr := loadServiceIndex(ctx, cfg.Client, cfg.ScopeCtx.ScopeID); idxErr == nil {
+		scipRPCDet.SetServiceIndex(svcIdx)
+	} else {
+		fmt.Printf("Warning: failed to preload service index for SCIP detector: %v\n", idxErr)
+	}
+	if err := scipRPCDet.DetectRPCCalls(ctx); err != nil {
+		fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+	}
+
 	// API surface detection.
 	modulePath := readModulePath(cfg.ProjectPath)
 	apiDetector := NewAPISurfaceDetector(cfg.Client, modulePath)

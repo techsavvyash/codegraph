@@ -581,6 +581,29 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 			},
 		},
 		{
+			Name:        "codegraph_expand_step",
+			Description: "Expand a single step from a codegraph_generate_flows execution trace to show its full details: file path, line range, signature, docstring, and scope annotations (condition, transaction, parallelism). Use this after codegraph_generate_flows to drill into any step shown in the execution trace.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"flow_node_key": map[string]interface{}{
+						"type":        "string",
+						"description": "The flow_node_key shown in the codegraph_generate_flows output tip",
+					},
+					"step_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Function or method name as shown in the execution trace (case-insensitive)",
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"flow_node_key", "step_name"},
+			},
+		},
+		{
 			Name:        "codegraph_trace_call_graph",
 			Description: "Traverse the call graph from a specific function, showing what it calls (downstream) or what calls it (upstream). Returns a tree-formatted call chain with file locations.",
 			InputSchema: map[string]interface{}{
@@ -655,6 +678,29 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"required": []string{"service"},
 			},
 		},
+		{
+			Name:        "codegraph_rpc_anatomy",
+			Description: "Return the structured anatomy of an RPC handler: all steps in source order with kind (validation/rpc/db/outbox), control-flow context, transaction membership, and parallel group. Requires enriched indexing with call metadata.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"rpc_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Handler function name (e.g. 'CreatePayout') or fully-qualified name (e.g. 'PayoutServiceServer.CreatePayout')",
+					},
+					"service": map[string]interface{}{
+						"type":        "string",
+						"description": "Service name to narrow the search when multiple services are indexed",
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"rpc_name"},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -716,12 +762,16 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleGetEntryPointsTool(ctx, toolCall.Arguments)
 	case "codegraph_generate_flows":
 		response = s.handleGenerateFlowsTool(ctx, toolCall.Arguments)
+	case "codegraph_expand_step":
+		response = s.handleExpandStepTool(ctx, toolCall.Arguments)
 	case "codegraph_trace_call_graph":
 		response = s.handleTraceCallGraphTool(ctx, toolCall.Arguments)
 	case "codegraph_rpc_dependencies":
 		response = s.handleRPCDependenciesTool(ctx, toolCall.Arguments)
 	case "codegraph_service_dependency_map":
 		response = s.handleServiceDependencyMapTool(ctx, toolCall.Arguments)
+	case "codegraph_rpc_anatomy":
+		response = s.handleRPCAnatomyTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -2738,6 +2788,9 @@ func (s *CodeGraphMCPServer) handleGenerateFlowsTool(ctx context.Context, args m
 		flows = flows[:limit]
 	}
 
+	summaryGen := query.NewBehavioralSummaryGenerator(s.client)
+	summaryGen.SetScope(scopeCtx)
+
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("## Generated Flows (%d)\n\n", len(flows)))
 	if len(serviceNames) > 0 {
@@ -2746,13 +2799,22 @@ func (s *CodeGraphMCPServer) handleGenerateFlowsTool(ctx context.Context, args m
 
 	for i, flow := range flows {
 		output.WriteString(fmt.Sprintf("### %d. %s\n", i+1, flow.FlowName))
-		output.WriteString(fmt.Sprintf("- **Type**: %s\n", flow.FlowType))
-		output.WriteString(fmt.Sprintf("- **Steps** (%d):\n", len(flow.Steps)))
-		for _, step := range flow.Steps {
-			indent := strings.Repeat("  ", step.Order)
-			output.WriteString(fmt.Sprintf("%s%d. `%s` (%s)\n", indent, step.Order+1, step.Name, step.Label))
+		output.WriteString(fmt.Sprintf("- **Type**: %s  **Steps**: %d\n\n", flow.FlowType, len(flow.Steps)))
+
+		summary, err := summaryGen.GetOrComputeSummary(ctx, flow.FlowNodeKey)
+		if err == nil && summary != "" {
+			output.WriteString("**Execution trace:**\n```\n")
+			output.WriteString(summary)
+			output.WriteString("\n```\n")
+			output.WriteString(fmt.Sprintf("_Use `codegraph_expand_step` with `flow_node_key: %q` and `step_name` for file location and full signature._\n\n", flow.FlowNodeKey))
+		} else {
+			// Fallback: raw step list when no enrichment data is available.
+			output.WriteString("**Steps:**\n")
+			for _, step := range flow.Steps {
+				output.WriteString(fmt.Sprintf("  %d. `%s` (%s)\n", step.Order+1, step.Name, step.Label))
+			}
+			output.WriteString("\n")
 		}
-		output.WriteString("\n")
 	}
 
 	return ToolCallResponse{
@@ -2940,6 +3002,9 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 			MATCH (caller)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
 			RETURN caller.name AS callerName,
 			       coalesce(caller.filePath, '') AS callerFile,
+			       coalesce(call.line, 0) AS callLine,
+			       coalesce(call.protoService, '') AS protoService,
+			       coalesce(call.protoMethod, '') AS protoMethod,
 			       CASE WHEN call:GRPCCall THEN 'gRPC'
 			            WHEN call:HTTPCall THEN 'HTTP'
 			            WHEN call:OutboxCall THEN 'Outbox'
@@ -2965,7 +3030,17 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 				callType := getStringFromRecord(m, "callType")
 				callTarget := getStringFromRecord(m, "callTarget")
 				targetSvc := getStringFromRecord(m, "targetService")
-				output.WriteString(fmt.Sprintf("  `%s` →[%s]→ `%s` @ **%s**\n", callerName, callType, callTarget, targetSvc))
+				protoService := getStringFromRecord(m, "protoService")
+				protoMethod := getStringFromRecord(m, "protoMethod")
+				line := getIntFromRecord(m, "callLine")
+				entry := fmt.Sprintf("  `%s` →[%s]→ `%s` @ **%s**", callerName, callType, callTarget, targetSvc)
+				if protoService != "" || protoMethod != "" {
+					entry += fmt.Sprintf(" (proto: %s.%s)", protoService, protoMethod)
+				}
+				if line > 0 {
+					entry += fmt.Sprintf(" line %d", line)
+				}
+				output.WriteString(entry + "\n")
 			}
 			output.WriteString("\n")
 		}
@@ -3045,11 +3120,14 @@ func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, arg
 	}
 
 	type crossCall struct {
-		CallerService string
-		FunctionName  string
-		CallType      string
-		CallTarget    string
-		TargetService string
+		CallerService  string
+		FunctionName   string
+		CallType       string
+		CallTarget     string
+		TargetService  string
+		HandlerName    string // resolved via RESOLVES_TO (may be empty)
+		HandlerFile    string
+		ResolutionConf float64
 	}
 
 	var output strings.Builder
@@ -3073,24 +3151,32 @@ func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, arg
 				MATCH (callerSvc:Service {name: $startService})-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
 				WHERE callerSvc <> targetSvc
 				  AND toLower(fn.name) CONTAINS toLower($startFunction)
+				OPTIONAL MATCH (call)-[:RESOLVES_TO]->(handler:Function)
 				RETURN callerSvc.name AS callerService, fn.name AS functionName,
 				       CASE WHEN call:GRPCCall THEN 'gRPC' WHEN call:HTTPCall THEN 'HTTP' WHEN call:OutboxCall THEN 'Outbox' ELSE 'Unknown' END AS callType,
 				       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod,'')
 				            WHEN call:HTTPCall THEN coalesce(call.url,'')
 				            ELSE coalesce(call.eventType,'') END AS callTarget,
-				       targetSvc.name AS targetService
+				       targetSvc.name AS targetService,
+				       coalesce(handler.name, '') AS handlerName,
+				       coalesce(handler.filePath, '') AS handlerFile,
+				       coalesce(handler.confidence, 0.0) AS resolutionConf
 				ORDER BY callerService, callType LIMIT 50`
 			params = map[string]interface{}{"startService": startService, "startFunction": startFunction}
 		} else {
 			cypher = `
 				MATCH (callerSvc:Service)-[:CONTAINS]->(file:File)-[:CONTAINS]->(fn:Function)-[:CALLS_API]->(call)-[:CALLS_SERVICE]->(targetSvc:Service)
 				WHERE callerSvc.name IN $frontier AND callerSvc <> targetSvc
+				OPTIONAL MATCH (call)-[:RESOLVES_TO]->(handler:Function)
 				RETURN callerSvc.name AS callerService, fn.name AS functionName,
 				       CASE WHEN call:GRPCCall THEN 'gRPC' WHEN call:HTTPCall THEN 'HTTP' WHEN call:OutboxCall THEN 'Outbox' ELSE 'Unknown' END AS callType,
 				       CASE WHEN call:GRPCCall THEN coalesce(call.targetMethod,'')
 				            WHEN call:HTTPCall THEN coalesce(call.url,'')
 				            ELSE coalesce(call.eventType,'') END AS callTarget,
-				       targetSvc.name AS targetService
+				       targetSvc.name AS targetService,
+				       coalesce(handler.name, '') AS handlerName,
+				       coalesce(handler.filePath, '') AS handlerFile,
+				       coalesce(handler.confidence, 0.0) AS resolutionConf
 				ORDER BY callerService, callType LIMIT 50`
 			params = map[string]interface{}{"frontier": frontier}
 		}
@@ -3105,12 +3191,19 @@ func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, arg
 		var calls []crossCall
 		for _, r := range records {
 			m := r.AsMap()
+			conf := 0.0
+			if v, ok := m["resolutionConf"].(float64); ok {
+				conf = v
+			}
 			c := crossCall{
-				CallerService: getStringFromRecord(m, "callerService"),
-				FunctionName:  getStringFromRecord(m, "functionName"),
-				CallType:      getStringFromRecord(m, "callType"),
-				CallTarget:    getStringFromRecord(m, "callTarget"),
-				TargetService: getStringFromRecord(m, "targetService"),
+				CallerService:  getStringFromRecord(m, "callerService"),
+				FunctionName:   getStringFromRecord(m, "functionName"),
+				CallType:       getStringFromRecord(m, "callType"),
+				CallTarget:     getStringFromRecord(m, "callTarget"),
+				TargetService:  getStringFromRecord(m, "targetService"),
+				HandlerName:    getStringFromRecord(m, "handlerName"),
+				HandlerFile:    getStringFromRecord(m, "handlerFile"),
+				ResolutionConf: conf,
 			}
 			calls = append(calls, c)
 			if !visited[c.TargetService] {
@@ -3124,11 +3217,18 @@ func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, arg
 			break
 		}
 
-		output.WriteString("| Caller | Function | Type | Call Target | Target Service |\n")
-		output.WriteString("|--------|----------|------|-------------|----------------|\n")
+		output.WriteString("| Caller | Function | Type | Call Target | Target Service | Handler |\n")
+		output.WriteString("|--------|----------|------|-------------|----------------|---------|\n")
 		for _, c := range calls {
-			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
-				c.CallerService, c.FunctionName, c.CallType, c.CallTarget, c.TargetService))
+			handler := "_unresolved_"
+			if c.HandlerName != "" {
+				handler = fmt.Sprintf("`%s`", c.HandlerName)
+				if c.ResolutionConf > 0 {
+					handler += fmt.Sprintf(" (%.0f%%)", c.ResolutionConf*100)
+				}
+			}
+			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+				c.CallerService, c.FunctionName, c.CallType, c.CallTarget, c.TargetService, handler))
 		}
 		output.WriteString("\n")
 
@@ -3144,6 +3244,77 @@ func (s *CodeGraphMCPServer) handleCrossServiceFlowTool(ctx context.Context, arg
 		output.WriteString(fmt.Sprintf("**Services reached**: %s\n", strings.Join(svcList, " → ")))
 	}
 
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleExpandStepTool returns the full details for a named step within a flow.
+// This is the companion to codegraph_generate_flows: the main flow view shows only
+// the phase-numbered execution trace; call this to drill into file location, signature,
+// and scope annotations for a specific step.
+func (s *CodeGraphMCPServer) handleExpandStepTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	flowNodeKey, ok := args["flow_node_key"].(string)
+	if !ok || flowNodeKey == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: flow_node_key is required (shown in the codegraph_generate_flows output)"}},
+			IsError: true,
+		}
+	}
+	stepName, ok := args["step_name"].(string)
+	if !ok || stepName == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: step_name is required (function/method name as shown in the execution trace)"}},
+			IsError: true,
+		}
+	}
+
+	scopeCtx := parseScopeContextArg(args)
+	summaryGen := query.NewBehavioralSummaryGenerator(s.client)
+	summaryGen.SetScope(scopeCtx)
+
+	details, err := summaryGen.GetStepDetails(ctx, flowNodeKey, stepName)
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error querying step details: %v", err)}},
+			IsError: true,
+		}
+	}
+	if len(details) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No step named %q found in flow %q. Check the spelling matches the execution trace.", stepName, flowNodeKey)}},
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Step: `%s`\n\n", stepName))
+	for i, d := range details {
+		if len(details) > 1 {
+			output.WriteString(fmt.Sprintf("### Occurrence %d\n", i+1))
+		}
+		if d.FilePath != "" {
+			output.WriteString(fmt.Sprintf("- **File**: `%s`\n", d.FilePath))
+			if d.StartLine > 0 {
+				output.WriteString(fmt.Sprintf("- **Lines**: %d–%d\n", d.StartLine, d.EndLine))
+			}
+		}
+		if d.Signature != "" {
+			output.WriteString(fmt.Sprintf("- **Signature**: `%s`\n", d.Signature))
+		}
+		if d.Condition != "" {
+			output.WriteString(fmt.Sprintf("- **Under condition**: `%s`\n", d.Condition))
+		}
+		if d.InTx {
+			output.WriteString("- **In transaction**: yes\n")
+		}
+		if d.ParallelGroup != "" {
+			output.WriteString("- **Parallel group**: yes (concurrent with siblings sharing the same fork)\n")
+		}
+		if d.Docstring != "" {
+			output.WriteString(fmt.Sprintf("\n**Docstring**: %s\n", d.Docstring))
+		}
+		output.WriteString("\n")
+	}
 	return ToolCallResponse{
 		Content: []ToolContent{{Type: "text", Text: output.String()}},
 	}
@@ -3615,4 +3786,223 @@ func (s *CodeGraphMCPServer) filterFlowsToWorkspace(ctx context.Context, scopeID
 	}
 
 	return filtered
+}
+
+func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	rpcName, ok := args["rpc_name"].(string)
+	if !ok || rpcName == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: rpc_name is required"}},
+			IsError: true,
+		}
+	}
+	service := getOptionalStringArg(args, "service")
+	scopeCtx := parseScopeContextArg(args)
+
+	// Locate the handler function.
+	serviceFilter := ""
+	if service != "" {
+		serviceFilter = `AND EXISTS { MATCH (svc:Service {name: $service})-[:CONTAINS*1..5]->(f) }`
+	}
+	locateCypher := `
+		MATCH (f:Function)
+		WHERE (f.scopeId = $scopeId OR f.scopeId = 'main')
+		  AND (toLower(f.name) = toLower($rpcName)
+		       OR toLower(f.name) ENDS WITH ('.' + toLower($rpcName)))
+		` + serviceFilter + `
+		RETURN elementId(f) AS fId, f.name AS fName, f.filePath AS fFile,
+		       coalesce(f.startLine, 0) AS startLine
+		ORDER BY startLine
+		LIMIT 1
+	`
+	params := map[string]any{
+		"scopeId": scopeCtx.ScopeID,
+		"rpcName": rpcName,
+		"service": service,
+	}
+	roots, err := s.client.ExecuteQuery(ctx, locateCypher, params)
+	if err != nil || len(roots) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No handler found for %q", rpcName)}},
+		}
+	}
+
+	rm := roots[0].AsMap()
+	fId := getStringFromRecord(rm, "fId")
+	fName := getStringFromRecord(rm, "fName")
+	fFile := getStringFromRecord(rm, "fFile")
+
+	// Gather all call sites reachable within 3 hops.
+	anatomyCypher := `
+		MATCH (root) WHERE elementId(root) = $rootId
+
+		// DB calls
+		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn:Function)-[:CALLS_DB]->(db:DBCall)
+		// gRPC calls
+		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn2:Function)-[:CALLS_API]->(grpc:GRPCCall)
+		OPTIONAL MATCH (grpc)-[:CALLS_SERVICE]->(tGRPC:Service)
+		OPTIONAL MATCH (grpc)-[:RESOLVES_TO]->(handler:Function)
+		// HTTP calls
+		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn3:Function)-[:CALLS_API]->(http:HTTPCall)
+		OPTIONAL MATCH (http)-[:CALLS_SERVICE]->(tHTTP:Service)
+		// Events
+		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn4:Function)-[:CALLS_API]->(event:OutboxCall)
+
+		RETURN
+		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {
+		    kind: 'db', table: db.table, op: db.operation, line: db.line,
+		    file: db.filePath, viaFn: fn.name
+		  } END) AS dbSteps,
+		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {
+		    kind: 'grpc', target: grpc.targetMethod, protoService: coalesce(grpc.protoService,''),
+		    protoMethod: coalesce(grpc.protoMethod,''), targetSvc: coalesce(tGRPC.name,''),
+		    handler: coalesce(handler.name,''), handlerFile: coalesce(handler.filePath,''),
+		    line: grpc.line, file: grpc.filePath, viaFn: fn2.name
+		  } END) AS grpcSteps,
+		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {
+		    kind: 'http', url: http.url, method: http.method,
+		    targetSvc: coalesce(tHTTP.name,''), line: http.line,
+		    file: http.filePath, viaFn: fn3.name
+		  } END) AS httpSteps,
+		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {
+		    kind: 'outbox', event: event.eventType, transport: event.transport,
+		    line: event.line, file: event.filePath, viaFn: fn4.name
+		  } END) AS eventSteps
+		LIMIT 1
+	`
+
+	result, err := s.client.ExecuteQuery(ctx, anatomyCypher, map[string]any{"rootId": fId})
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## RPC Anatomy: `%s`\n\n", fName))
+	if fFile != "" {
+		output.WriteString(fmt.Sprintf("**Handler**: `%s` in `%s`\n\n", fName, fFile))
+	}
+
+	if len(result) > 0 {
+		m := result[0].AsMap()
+
+		type step struct {
+			Line int
+			Text string
+		}
+		var steps []step
+
+		collectSteps := func(key string, formatter func(map[string]any) (int, string)) {
+			if items, ok := m[key].([]interface{}); ok {
+				for _, item := range items {
+					if item == nil {
+						continue
+					}
+					if itemMap, ok := item.(map[string]any); ok {
+						line, text := formatter(itemMap)
+						if text != "" {
+							steps = append(steps, step{Line: line, Text: text})
+						}
+					}
+				}
+			}
+		}
+
+		collectSteps("dbSteps", func(m map[string]any) (int, string) {
+			table, _ := m["table"].(string)
+			op, _ := m["op"].(string)
+			line, _ := m["line"].(int64)
+			viaFn, _ := m["viaFn"].(string)
+			if table == "" {
+				return 0, ""
+			}
+			text := fmt.Sprintf("**DB** `%s` %s", op, table)
+			if viaFn != "" {
+				text += fmt.Sprintf(" (via `%s`)", viaFn)
+			}
+			return int(line), text
+		})
+
+		collectSteps("grpcSteps", func(m map[string]any) (int, string) {
+			target, _ := m["target"].(string)
+			targetSvc, _ := m["targetSvc"].(string)
+			handler, _ := m["handler"].(string)
+			line, _ := m["line"].(int64)
+			viaFn, _ := m["viaFn"].(string)
+			if target == "" {
+				return 0, ""
+			}
+			text := fmt.Sprintf("**gRPC** → `%s`", target)
+			if targetSvc != "" {
+				text += fmt.Sprintf(" @ **%s**", targetSvc)
+			}
+			if handler != "" {
+				text += fmt.Sprintf(" → handler `%s`", handler)
+			}
+			if viaFn != "" {
+				text += fmt.Sprintf(" (via `%s`)", viaFn)
+			}
+			return int(line), text
+		})
+
+		collectSteps("httpSteps", func(m map[string]any) (int, string) {
+			url, _ := m["url"].(string)
+			method, _ := m["method"].(string)
+			targetSvc, _ := m["targetSvc"].(string)
+			line, _ := m["line"].(int64)
+			viaFn, _ := m["viaFn"].(string)
+			if url == "" {
+				return 0, ""
+			}
+			text := fmt.Sprintf("**HTTP** %s `%s`", method, url)
+			if targetSvc != "" {
+				text += fmt.Sprintf(" @ **%s**", targetSvc)
+			}
+			if viaFn != "" {
+				text += fmt.Sprintf(" (via `%s`)", viaFn)
+			}
+			return int(line), text
+		})
+
+		collectSteps("eventSteps", func(m map[string]any) (int, string) {
+			event, _ := m["event"].(string)
+			transport, _ := m["transport"].(string)
+			line, _ := m["line"].(int64)
+			viaFn, _ := m["viaFn"].(string)
+			if event == "" {
+				return 0, ""
+			}
+			text := fmt.Sprintf("**Event** `%s` via %s", event, transport)
+			if viaFn != "" {
+				text += fmt.Sprintf(" (via `%s`)", viaFn)
+			}
+			return int(line), text
+		})
+
+		// Sort by line number (insertion sort).
+		for i := 1; i < len(steps); i++ {
+			for j := i; j > 0 && steps[j].Line < steps[j-1].Line; j-- {
+				steps[j], steps[j-1] = steps[j-1], steps[j]
+			}
+		}
+
+		if len(steps) == 0 {
+			output.WriteString("_No DB/RPC/event call sites found within 3 hops. Ensure the service is indexed with SCIP._\n")
+		} else {
+			output.WriteString("### Call Sites (source order)\n\n")
+			for i, st := range steps {
+				if st.Line > 0 {
+					output.WriteString(fmt.Sprintf("%d. (line %d) %s\n", i+1, st.Line, st.Text))
+				} else {
+					output.WriteString(fmt.Sprintf("%d. %s\n", i+1, st.Text))
+				}
+			}
+		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
 }

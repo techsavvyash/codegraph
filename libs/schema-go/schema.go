@@ -40,7 +40,32 @@ type Index struct {
 // because the same entity can now exist in multiple scopes (main + PR overlays).
 // Uniqueness is enforced via composite (nodeKey, scopeId) indexes instead.
 func GetConstraints() []Constraint {
-	return []Constraint{}
+	return []Constraint{
+		{
+			Name:      "grpccall_nodekey_unique",
+			NodeLabel: "GRPCCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
+			Name:      "httpcall_nodekey_unique",
+			NodeLabel: "HTTPCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
+			Name:      "outboxcall_nodekey_unique",
+			NodeLabel: "OutboxCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
+			Name:      "dbcall_nodekey_unique",
+			NodeLabel: "DBCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+	}
 }
 
 // GetDroppedConstraints returns the names of old constraints that should be dropped
@@ -522,6 +547,67 @@ func GetIndexes() []Index {
 			Name:       "dbcall_operation_idx",
 			NodeLabel:  "DBCall",
 			Properties: []string{"operation"},
+			Type:       "BTREE",
+		},
+		// ControlFlowScope indexes (Change #2 — control-flow reification)
+		{
+			Name:       "cfs_nodekey_idx",
+			NodeLabel:  "ControlFlowScope",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "cfs_filepath_idx",
+			NodeLabel:  "ControlFlowScope",
+			Properties: []string{"filePath"},
+			Type:       "BTREE",
+		},
+		// CallEdge indexes (Change #2 — control-flow reification)
+		{
+			Name:       "calledge_nodekey_idx",
+			NodeLabel:  "CallEdge",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		// ConcurrentScope indexes (Change #3 — concurrent + tx scope reification)
+		{
+			Name:       "concurrentscope_nodekey_idx",
+			NodeLabel:  "ConcurrentScope",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "concurrentscope_filepath_idx",
+			NodeLabel:  "ConcurrentScope",
+			Properties: []string{"filePath"},
+			Type:       "BTREE",
+		},
+		// TxScope indexes (Change #3 — concurrent + tx scope reification)
+		{
+			Name:       "txscope_nodekey_idx",
+			NodeLabel:  "TxScope",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "txscope_filepath_idx",
+			NodeLabel:  "TxScope",
+			Properties: []string{"filePath"},
+			Type:       "BTREE",
+		},
+		// Cross-service handler resolution indexes (Change #5 — ResolveCrossServiceHandlersStage)
+		// GRPCCall.targetMethod is the primary lookup key used to find handler functions.
+		{
+			Name:       "grpccall_targetmethod_idx",
+			NodeLabel:  "GRPCCall",
+			Properties: []string{"targetMethod"},
+			Type:       "BTREE",
+		},
+		// APIRoute composite index accelerates path + method lookups during HTTP resolution.
+		{
+			Name:       "apiroute_path_method_idx",
+			NodeLabel:  "APIRoute",
+			Properties: []string{"path", "method"},
 			Type:       "BTREE",
 		},
 	}

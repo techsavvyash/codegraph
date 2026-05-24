@@ -54,6 +54,36 @@ func loadServiceIndex(ctx context.Context, client *neo4j.Client, scopeID string)
 		}
 	}
 
+	// Load proto contract → service mappings for precise resolution.
+	protoQuery := `
+		MATCH (pc:ProtoContract)-[:BELONGS_TO]->(s:Service {scopeId: $scopeId})
+		RETURN pc.protoPackage AS pkg, pc.protoService AS svc, elementId(s) AS id
+	`
+	protoRows, _ := client.ExecuteQuery(ctx, protoQuery, map[string]any{"scopeId": scopeID})
+	for _, row := range protoRows {
+		rm := row.AsMap()
+		id := getStringFromMap(rm, "id")
+		if id == "" {
+			continue
+		}
+		if pkg := getStringFromMap(rm, "pkg"); pkg != "" {
+			for _, alias := range serviceAliases(pkg) {
+				if alias != "" {
+					idx.byProto[alias] = id
+					idx.byName[alias] = id
+				}
+			}
+		}
+		if svc := getStringFromMap(rm, "svc"); svc != "" {
+			for _, alias := range serviceAliases(svc) {
+				if alias != "" {
+					idx.byProto[alias] = id
+					idx.byName[alias] = id
+				}
+			}
+		}
+	}
+
 	return idx, nil
 }
 

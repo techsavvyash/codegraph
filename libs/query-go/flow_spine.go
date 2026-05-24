@@ -16,6 +16,11 @@ type FlowStep struct {
 	Name    string `json:"name"`
 	Label   string `json:"label"` // Function, Method, Service, APIRoute
 	Order   int    `json:"order"`
+	// Spine v2 enrichment (Change #6): derived from CALLS edge properties written by changes 1–3.
+	StepIndex     int    `json:"stepIndex,omitempty"`     // source execution order from CALLS.orderIndex
+	BranchKey     string `json:"branchKey,omitempty"`     // condition text of enclosing ControlFlowScope
+	ParallelGroup string `json:"parallelGroup,omitempty"` // ConcurrentScope nodeKey shared by co-forked callees
+	InTx          bool   `json:"inTx,omitempty"`          // true when the CALLS edge is inside a TxScope
 }
 
 // FlowSpineResult holds the generated flow and its steps.
@@ -464,7 +469,12 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 }
 
 // traceCallees recursively follows CALLS edges from a given function nodeKey.
-// It respects the budget's MaxFanout and MaxDepth, and filters blocked names.
+// It respects the budget's MaxFanout and MaxDepth, filters blocked names, and
+// enriches each FlowStep with spine v2 fields (StepIndex, BranchKey,
+// ParallelGroup, InTx) derived from the CALLS edge properties written by
+// changes 1–3 (orderIndex, isConditional, isParallel, isInTx, plus
+// ControlFlowScope/ConcurrentScope nodes linked via UNDER_CONTROL_FLOW /
+// IN_PARALLEL_WITH).
 func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, remainingDepth, nextOrder int) ([]FlowStep, error) {
 	if remainingDepth <= 0 {
 		return nil, nil
@@ -475,17 +485,31 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		fanout = 10
 	}
 
+	// LIMIT is applied before the OPTIONAL MATCHes so fanout capping is not
+	// affected by the join expansion. ORDER BY orderIndex replaces the old
+	// name-based ordering so callees are returned in source execution order.
 	cypher := fmt.Sprintf(`
-		MATCH (caller {nodeKey: $nodeKey})-[:CALLS]->(callee)
+		MATCH (caller {nodeKey: $nodeKey})-[ce:CALLS]->(callee)
 		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		  AND (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
 		  AND NOT callee.nodeKey CONTAINS 'github.com/golang/go/src'
-                  %s
-		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
-		ORDER BY callee.name ASC, callee.nodeKey ASC
-                LIMIT %d`, serviceConstraintClause("callee"), fanout)
+		  %s
+		WITH caller, ce, callee
+		ORDER BY coalesce(ce.orderIndex, 99999) ASC, callee.name ASC, callee.nodeKey ASC
+		LIMIT %d
+		OPTIONAL MATCH (caller)-[:HAS_CALL_EDGE]->(ced:CallEdge)
+		WHERE ced.calleeID = elementId(callee)
+		OPTIONAL MATCH (ced)-[:UNDER_CONTROL_FLOW]->(cfs:ControlFlowScope)
+		OPTIONAL MATCH (ced)-[:IN_PARALLEL_WITH]->(csc:ConcurrentScope)
+		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels,
+		       coalesce(ce.orderIndex, 0) AS orderIndex,
+		       coalesce(ce.isParallel, false) AS isParallel,
+		       coalesce(ce.isInTx, false) AS isInTx,
+		       cfs.condition AS branchCondition,
+		       csc.nodeKey AS parallelGroupKey`,
+		serviceConstraintClause("callee"), fanout)
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKey": nodeKey}))
 	if err != nil {
@@ -520,8 +544,34 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 			continue
 		}
 
+		// Decode spine v2 enrichment fields from the CALLS edge and linked scopes.
+		stepIndex := 0
+		if v, ok := m["orderIndex"].(int64); ok {
+			stepIndex = int(v)
+		}
+		isParallel := false
+		if v, ok := m["isParallel"].(bool); ok {
+			isParallel = v
+		}
+		isInTx := false
+		if v, ok := m["isInTx"].(bool); ok {
+			isInTx = v
+		}
+		branchKey := strVal(m, "branchCondition")
+		parallelGroup := ""
+		if isParallel {
+			parallelGroup = strVal(m, "parallelGroupKey")
+		}
+
 		steps = append(steps, FlowStep{
-			NodeKey: calleeKey, Name: calleeName, Label: calleeLabel, Order: order,
+			NodeKey:       calleeKey,
+			Name:          calleeName,
+			Label:         calleeLabel,
+			Order:         order,
+			StepIndex:     stepIndex,
+			BranchKey:     branchKey,
+			ParallelGroup: parallelGroup,
+			InTx:          isInTx,
 		})
 		order++
 
@@ -555,7 +605,11 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 		return fmt.Errorf("failed to create Flow node: %w", err)
 	}
 
-	// Create HAS_STEP edges to each step's node.
+	// Create HAS_STEP edges (Spine v2 — Change #6).
+	// Writes stepIndex, branchKey, parallelGroup, inTx alongside the existing
+	// order/stepName properties so consumers can reconstruct execution order,
+	// conditional gates, parallel fork groups, and transaction scope without
+	// re-reading the source.
 	for _, step := range steps {
 		cypher := `
 			MATCH (target {nodeKey: $targetKey})
@@ -564,15 +618,25 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 			WITH target LIMIT 1
 			MATCH (flow:Flow {nodeKey: $flowKey, scopeId: $scopeId})
 			MERGE (flow)-[r:HAS_STEP {order: $order}]->(target)
-			SET r.stepName = $stepName, r.scope = $scope, r.scopeId = $scopeId`
+			SET r.stepName     = $stepName,
+			    r.scope        = $scope,
+			    r.scopeId      = $scopeId,
+			    r.stepIndex    = $stepIndex,
+			    r.branchKey    = $branchKey,
+			    r.parallelGroup = $parallelGroup,
+			    r.inTx         = $inTx`
 
 		_, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"flowKey":   flowNodeKey,
-			"scopeId":   g.scopeCtx.ScopeID,
-			"scope":     g.scopeCtx.Scope,
-			"targetKey": step.NodeKey,
-			"order":     step.Order,
-			"stepName":  step.Name,
+			"flowKey":       flowNodeKey,
+			"scopeId":       g.scopeCtx.ScopeID,
+			"scope":         g.scopeCtx.Scope,
+			"targetKey":     step.NodeKey,
+			"order":         step.Order,
+			"stepName":      step.Name,
+			"stepIndex":     step.StepIndex,
+			"branchKey":     step.BranchKey,
+			"parallelGroup": step.ParallelGroup,
+			"inTx":          step.InTx,
 		})
 		if err != nil {
 			fmt.Printf("Warning: failed to create HAS_STEP for step %d (%s): %v\n", step.Order, step.Name, err)
@@ -592,7 +656,9 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		WHERE step.scopeId = $scopeId OR step.scopeId = 'main'
 		RETURN f.name AS flowName, f.flowType AS flowType, f.nodeKey AS flowNodeKey,
 		       step.nodeKey AS stepKey, step.name AS stepName, labels(step) AS stepLabels,
-		       r.order AS stepOrder
+		       r.order AS stepOrder, coalesce(r.stepIndex, 0) AS stepIndex,
+		       r.branchKey AS branchKey, r.parallelGroup AS parallelGroup,
+		       coalesce(r.inTx, false) AS inTx
 		ORDER BY r.order`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"flowKey": flowNodeKey, "scopeId": g.scopeCtx.ScopeID})
@@ -621,6 +687,14 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		if o, ok := m["stepOrder"].(int64); ok {
 			order = int(o)
 		}
+		stepIndex := 0
+		if v, ok := m["stepIndex"].(int64); ok {
+			stepIndex = int(v)
+		}
+		inTx := false
+		if v, ok := m["inTx"].(bool); ok {
+			inTx = v
+		}
 
 		stepLabel := "Function"
 		if labels, ok := m["stepLabels"].([]any); ok {
@@ -635,10 +709,14 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		}
 
 		result.Steps = append(result.Steps, FlowStep{
-			NodeKey: stepKey,
-			Name:    strVal(m, "stepName"),
-			Label:   stepLabel,
-			Order:   order,
+			NodeKey:       stepKey,
+			Name:          strVal(m, "stepName"),
+			Label:         stepLabel,
+			Order:         order,
+			StepIndex:     stepIndex,
+			BranchKey:     strVal(m, "branchKey"),
+			ParallelGroup: strVal(m, "parallelGroup"),
+			InTx:          inTx,
 		})
 	}
 
@@ -810,9 +888,19 @@ func extractLabel(m map[string]any, key string) string {
 
 // deduplicateSteps converts FlowSteps to inference.FlowStepInfo, runs the
 // deduplicator with the current budget, and converts back.
+// Spine v2 enrichment fields are preserved by indexing them before dedup and
+// restoring the first occurrence seen for each nodeKey after dedup.
 func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep) []FlowStep {
 	if g.deduplicator == nil || len(steps) == 0 {
 		return steps
+	}
+
+	// Index first-seen enrichment per nodeKey so it survives the FlowStepInfo round-trip.
+	enrichment := make(map[string]FlowStep, len(steps))
+	for _, s := range steps {
+		if _, exists := enrichment[s.NodeKey]; !exists {
+			enrichment[s.NodeKey] = s
+		}
 	}
 
 	infos := make([]inference.FlowStepInfo, len(steps))
@@ -829,12 +917,19 @@ func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep) []FlowStep {
 
 	out := make([]FlowStep, len(deduped))
 	for i, d := range deduped {
-		out[i] = FlowStep{
+		step := FlowStep{
 			NodeKey: d.NodeKey,
 			Name:    d.Name,
 			Label:   d.NodeType,
 			Order:   d.Order,
 		}
+		if orig, ok := enrichment[d.NodeKey]; ok {
+			step.StepIndex = orig.StepIndex
+			step.BranchKey = orig.BranchKey
+			step.ParallelGroup = orig.ParallelGroup
+			step.InTx = orig.InTx
+		}
+		out[i] = step
 	}
 	return out
 }

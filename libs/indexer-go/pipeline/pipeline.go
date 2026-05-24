@@ -19,14 +19,17 @@ import (
 type StageName string
 
 const (
-	StageIngestCode              StageName = "IngestCode"
-	StageComputeGraphMetrics     StageName = "ComputeGraphMetrics"
-	StageInferServiceDeps        StageName = "InferServiceDependencies"
-	StageGenerateFlowSpines      StageName = "GenerateFlowSpines"
-	StageIngestDocuments         StageName = "IngestDocuments"
-	StageLinkDocumentChunks      StageName = "LinkDocumentChunks"
-	StageGenerateContextDocs     StageName = "GenerateContextDocs"
-	StageRefreshRetrievalIndexes StageName = "RefreshRetrievalIndexes"
+	StageIngestCode                      StageName = "IngestCode"
+	StageComputeGraphMetrics             StageName = "ComputeGraphMetrics"
+	StageInferServiceDeps                StageName = "InferServiceDependencies"
+	StageResolveCrossServiceHandlers     StageName = "ResolveCrossServiceHandlers"
+	StageGenerateFlowSpines              StageName = "GenerateFlowSpines"
+	StageGenerateBehavioralSummaries     StageName = "GenerateBehavioralSummaries"
+	StageIngestDocuments                 StageName = "IngestDocuments"
+	StageLinkDocumentChunks              StageName = "LinkDocumentChunks"
+	StageGenerateContextDocs             StageName = "GenerateContextDocs"
+	StageRefreshRetrievalIndexes         StageName = "RefreshRetrievalIndexes"
+	StageHelperCollapse                  StageName = "HelperCollapse"
 )
 
 // StageResult captures the outcome of a single stage.
@@ -87,13 +90,16 @@ func New(stages ...Stage) *Pipeline {
 	return &Pipeline{stages: stages}
 }
 
-// DefaultStages returns the 8 stages in canonical order.
+// DefaultStages returns the stages in canonical order.
 func DefaultStages() []Stage {
 	return []Stage{
 		&IngestCodeStage{},
 		&ComputeGraphMetricsStage{},
 		&InferServiceDepsStage{},
+		&ResolveCrossServiceHandlersStage{},
+		&HelperCollapseStage{},
 		&GenerateFlowSpinesStage{},
+		&GenerateBehavioralSummariesStage{},
 		&IngestDocumentsStage{},
 		&LinkDocumentChunksStage{},
 		&GenerateContextDocsStage{},
@@ -155,15 +161,19 @@ type StageTier struct {
 // DefaultTiers returns the default parallel execution tiers.
 // Tier 0: IngestCode (required, must run first)
 // Tier 1: ComputeGraphMetrics (depends on ingested call graph)
-// Tier 2: InferServiceDeps, GenerateFlowSpines, IngestDocuments (independent)
-// Tier 3: LinkDocumentChunks, GenerateContextDocs (depend on tier 2)
-// Tier 4: RefreshRetrievalIndexes (final)
+// Tier 2: InferServiceDeps, ResolveCrossServiceHandlers (depend on ingested nodes/edges)
+// Tier 3: GenerateFlowSpines, IngestDocuments (independent; flow spines benefit from RESOLVES_TO edges)
+// Tier 4: GenerateBehavioralSummaries, LinkDocumentChunks (depend on tier 3 flows)
+// Tier 5: GenerateContextDocs (may reference behavioral summaries)
+// Tier 6: RefreshRetrievalIndexes (final)
 func DefaultTiers() []StageTier {
 	return []StageTier{
 		{Stages: []Stage{&IngestCodeStage{}}},
 		{Stages: []Stage{&ComputeGraphMetricsStage{}}},
-		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}, &IngestDocumentsStage{}}},
-		{Stages: []Stage{&LinkDocumentChunksStage{}, &GenerateContextDocsStage{}}},
+		{Stages: []Stage{&InferServiceDepsStage{}, &ResolveCrossServiceHandlersStage{}, &HelperCollapseStage{}}},
+		{Stages: []Stage{&GenerateFlowSpinesStage{}, &IngestDocumentsStage{}}},
+		{Stages: []Stage{&GenerateBehavioralSummariesStage{}, &LinkDocumentChunksStage{}}},
+		{Stages: []Stage{&GenerateContextDocsStage{}}},
 		{Stages: []Stage{&RefreshRetrievalIndexesStage{}}},
 	}
 }

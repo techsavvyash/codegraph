@@ -5,9 +5,8 @@ type RelationshipType string
 
 const (
 	// Structural Relationships
-	ContainsRel RelationshipType = "CONTAINS"
-	DefinesRel  RelationshipType = "DEFINES"
-	// Deprecated: noise — not written during call-graph indexing; volume too high and not in any RPC traversal query
+	ContainsRel   RelationshipType = "CONTAINS"
+	DefinesRel    RelationshipType = "DEFINES"
 	ReferencesRel RelationshipType = "REFERENCES"
 
 	// Behavioral Relationships
@@ -27,6 +26,9 @@ const (
 	// Service Relationships
 	DependsOnRel     RelationshipType = "DEPENDS_ON"
 	CallsServiceRel  RelationshipType = "CALLS_SERVICE"
+	// ResolvesToRel connects a GRPCCall/HTTPCall to the concrete handler Function in the
+	// target service. Written by ResolveCrossServiceHandlersStage after all services are indexed.
+	ResolvesToRel RelationshipType = "RESOLVES_TO"
 
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"
@@ -39,6 +41,24 @@ const (
 
 	// DB Relationships
 	CallsDBRel RelationshipType = "CALLS_DB"
+
+	// Control-flow reification relationships (Change #2)
+	UnderControlFlowRel RelationshipType = "UNDER_CONTROL_FLOW"
+	HasCallEdgeRel      RelationshipType = "HAS_CALL_EDGE"
+
+	// Concurrent / transactional scope reification (Change #3)
+	InParallelWithRel RelationshipType = "IN_PARALLEL_WITH"
+	InTxRel           RelationshipType = "IN_TX"
+
+	// TransitiveCallsAPIRel connects a caller Function to a GRPCCall/HTTPCall via a helper shim.
+	// Written by HelperCollapseStage. Carries viaShim property naming the intermediate function.
+	TransitiveCallsAPIRel RelationshipType = "TRANSITIVE_CALLS_API"
+
+	// Proto contract relationships (Phase 1.4)
+	DefinesMethodRel RelationshipType = "DEFINES_METHOD"  // ProtoContract → ProtoMethod
+	ImplementedByRel RelationshipType = "IMPLEMENTED_BY"  // ProtoMethod → Function (handler)
+	CalledByRel      RelationshipType = "CALLED_BY"       // ProtoMethod ← GRPCCall (caller)
+	BelongsToRel     RelationshipType = "BELONGS_TO"      // ProtoContract → Service
 )
 
 // BaseRelationship represents common properties for all relationships
@@ -72,12 +92,22 @@ type ReferencesRelationship struct {
 	Column       int  `json:"column" neo4j:"column"`
 }
 
-// CallsRelationship represents function/method invocations
+// CallsRelationship represents function/method invocations.
+//
+// AST-derived enrichment fields (OrderIndex, LiteralArgs, NearestComment,
+// ReceiverChain) let a consumer reconstruct execution order, distinguish
+// otherwise-identical call sites by their string-literal args, surface the
+// nearest source comment as "purpose" context, and resolve abstracted method
+// chains (e.g. repository.Pgx().Payout.Save) back to the underlying receiver.
 type CallsRelationship struct {
 	BaseRelationship
-	IsDynamic   bool `json:"isDynamic" neo4j:"isDynamic"`
-	Line        int  `json:"line" neo4j:"line"`
-	IsRecursive bool `json:"isRecursive" neo4j:"isRecursive"`
+	IsDynamic      bool     `json:"isDynamic" neo4j:"isDynamic"`
+	Line           int      `json:"line" neo4j:"line"`
+	IsRecursive    bool     `json:"isRecursive" neo4j:"isRecursive"`
+	OrderIndex     int      `json:"orderIndex,omitempty" neo4j:"orderIndex,omitempty"`
+	LiteralArgs    []string `json:"literalArgs,omitempty" neo4j:"literalArgs,omitempty"`
+	NearestComment string   `json:"nearestComment,omitempty" neo4j:"nearestComment,omitempty"`
+	ReceiverChain  []string `json:"receiverChain,omitempty" neo4j:"receiverChain,omitempty"`
 }
 
 // FlowsToRelationship represents data flow dependencies
@@ -150,6 +180,66 @@ type CallsDBRelationship struct {
 	Line int `json:"line" neo4j:"line"`
 }
 
+// UnderControlFlowRelationship connects a CallEdge reified node to its enclosing ControlFlowScope.
+type UnderControlFlowRelationship struct {
+	BaseRelationship
+	BranchDepth int `json:"branchDepth" neo4j:"branchDepth"`
+}
+
+// HasCallEdgeRelationship connects a Function/Method to a reified CallEdge node for conditional calls.
+type HasCallEdgeRelationship struct {
+	BaseRelationship
+}
+
+// InParallelWithRelationship connects a CallEdge reified node to its enclosing ConcurrentScope.
+type InParallelWithRelationship struct {
+	BaseRelationship
+	ForkPoint int `json:"forkPoint" neo4j:"forkPoint"` // line where the parallel scope opens
+}
+
+// InTxRelationship connects a CallEdge reified node to its enclosing TxScope.
+type InTxRelationship struct {
+	BaseRelationship
+	Order int `json:"order" neo4j:"order"` // execution order within the tx
+}
+
+// TransitiveCallsAPIRelationship connects an outer Function to a call node through a helper shim.
+type TransitiveCallsAPIRelationship struct {
+	BaseRelationship
+	ViaShim    string `json:"viaShim" neo4j:"viaShim"`
+	ResolvedAt int64  `json:"resolvedAt" neo4j:"resolvedAt"`
+}
+
+// DefinesMethodRelationship connects a ProtoContract to its ProtoMethod.
+type DefinesMethodRelationship struct {
+	BaseRelationship
+}
+
+// ImplementedByRelationship connects a ProtoMethod to the concrete handler Function.
+type ImplementedByRelationship struct {
+	BaseRelationship
+	Confidence float64 `json:"confidence" neo4j:"confidence"`
+}
+
+// CalledByRelationship connects a ProtoMethod to a GRPCCall site.
+type CalledByRelationship struct {
+	BaseRelationship
+}
+
+// BelongsToRelationship connects a ProtoContract to its owning Service.
+type BelongsToRelationship struct {
+	BaseRelationship
+}
+
+// ResolvesToRelationship connects a GRPCCall or HTTPCall node to the concrete handler
+// Function/Method in the target service. Confidence reflects resolution certainty:
+// ~0.9 for a unique name match, ~0.6 for a heuristic/multi-candidate selection.
+type ResolvesToRelationship struct {
+	BaseRelationship
+	Confidence       float64 `json:"confidence" neo4j:"confidence"`
+	ResolutionMethod string  `json:"resolutionMethod" neo4j:"resolutionMethod"` // "proto_matched", "http_route_matched", "heuristic"
+}
+
 // RelationshipFactory creates relationships from type and properties
 func RelationshipFactory(relType RelationshipType, startID, endID string, props map[string]any) interface{} {
 	base := BaseRelationship{
@@ -190,6 +280,26 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &MentionsRelationship{BaseRelationship: base}
 	case CallsDBRel:
 		return &CallsDBRelationship{BaseRelationship: base}
+	case UnderControlFlowRel:
+		return &UnderControlFlowRelationship{BaseRelationship: base}
+	case HasCallEdgeRel:
+		return &HasCallEdgeRelationship{BaseRelationship: base}
+	case InParallelWithRel:
+		return &InParallelWithRelationship{BaseRelationship: base}
+	case InTxRel:
+		return &InTxRelationship{BaseRelationship: base}
+	case ResolvesToRel:
+		return &ResolvesToRelationship{BaseRelationship: base}
+	case TransitiveCallsAPIRel:
+		return &TransitiveCallsAPIRelationship{BaseRelationship: base}
+	case DefinesMethodRel:
+		return &DefinesMethodRelationship{BaseRelationship: base}
+	case ImplementedByRel:
+		return &ImplementedByRelationship{BaseRelationship: base}
+	case CalledByRel:
+		return &CalledByRelationship{BaseRelationship: base}
+	case BelongsToRel:
+		return &BelongsToRelationship{BaseRelationship: base}
 	default:
 		return &BaseRelationship{
 			Type:       relType,

@@ -525,9 +525,9 @@ var indexPipelineCmd = &cobra.Command{
 			cfg.TextStore = osStore
 		}
 
-		// Wire generation + verification + policy for Stage 6.
+		// Wire generation + verification + policy for Stage 6 (optional).
 		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
-			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+			fmt.Printf("Warning: Stage 6 (GenerateContextDocs) will be skipped: %v\n", err)
 		}
 
 		parallel, _ := cmd.Flags().GetBool("parallel")
@@ -665,9 +665,9 @@ Example:
 			cfg.TextStore = osStore
 		}
 
-		// Wire generation + verification + policy for Stage 6.
+		// Wire generation + verification + policy for Stage 6 (optional).
 		if err := wireGenerationDeps(cmd, cfg, client); err != nil {
-			return fmt.Errorf("Stage 6 requires LLM configuration: %w", err)
+			fmt.Printf("Warning: Stage 6 (GenerateContextDocs) will be skipped: %v\n", err)
 		}
 
 		stageNames := make([]string, len(selected))

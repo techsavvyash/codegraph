@@ -77,22 +77,20 @@ func (cge *CallGraphExtractor) processCallExpression(ctx context.Context, callEx
 	// Try to find the target function in the database
 	targetFuncID := cge.findTargetFunction(ctx, calledName)
 	if targetFuncID == "" {
-		// Create a placeholder function node for external calls
-		targetFuncID = cge.createPlaceholderFunction(ctx, calledName)
+		// External call — target not indexed. Skip to avoid placeholder noise.
+		return
 	}
 
-	if targetFuncID != "" {
-		// Create CALLS relationship
-		relProps := map[string]any{
-			"line":        pos.Line,
-			"isDynamic":   isDynamic,
-			"isRecursive": calledName == cge.getCurrentFunctionName(callerID),
-		}
+	// Create CALLS relationship
+	relProps := map[string]any{
+		"line":        pos.Line,
+		"isDynamic":   isDynamic,
+		"isRecursive": calledName == cge.getCurrentFunctionName(callerID),
+	}
 
-		_, err := cge.client.CreateRelationship(ctx, callerID, targetFuncID, string(models.CallsRel), relProps)
-		if err != nil {
-			log.Printf("Warning: failed to create CALLS relationship from %s to %s: %v", callerID, targetFuncID, err)
-		}
+	_, err := cge.client.CreateRelationship(ctx, callerID, targetFuncID, string(models.CallsRel), relProps)
+	if err != nil {
+		log.Printf("Warning: failed to create CALLS relationship from %s to %s: %v", callerID, targetFuncID, err)
 	}
 }
 

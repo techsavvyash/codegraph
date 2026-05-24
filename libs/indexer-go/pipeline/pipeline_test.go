@@ -195,8 +195,8 @@ func TestPipeline_ContextCancellation(t *testing.T) {
 
 func TestDefaultStages_Count(t *testing.T) {
 	stages := DefaultStages()
-	if len(stages) != 7 {
-		t.Fatalf("expected 7 default stages, got %d", len(stages))
+	if len(stages) != 11 {
+		t.Fatalf("expected 11 default stages, got %d", len(stages))
 	}
 }
 
@@ -204,8 +204,12 @@ func TestDefaultStages_Names(t *testing.T) {
 	stages := DefaultStages()
 	expectedNames := []StageName{
 		StageIngestCode,
+		StageComputeGraphMetrics,
 		StageInferServiceDeps,
+		StageResolveCrossServiceHandlers,
+		StageHelperCollapse,
 		StageGenerateFlowSpines,
+		StageGenerateBehavioralSummaries,
 		StageIngestDocuments,
 		StageLinkDocumentChunks,
 		StageGenerateContextDocs,
@@ -230,8 +234,9 @@ func TestDefaultStages_OptionalFlags(t *testing.T) {
 	stages := DefaultStages()
 	// IngestCode and GenerateContextDocs are required; others are optional.
 	requiredStages := map[StageName]bool{
-		StageIngestCode:          true,
-		StageGenerateContextDocs: true,
+		StageIngestCode:                  true,
+		StageResolveCrossServiceHandlers: true,
+		StageGenerateContextDocs:         true,
 	}
 	for i, stage := range stages {
 		if requiredStages[stage.Name()] {
@@ -248,8 +253,8 @@ func TestDefaultStages_OptionalFlags(t *testing.T) {
 
 func TestDefaultTiers_Count(t *testing.T) {
 	tiers := DefaultTiers()
-	if len(tiers) != 4 {
-		t.Fatalf("expected 4 tiers, got %d", len(tiers))
+	if len(tiers) != 7 {
+		t.Fatalf("expected 7 tiers, got %d", len(tiers))
 	}
 }
 
@@ -259,17 +264,29 @@ func TestDefaultTiers_StageDistribution(t *testing.T) {
 	if len(tiers[0].Stages) != 1 {
 		t.Errorf("tier 0: expected 1 stage, got %d", len(tiers[0].Stages))
 	}
-	// Tier 1: 3 stages (InferServiceDeps, GenerateFlowSpines, IngestDocuments)
-	if len(tiers[1].Stages) != 3 {
-		t.Errorf("tier 1: expected 3 stages, got %d", len(tiers[1].Stages))
+	// Tier 1: 1 stage (ComputeGraphMetrics)
+	if len(tiers[1].Stages) != 1 {
+		t.Errorf("tier 1: expected 1 stage, got %d", len(tiers[1].Stages))
 	}
-	// Tier 2: 2 stages (LinkDocumentChunks, GenerateContextDocs)
-	if len(tiers[2].Stages) != 2 {
-		t.Errorf("tier 2: expected 2 stages, got %d", len(tiers[2].Stages))
+	// Tier 2: 3 stages (InferServiceDeps, ResolveCrossServiceHandlers, HelperCollapse)
+	if len(tiers[2].Stages) != 3 {
+		t.Errorf("tier 2: expected 3 stages, got %d", len(tiers[2].Stages))
 	}
-	// Tier 3: 1 stage (RefreshRetrievalIndexes)
-	if len(tiers[3].Stages) != 1 {
-		t.Errorf("tier 3: expected 1 stage, got %d", len(tiers[3].Stages))
+	// Tier 3: 2 stages (GenerateFlowSpines, IngestDocuments)
+	if len(tiers[3].Stages) != 2 {
+		t.Errorf("tier 3: expected 2 stages, got %d", len(tiers[3].Stages))
+	}
+	// Tier 4: 2 stages (GenerateBehavioralSummaries, LinkDocumentChunks)
+	if len(tiers[4].Stages) != 2 {
+		t.Errorf("tier 4: expected 2 stages, got %d", len(tiers[4].Stages))
+	}
+	// Tier 5: 1 stage (GenerateContextDocs)
+	if len(tiers[5].Stages) != 1 {
+		t.Errorf("tier 5: expected 1 stage, got %d", len(tiers[5].Stages))
+	}
+	// Tier 6: 1 stage (RefreshRetrievalIndexes)
+	if len(tiers[6].Stages) != 1 {
+		t.Errorf("tier 6: expected 1 stage, got %d", len(tiers[6].Stages))
 	}
 }
 
@@ -279,21 +296,25 @@ func TestDefaultTiers_TotalStagesMatch(t *testing.T) {
 	for _, tier := range tiers {
 		total += len(tier.Stages)
 	}
-	if total != 7 {
-		t.Errorf("expected 7 total stages across tiers, got %d", total)
+	if total != 11 {
+		t.Errorf("expected 11 total stages across tiers, got %d", total)
 	}
 }
 
 func TestStageNameConstants(t *testing.T) {
 	// Freeze the string values — they're used in logs and might be referenced externally.
 	names := map[StageName]string{
-		StageIngestCode:              "IngestCode",
-		StageInferServiceDeps:        "InferServiceDependencies",
-		StageGenerateFlowSpines:      "GenerateFlowSpines",
-		StageIngestDocuments:         "IngestDocuments",
-		StageLinkDocumentChunks:      "LinkDocumentChunks",
-		StageGenerateContextDocs:     "GenerateContextDocs",
-		StageRefreshRetrievalIndexes: "RefreshRetrievalIndexes",
+		StageIngestCode:                    "IngestCode",
+		StageComputeGraphMetrics:           "ComputeGraphMetrics",
+		StageInferServiceDeps:              "InferServiceDependencies",
+		StageResolveCrossServiceHandlers:   "ResolveCrossServiceHandlers",
+		StageHelperCollapse:                "HelperCollapse",
+		StageGenerateFlowSpines:            "GenerateFlowSpines",
+		StageGenerateBehavioralSummaries:   "GenerateBehavioralSummaries",
+		StageIngestDocuments:               "IngestDocuments",
+		StageLinkDocumentChunks:            "LinkDocumentChunks",
+		StageGenerateContextDocs:           "GenerateContextDocs",
+		StageRefreshRetrievalIndexes:       "RefreshRetrievalIndexes",
 	}
 	for constant, expected := range names {
 		if string(constant) != expected {
