@@ -89,6 +89,10 @@ type DBCallDetector struct {
 	scopeCtx    models.ScopeContext
 	callBuffer  *callNodeBuffer
 
+	// repoSQLMap holds pre-scanned repository SQL info keyed by "Interface.Method".
+	// Populated from ScanRepositorySQL before detection begins.
+	repoSQLMap RepoSQLMap
+
 	// varDBType: local var name → db client kind ("pgx", "pgxpool", "sqlx", "gorm").
 	// Reset per function.
 	varDBType map[string]string
@@ -99,11 +103,17 @@ type DBCallDetector struct {
 }
 
 // NewDBCallDetector creates a detector scoped to a single service indexing run.
-func NewDBCallDetector(client *neo4j.Client, serviceName string, scopeCtx models.ScopeContext) *DBCallDetector {
+// Pass a RepoSQLMap (from ScanRepositorySQL) to resolve real table names from
+// pgx/*.go implementations; pass nil to fall back to name-prefix inference.
+func NewDBCallDetector(client *neo4j.Client, serviceName string, scopeCtx models.ScopeContext, repoSQLMap RepoSQLMap) *DBCallDetector {
+	if repoSQLMap == nil {
+		repoSQLMap = RepoSQLMap{}
+	}
 	return &DBCallDetector{
 		client:         client,
 		serviceName:    serviceName,
 		scopeCtx:       scopeCtx,
+		repoSQLMap:     repoSQLMap,
 		varDBType:      make(map[string]string),
 		varStringValue: make(map[string]string),
 	}
@@ -537,8 +547,8 @@ func extractGORMTable(callExpr *ast.CallExpr) string {
 }
 
 // writeTazapayRepoCall creates a DBCall node for Tazapay's repository.Pgx().<Repo>.<Method> pattern.
-// Operation is inferred from the method name prefix (Get→SELECT, Save→INSERT, Update→UPDATE,
-// Delete→DELETE); table name is derived from the repo name (snake_case).
+// Table and operation are resolved from the pre-scanned RepoSQLMap when available;
+// otherwise they fall back to name-prefix inference.
 func (d *DBCallDetector) writeTazapayRepoCall(
 	ctx context.Context,
 	callerFuncID, filePath string,
@@ -548,20 +558,31 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 	operation := inferOperationFromRepoMethod(methodName)
 	table := camelToSnake(repoName)
 
+	// Override with real SQL-derived values if the pre-scanner found this method.
+	if info, ok := d.repoSQLMap[repoName+"."+methodName]; ok {
+		if info.Table != "" {
+			table = info.Table
+		}
+		if info.Operation != "" {
+			operation = info.Operation
+		}
+	}
+
 	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, line)
 
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
-		"nodeKey":      nodeKey,
-		"serviceName":  d.serviceName,
-		"repo":         repoName,
-		"table":        table,
-		"operation":    operation,
-		"queryPattern": repoName + "." + methodName,
-		"filePath":     filePath,
-		"line":         line,
-		"createdAt":    time.Now().UTC().Unix(),
-		"updatedAt":    time.Now().UTC().Unix(),
+		"nodeKey":             nodeKey,
+		"serviceName":         d.serviceName,
+		"repositoryInterface": repoName,
+		"repositoryMethod":    methodName,
+		"table":               table,
+		"operation":           operation,
+		"queryPattern":        repoName + "." + methodName,
+		"filePath":            filePath,
+		"line":                line,
+		"createdAt":           time.Now().UTC().Unix(),
+		"updatedAt":           time.Now().UTC().Unix(),
 	}
 	maps.Copy(setProps, d.scopeCtx.Props())
 

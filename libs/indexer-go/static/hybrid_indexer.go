@@ -87,15 +87,9 @@ func runASTPass(ctx context.Context, cfg IndexConfig) error {
 	}
 
 	// RPC / event / DB call-site detection via Go AST.
-	// Reuse SCIPIndexer as a thin host for runASTRPCDetection.
-	astHost := &SCIPIndexer{
-		client:      cfg.Client,
-		serviceName: cfg.ServiceName,
-		version:     cfg.Version,
-		repoURL:     cfg.RepoURL,
-		language:    LanguageGo,
-		scopeCtx:    cfg.ScopeCtx,
-	}
+	// Use the full constructor so langConfig and all derived fields are initialised.
+	astHost := NewSCIPIndexerWithLanguage(cfg.Client, cfg.ServiceName, cfg.Version, cfg.RepoURL, LanguageGo)
+	astHost.SetScope(cfg.ScopeCtx)
 	if err := astHost.runASTRPCDetection(ctx, cfg.ProjectPath); err != nil {
 		fmt.Printf("Warning: AST RPC/DB/event detection failed: %v\n", err)
 	}

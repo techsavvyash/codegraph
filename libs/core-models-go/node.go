@@ -223,12 +223,14 @@ type OutboxCall struct {
 // NodeKey pattern: dbcall:{scopeId}:{serviceName}:{filePath}:{line}
 type DBCall struct {
 	BaseNode
-	Table        string `json:"table" neo4j:"table"`
-	Operation    string `json:"operation" neo4j:"operation"` // SELECT, INSERT, UPDATE, DELETE
-	QueryPattern string `json:"queryPattern" neo4j:"queryPattern"`
-	ServiceName  string `json:"serviceName" neo4j:"serviceName"`
-	FilePath     string `json:"filePath" neo4j:"filePath"`
-	Line         int    `json:"line" neo4j:"line"`
+	Table               string `json:"table" neo4j:"table"`
+	Operation           string `json:"operation" neo4j:"operation"` // SELECT, INSERT, UPDATE, DELETE
+	QueryPattern        string `json:"queryPattern" neo4j:"queryPattern"`
+	ServiceName         string `json:"serviceName" neo4j:"serviceName"`
+	FilePath            string `json:"filePath" neo4j:"filePath"`
+	Line                int    `json:"line" neo4j:"line"`
+	RepositoryInterface string `json:"repositoryInterface" neo4j:"repositoryInterface"` // e.g. "Account", "AccountMetadata"
+	RepositoryMethod    string `json:"repositoryMethod" neo4j:"repositoryMethod"`       // e.g. "GetByID", "Save"
 }
 
 // Comment represents code comments and docstrings

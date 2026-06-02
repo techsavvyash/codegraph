@@ -1388,7 +1388,14 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	eventDet := NewEventCallDetector(si.client, si.serviceName, si.scopeCtx)
 	eventDet.SetCallNodeBuffer(callBuffer)
 
-	dbDet := NewDBCallDetector(si.client, si.serviceName, si.scopeCtx)
+	repoSQLMap, sqlScanErr := ScanRepositorySQL(projectPath)
+	if sqlScanErr != nil {
+		fmt.Printf("Warning: repository SQL scan failed: %v\n", sqlScanErr)
+		repoSQLMap = RepoSQLMap{}
+	}
+	fmt.Printf("  Repository SQL pre-scan: %d methods resolved\n", len(repoSQLMap))
+
+	dbDet := NewDBCallDetector(si.client, si.serviceName, si.scopeCtx, repoSQLMap)
 	dbDet.SetCallNodeBuffer(callBuffer)
 
 	detected, skipped := 0, 0
@@ -1398,6 +1405,13 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 		}
 		if !strings.HasSuffix(path, ".go") || isNoisyFilePath(path) {
 			return nil
+		}
+
+		// SCIP stores filePaths as relative paths (doc.RelativePath); convert the
+		// absolute walk path to relative so the funcIDs lookup key matches.
+		relPath, relErr := filepath.Rel(projectPath, path)
+		if relErr != nil {
+			relPath = path
 		}
 
 		fset := token.NewFileSet()
@@ -1414,14 +1428,14 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 			if isObservabilityFunction(funcDecl.Name.Name, path) {
 				continue
 			}
-			funcID := funcIDs[path+":"+funcDecl.Name.Name]
+			funcID := funcIDs[relPath+":"+funcDecl.Name.Name]
 			if funcID == "" {
 				skipped++
 				continue
 			}
-			_ = rpcDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
-			_ = eventDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
-			_ = dbDet.DetectInFunction(ctx, funcDecl, funcID, path, fset)
+			_ = rpcDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
+			_ = eventDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
+			_ = dbDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
 			detected++
 		}
 		return nil
@@ -1458,6 +1472,10 @@ func (si *SCIPIndexer) loadFunctionIDs(ctx context.Context) (map[string]string, 
 		fp, _ := data["filePath"].(string)
 		name, _ := data["name"].(string)
 		id, _ := data["id"].(string)
+		// SCIP display names carry trailing SCIP descriptor punctuation, e.g.
+		// "GetByID()." — strip to get the bare Go identifier that the AST produces.
+		name = strings.TrimSuffix(name, ".")
+		name = strings.TrimSuffix(name, "()")
 		if fp != "" && name != "" && id != "" {
 			m[fp+":"+name] = id
 		}

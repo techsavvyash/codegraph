@@ -8,7 +8,7 @@ import (
 
 // newTestDBDetector creates a detector with a nil client (safe for parse-only tests).
 func newTestDBDetector() *DBCallDetector {
-	return NewDBCallDetector(nil, "test-service", models.DefaultScope())
+	return NewDBCallDetector(nil, "test-service", models.DefaultScope(), nil)
 }
 
 // ── processAssignment unit tests ─────────────────────────────────────────────
