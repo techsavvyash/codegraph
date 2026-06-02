@@ -274,14 +274,21 @@ func (d *DBCallDetector) processDeclString(decl *ast.DeclStmt) {
 	}
 }
 
-// isRepositoryPgxCall returns true if expr is `repository.Pgx()`.
+// isRepositoryPgxCall returns true if expr is a call to Pgx() on the repository
+// package or field. Accepts both `repository.Pgx()` (Ident) and `d.repository.Pgx()`
+// (SelectorExpr whose rightmost identifier is "repository").
 func isRepositoryPgxCall(expr *ast.CallExpr) bool {
 	sel, ok := expr.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Pgx" {
 		return false
 	}
-	ident, ok := sel.X.(*ast.Ident)
-	return ok && ident.Name == "repository"
+	switch x := sel.X.(type) {
+	case *ast.Ident:
+		return x.Name == "repository"
+	case *ast.SelectorExpr:
+		return x.Sel.Name == "repository"
+	}
+	return false
 }
 
 // detectTazapayRepoCall checks whether callExpr matches the Tazapay repository chain pattern:
@@ -409,6 +416,7 @@ func (d *DBCallDetector) processCallExpr(
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
 		"nodeKey":      nodeKey,
+		"name":         methodName,
 		"serviceName":  d.serviceName,
 		"table":        table,
 		"operation":    operation,
@@ -573,6 +581,7 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
 		"nodeKey":             nodeKey,
+		"name":                methodName,
 		"serviceName":         d.serviceName,
 		"repositoryInterface": repoName,
 		"repositoryMethod":    methodName,
@@ -617,6 +626,9 @@ func inferOperationFromRepoMethod(method string) string {
 		strings.HasPrefix(lower, "list") || strings.HasPrefix(lower, "fetch") ||
 		strings.HasPrefix(lower, "search") || strings.HasPrefix(lower, "count"):
 		return "SELECT"
+	case strings.HasPrefix(lower, "upsert") || strings.HasPrefix(lower, "bulkupsert") ||
+		strings.HasPrefix(lower, "bulk_upsert"):
+		return "UPSERT"
 	case strings.HasPrefix(lower, "save") || strings.HasPrefix(lower, "create") ||
 		strings.HasPrefix(lower, "insert") || strings.HasPrefix(lower, "add") ||
 		strings.HasPrefix(lower, "bulksave") || strings.HasPrefix(lower, "bulk_save"):
@@ -674,6 +686,7 @@ func (d *DBCallDetector) writeRawDBCall(
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
 		"nodeKey":      nodeKey,
+		"name":         dbKind + "." + operation,
 		"serviceName":  d.serviceName,
 		"table":        table,
 		"operation":    operation,
