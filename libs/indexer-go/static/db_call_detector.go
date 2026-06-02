@@ -92,15 +92,20 @@ type DBCallDetector struct {
 	// varDBType: local var name → db client kind ("pgx", "pgxpool", "sqlx", "gorm").
 	// Reset per function.
 	varDBType map[string]string
+
+	// varStringValue: local var name → raw string value.
+	// Used to track SQL strings assigned to local variables.
+	varStringValue map[string]string
 }
 
 // NewDBCallDetector creates a detector scoped to a single service indexing run.
 func NewDBCallDetector(client *neo4j.Client, serviceName string, scopeCtx models.ScopeContext) *DBCallDetector {
 	return &DBCallDetector{
-		client:      client,
-		serviceName: serviceName,
-		scopeCtx:    scopeCtx,
-		varDBType:   make(map[string]string),
+		client:         client,
+		serviceName:    serviceName,
+		scopeCtx:       scopeCtx,
+		varDBType:      make(map[string]string),
+		varStringValue: make(map[string]string),
 	}
 }
 
@@ -126,11 +131,16 @@ func (d *DBCallDetector) DetectInFunction(
 
 	// Invariant: reset per function so bindings from other functions don't leak.
 	d.varDBType = make(map[string]string)
+	d.varStringValue = make(map[string]string)
 
-	// Pass 1 — collect variable → DB client type bindings.
+	// Pass 1 — collect variable → DB client type bindings and string variables.
 	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
 		if assign, ok := n.(*ast.AssignStmt); ok {
 			d.processAssignment(assign)
+			d.processStringAssignment(assign)
+		}
+		if decl, ok := n.(*ast.DeclStmt); ok {
+			d.processDeclString(decl)
 		}
 		return true
 	})
@@ -212,6 +222,48 @@ func (d *DBCallDetector) processAssignment(assign *ast.AssignStmt) {
 	}
 }
 
+// processStringAssignment tracks variable assignments where the RHS is a string literal.
+func (d *DBCallDetector) processStringAssignment(assign *ast.AssignStmt) {
+	if len(assign.Lhs) == 0 || len(assign.Rhs) == 0 {
+		return
+	}
+	for i, lhs := range assign.Lhs {
+		if i >= len(assign.Rhs) {
+			break
+		}
+		if ident, ok := lhs.(*ast.Ident); ok {
+			if lit, ok := assign.Rhs[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				val := lit.Value
+				if len(val) >= 2 && (val[0] == '"' || val[0] == '`') {
+					d.varStringValue[ident.Name] = val[1 : len(val)-1]
+				}
+			}
+		}
+	}
+}
+
+// processDeclString tracks variable declarations where the variable is assigned a string literal.
+func (d *DBCallDetector) processDeclString(decl *ast.DeclStmt) {
+	genDecl, ok := decl.Decl.(*ast.GenDecl)
+	if !ok || genDecl.Tok != token.VAR {
+		return
+	}
+	for _, spec := range genDecl.Specs {
+		if valSpec, ok := spec.(*ast.ValueSpec); ok {
+			for i, name := range valSpec.Names {
+				if i < len(valSpec.Values) {
+					if lit, ok := valSpec.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						val := lit.Value
+						if len(val) >= 2 && (val[0] == '"' || val[0] == '`') {
+							d.varStringValue[name.Name] = val[1 : len(val)-1]
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 // isRepositoryPgxCall returns true if expr is `repository.Pgx()`.
 func isRepositoryPgxCall(expr *ast.CallExpr) bool {
 	sel, ok := expr.Fun.(*ast.SelectorExpr)
@@ -277,7 +329,7 @@ func (d *DBCallDetector) processCallExpr(
 	if pkgIdent, ok := sel.X.(*ast.Ident); ok && pkgIdent.Name == "pgxscan" {
 		method := sel.Sel.Name
 		if method == "Get" || method == "Select" {
-			sqlStr := extractStringArg(callExpr, 3)
+			sqlStr := d.extractStringArgWithVars(callExpr, 3)
 			table := ""
 			if sqlStr != "" {
 				if m := tableFromSQL.FindStringSubmatch(sqlStr); len(m) > 1 {
@@ -334,7 +386,7 @@ func (d *DBCallDetector) processCallExpr(
 
 	sqlStr := ""
 	if sqlArgIdx >= 0 && sqlArgIdx < len(callExpr.Args) {
-		sqlStr = extractStringArg(callExpr, sqlArgIdx)
+		sqlStr = d.extractStringArgWithVars(callExpr, sqlArgIdx)
 	}
 
 	operation, table := parseSQL(sqlStr, methodName, callExpr, dbKind)
@@ -632,4 +684,31 @@ func (d *DBCallDetector) writeRawDBCall(
 		log.Printf("Warning: db detector: CALLS_DB edge at %s:%d: %v", filePath, line, err)
 	}
 	return nil
+}
+
+// extractStringArgWithVars safely extracts a string from a call argument, including
+// tracking back to a locally assigned variable in varStringValue if it's an identifier.
+func (d *DBCallDetector) extractStringArgWithVars(callExpr *ast.CallExpr, n int) string {
+	if n >= len(callExpr.Args) {
+		return ""
+	}
+	arg := callExpr.Args[n]
+
+	// Case 1: Direct string literal
+	if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		val := lit.Value
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '`') {
+			return val[1 : len(val)-1]
+		}
+		return val
+	}
+
+	// Case 2: Local string variable reference (e.g. query := "...")
+	if ident, ok := arg.(*ast.Ident); ok {
+		if val, exists := d.varStringValue[ident.Name]; exists {
+			return val
+		}
+	}
+
+	return ""
 }
