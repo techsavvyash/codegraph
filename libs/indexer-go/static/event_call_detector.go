@@ -243,6 +243,13 @@ func (d *EventCallDetector) processPublishCallExpr(
 				transport = "outbox"
 				eventType = extractEventTypeArg(callExpr)
 				detected = true
+			} else if recv.Name == "queue" &&
+				(sel.Sel.Name == "SendDelaySQSMsg" || sel.Sel.Name == "SendSQSMsg") {
+				// Tazapay SQS wrapper: queue.SendDelaySQSMsg(ctx, env.Get(svcenv.QueueXxxURL), qMsg, delay)
+				transport = "sqs"
+				queueOrTopic = extractTazapayQueueEnvKey(callExpr)
+				eventType = queueOrTopic
+				detected = true
 			} else if varTransport, tracked := d.varTransportMap[recv.Name]; tracked {
 				switch varTransport {
 				case "sqs":
@@ -298,6 +305,11 @@ func (d *EventCallDetector) processPublishCallExpr(
 			case outboxFuncNames[sel.Sel.Name]:
 				transport = "outbox"
 				eventType = extractEventTypeArg(callExpr)
+				detected = true
+			// Tazapay outbox: repo.OutboxSettlement.BulkSave/Save or any repo.Outbox*.BulkSave/Save
+			case strings.Contains(fieldLower, "outbox") && (sel.Sel.Name == "BulkSave" || sel.Sel.Name == "Save"):
+				transport = "outbox"
+				eventType = strings.ToLower(recv.Sel.Name) // "outboxsettlement"
 				detected = true
 			}
 		}
@@ -572,6 +584,31 @@ func extractQueueStringLiteral(callExpr *ast.CallExpr) string {
 		return true
 	})
 	return found
+}
+
+// extractTazapayQueueEnvKey extracts the svcenv constant name from the second argument of
+// queue.SendDelaySQSMsg / queue.SendSQSMsg calls.
+//
+// Pattern: queue.SendDelaySQSMsg(ctx, env.Get(svcenv.QueueEventURL), qMsg, delay)
+// Returns "QueueEventURL" (the constant selector name).
+func extractTazapayQueueEnvKey(callExpr *ast.CallExpr) string {
+	// Second arg (index 1) is env.Get(svcenv.QueueXxxURL)
+	if len(callExpr.Args) < 2 {
+		return "dynamic"
+	}
+	envGetCall, ok := callExpr.Args[1].(*ast.CallExpr)
+	if !ok {
+		return "dynamic"
+	}
+	if len(envGetCall.Args) == 0 {
+		return "dynamic"
+	}
+	// Arg to env.Get is svcenv.QueueXxxURL — a SelectorExpr
+	sel, ok := envGetCall.Args[0].(*ast.SelectorExpr)
+	if !ok {
+		return "dynamic"
+	}
+	return sel.Sel.Name // "QueueEventURL"
 }
 
 // extractFirstStringLiteral returns the first string literal found anywhere in the call

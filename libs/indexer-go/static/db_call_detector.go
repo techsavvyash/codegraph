@@ -54,6 +54,20 @@ var dbQueryMethods = map[string]int{
 	"Scan":    -1,
 	"Updates": -1,
 	"Update":  -1,
+	// MongoDB driver methods on *mongo.Collection — no SQL arg
+	"FindOne":        -1,
+	"InsertOne":      -1,
+	"InsertMany":     -1,
+	"UpdateOne":      -1,
+	"UpdateMany":     -1,
+	"ReplaceOne":     -1,
+	"DeleteOne":      -1,
+	"DeleteMany":     -1,
+	"Aggregate":      -1,
+	"CountDocuments": -1,
+	"FindOneAndUpdate": -1,
+	"FindOneAndDelete": -1,
+	"FindOneAndReplace": -1,
 }
 
 // DBCallInfo holds a detected database call site.
@@ -166,6 +180,16 @@ func (d *DBCallDetector) processAssignment(assign *ast.AssignStmt) {
 	if !ok {
 		return
 	}
+
+	// Tazapay: repo, err := repository.Pgx().BeginTx(ctx)
+	// sel.X is a CallExpr (repository.Pgx()), not an Ident, so handle before pkgIdent check.
+	if sel.Sel.Name == "BeginTx" {
+		if innerCall, ok := sel.X.(*ast.CallExpr); ok && isRepositoryPgxCall(innerCall) {
+			d.varDBType[lhsIdent.Name] = "tazapay-tx"
+			return
+		}
+	}
+
 	pkgIdent, ok := sel.X.(*ast.Ident)
 	if !ok {
 		return
@@ -188,6 +212,46 @@ func (d *DBCallDetector) processAssignment(assign *ast.AssignStmt) {
 	}
 }
 
+// isRepositoryPgxCall returns true if expr is `repository.Pgx()`.
+func isRepositoryPgxCall(expr *ast.CallExpr) bool {
+	sel, ok := expr.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Pgx" {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && ident.Name == "repository"
+}
+
+// detectTazapayRepoCall checks whether callExpr matches the Tazapay repository chain pattern:
+//   - repository.Pgx().<RepoName>.<MethodName>(ctx, ...)
+//   - repo.<RepoName>.<MethodName>(ctx, ...)  where repo is tracked as "tazapay-tx"
+//
+// Returns repo name, method name, and whether the pattern matched.
+func (d *DBCallDetector) detectTazapayRepoCall(sel *ast.SelectorExpr) (repoName, methodName string, ok bool) {
+	methodName = sel.Sel.Name
+
+	// sel.X must be a SelectorExpr representing <root>.<RepoName>
+	fieldSel, isSel := sel.X.(*ast.SelectorExpr)
+	if !isSel {
+		return
+	}
+	repoName = fieldSel.Sel.Name
+
+	switch inner := fieldSel.X.(type) {
+	case *ast.CallExpr:
+		// repository.Pgx().<RepoName>.<MethodName>
+		if isRepositoryPgxCall(inner) {
+			ok = true
+		}
+	case *ast.Ident:
+		// repo.<RepoName>.<MethodName> where repo was bound via BeginTx
+		if d.varDBType[inner.Name] == "tazapay-tx" {
+			ok = true
+		}
+	}
+	return
+}
+
 // processCallExpr detects a DB method call on a tracked variable or a struct field
 // whose name contains common DB field names (db, repo, store, pool).
 func (d *DBCallDetector) processCallExpr(
@@ -198,6 +262,30 @@ func (d *DBCallDetector) processCallExpr(
 ) error {
 	sel, ok := callExpr.Fun.(*ast.SelectorExpr)
 	if !ok {
+		return nil
+	}
+
+	// Tazapay repository pattern: repository.Pgx().<Repo>.<Method> or repo.<Repo>.<Method>
+	// These use business-named methods (GetPayoutEvent, UpdateStatusByID, etc.) that are not
+	// in dbQueryMethods, so we handle them before that check.
+	if repoName, methodName, matched := d.detectTazapayRepoCall(sel); matched {
+		return d.writeTazapayRepoCall(ctx, callerFuncID, filePath, line, repoName, methodName)
+	}
+
+	// pgxscan package functions: pgxscan.Get(ctx, querier, &dest, query, args...)
+	// pgxscan.Select(ctx, querier, &dest, query, args...) — SQL is at argument index 3.
+	if pkgIdent, ok := sel.X.(*ast.Ident); ok && pkgIdent.Name == "pgxscan" {
+		method := sel.Sel.Name
+		if method == "Get" || method == "Select" {
+			sqlStr := extractStringArg(callExpr, 3)
+			table := ""
+			if sqlStr != "" {
+				if m := tableFromSQL.FindStringSubmatch(sqlStr); len(m) > 1 {
+					table = m[1]
+				}
+			}
+			return d.writeRawDBCall(ctx, callerFuncID, filePath, line, "SELECT", table, sqlStr, "pgxscan")
+		}
 		return nil
 	}
 
@@ -295,7 +383,7 @@ func (d *DBCallDetector) processCallExpr(
 
 // isDBFieldName returns true if a struct field name looks like a DB client field.
 func isDBFieldName(lower string) bool {
-	for _, kw := range []string{"db", "pool", "repo", "store", "conn", "gorm", "sqlx"} {
+	for _, kw := range []string{"db", "pool", "repo", "store", "conn", "gorm", "sqlx", "col"} {
 		if strings.Contains(lower, kw) {
 			return true
 		}
@@ -323,6 +411,12 @@ func parseSQL(sqlStr, methodName string, callExpr *ast.CallExpr, dbKind string) 
 			table = extractGORMTable(callExpr)
 			return
 		}
+	}
+
+	// MongoDB driver method on *mongo.Collection (field named "col" or similar).
+	// dbKind is "unknown" when detected via struct field name heuristic.
+	if op := mongoMethodToOperation(methodName); op != "" {
+		return op, ""
 	}
 
 	// For sqlx Select/Get: infer table from SQL or struct type arg.
@@ -388,4 +482,154 @@ func extractGORMTable(callExpr *ast.CallExpr) string {
 		}
 	}
 	return ""
+}
+
+// writeTazapayRepoCall creates a DBCall node for Tazapay's repository.Pgx().<Repo>.<Method> pattern.
+// Operation is inferred from the method name prefix (Get→SELECT, Save→INSERT, Update→UPDATE,
+// Delete→DELETE); table name is derived from the repo name (snake_case).
+func (d *DBCallDetector) writeTazapayRepoCall(
+	ctx context.Context,
+	callerFuncID, filePath string,
+	line int,
+	repoName, methodName string,
+) error {
+	operation := inferOperationFromRepoMethod(methodName)
+	table := camelToSnake(repoName)
+
+	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, line)
+
+	mergeProps := map[string]any{"nodeKey": nodeKey}
+	setProps := map[string]any{
+		"nodeKey":      nodeKey,
+		"serviceName":  d.serviceName,
+		"repo":         repoName,
+		"table":        table,
+		"operation":    operation,
+		"queryPattern": repoName + "." + methodName,
+		"filePath":     filePath,
+		"line":         line,
+		"createdAt":    time.Now().UTC().Unix(),
+		"updatedAt":    time.Now().UTC().Unix(),
+	}
+	maps.Copy(setProps, d.scopeCtx.Props())
+
+	if d.callBuffer != nil {
+		d.callBuffer.addDBCall(nodeKey, setProps)
+		d.callBuffer.addCallsDBEdge(callerFuncID, nodeKey, map[string]any{"line": line})
+		return nil
+	}
+
+	dbCallID, err := d.client.MergeNode(ctx, []string{"DBCall"}, mergeProps, setProps)
+	if err != nil {
+		return fmt.Errorf("db call detector: merge tazapay repo call at %s:%d: %w", filePath, line, err)
+	}
+
+	if _, err := d.client.MergeRelationship(ctx,
+		callerFuncID, dbCallID,
+		string(models.CallsDBRel),
+		map[string]any{},
+		map[string]any{"line": line},
+	); err != nil {
+		log.Printf("Warning: db detector: CALLS_DB edge at %s:%d: %v", filePath, line, err)
+	}
+
+	return nil
+}
+
+// inferOperationFromRepoMethod maps common method name prefixes to SQL operations.
+func inferOperationFromRepoMethod(method string) string {
+	lower := strings.ToLower(method)
+	switch {
+	case strings.HasPrefix(lower, "get") || strings.HasPrefix(lower, "find") ||
+		strings.HasPrefix(lower, "list") || strings.HasPrefix(lower, "fetch") ||
+		strings.HasPrefix(lower, "search") || strings.HasPrefix(lower, "count"):
+		return "SELECT"
+	case strings.HasPrefix(lower, "save") || strings.HasPrefix(lower, "create") ||
+		strings.HasPrefix(lower, "insert") || strings.HasPrefix(lower, "add") ||
+		strings.HasPrefix(lower, "bulksave") || strings.HasPrefix(lower, "bulk_save"):
+		return "INSERT"
+	case strings.HasPrefix(lower, "update") || strings.HasPrefix(lower, "set") ||
+		strings.HasPrefix(lower, "patch") || strings.HasPrefix(lower, "bulkupdate") ||
+		strings.HasPrefix(lower, "bulk_update"):
+		return "UPDATE"
+	case strings.HasPrefix(lower, "delete") || strings.HasPrefix(lower, "remove") ||
+		strings.HasPrefix(lower, "purge"):
+		return "DELETE"
+	}
+	return "QUERY"
+}
+
+// camelToSnake converts a CamelCase repo name to snake_case table name.
+// "PayoutAttempt" → "payout_attempt", "BulkPayout" → "bulk_payout"
+func camelToSnake(s string) string {
+	var out []rune
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			out = append(out, '_')
+		}
+		out = append(out, []rune(strings.ToLower(string(r)))...)
+	}
+	return string(out)
+}
+
+// mongoMethodToOperation maps MongoDB driver method names to DML operation strings.
+func mongoMethodToOperation(method string) string {
+	switch method {
+	case "FindOne", "Find", "Aggregate", "CountDocuments",
+		"FindOneAndUpdate", "FindOneAndDelete", "FindOneAndReplace":
+		return "SELECT"
+	case "InsertOne", "InsertMany":
+		return "INSERT"
+	case "UpdateOne", "UpdateMany", "ReplaceOne":
+		return "UPDATE"
+	case "DeleteOne", "DeleteMany":
+		return "DELETE"
+	}
+	return ""
+}
+
+// writeRawDBCall is a shared helper for writing a DBCall node and CALLS_DB edge
+// when the operation and table are already resolved (pgxscan, mongo, etc.).
+func (d *DBCallDetector) writeRawDBCall(
+	ctx context.Context,
+	callerFuncID, filePath string,
+	line int,
+	operation, table, queryPattern, dbKind string,
+) error {
+	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, dbKind, line)
+
+	mergeProps := map[string]any{"nodeKey": nodeKey}
+	setProps := map[string]any{
+		"nodeKey":      nodeKey,
+		"serviceName":  d.serviceName,
+		"table":        table,
+		"operation":    operation,
+		"queryPattern": queryPattern,
+		"dbKind":       dbKind,
+		"filePath":     filePath,
+		"line":         line,
+		"createdAt":    time.Now().UTC().Unix(),
+		"updatedAt":    time.Now().UTC().Unix(),
+	}
+	maps.Copy(setProps, d.scopeCtx.Props())
+
+	if d.callBuffer != nil {
+		d.callBuffer.addDBCall(nodeKey, setProps)
+		d.callBuffer.addCallsDBEdge(callerFuncID, nodeKey, map[string]any{"line": line})
+		return nil
+	}
+
+	dbCallID, err := d.client.MergeNode(ctx, []string{"DBCall"}, mergeProps, setProps)
+	if err != nil {
+		return fmt.Errorf("db call detector: merge DBCall node at %s:%d: %w", filePath, line, err)
+	}
+	if _, err := d.client.MergeRelationship(ctx,
+		callerFuncID, dbCallID,
+		string(models.CallsDBRel),
+		map[string]any{},
+		map[string]any{"line": line},
+	); err != nil {
+		log.Printf("Warning: db detector: CALLS_DB edge at %s:%d: %v", filePath, line, err)
+	}
+	return nil
 }

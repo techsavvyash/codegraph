@@ -166,6 +166,18 @@ func (d *RPCCallDetector) processAssignment(assign *ast.AssignStmt) {
 			return
 		}
 	}
+
+	// Tazapay grpcclient: client, err := grpcclient.GetAccountService(ctx)
+	// grpcclient.GetOnBoardingBankHTTPService(ctx) → "OnBoardingBankHTTPServiceClient"
+	// Stored with "Client" suffix so the existing method-call detection in processCallExpr works.
+	if pkgIdent, ok := sel.X.(*ast.Ident); ok {
+		if pkgIdent.Name == "grpcclient" && strings.HasPrefix(funcName, "Get") && strings.HasSuffix(funcName, "Service") {
+			svcName := strings.TrimPrefix(funcName, "Get") // "AccountService"
+			d.varTypeMap[lhsIdent.Name] = svcName + "Client"
+			d.varPkgMap[lhsIdent.Name] = "grpcclient"
+			return
+		}
+	}
 }
 
 // processCallExpr checks whether this call expression is a gRPC method invocation on a

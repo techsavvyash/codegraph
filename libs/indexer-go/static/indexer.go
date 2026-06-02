@@ -326,6 +326,9 @@ func (v *astVisitor) indexFunction(fn *ast.FuncDecl) {
 	if fn.Name == nil {
 		return
 	}
+	if isObservabilityFunction(fn.Name.Name, v.filePath) {
+		return
+	}
 
 	startPos := v.fset.Position(fn.Pos())
 	endPos := v.fset.Position(fn.End())
@@ -966,14 +969,16 @@ func shouldSkipDir(dirName string) bool {
 	skipDirs := []string{
 		"vendor", ".git", ".github", "node_modules", ".vscode",
 		"bin", "build", "dist", "tmp", ".idea",
+		// Tazapay service-specific noise directories
+		"mocks", "testdata", "docs", "cdk", "env", "migration",
 	}
-	
+
 	for _, skip := range skipDirs {
 		if dirName == skip {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

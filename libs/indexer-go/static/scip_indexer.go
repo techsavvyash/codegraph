@@ -1492,7 +1492,20 @@ func isGeneratedFilePath(path string) bool {
 		strings.Contains(p, "/generated/") ||
 		strings.HasPrefix(p, "generated/") ||
 		strings.Contains(p, "/vendor/") ||
-		strings.HasPrefix(p, "vendor/")
+		strings.HasPrefix(p, "vendor/") ||
+		// Tazapay service-specific noise directories
+		strings.Contains(p, "/mocks/") ||
+		strings.HasPrefix(p, "mocks/") ||
+		strings.Contains(p, "/testdata/") ||
+		strings.HasPrefix(p, "testdata/") ||
+		strings.Contains(p, "/docs/") ||
+		strings.HasPrefix(p, "docs/") ||
+		strings.Contains(p, "/cdk/") ||
+		strings.HasPrefix(p, "cdk/") ||
+		strings.Contains(p, "/env/") ||
+		strings.HasPrefix(p, "env/") ||
+		strings.Contains(p, "/migration/") ||
+		strings.HasPrefix(p, "migration/")
 }
 
 // isNoisyFilePath returns true for files that should be skipped during indexing
@@ -1516,6 +1529,14 @@ func isFunctionReferenceKind(kind models.SymbolKind) bool {
 // plus common telemetry file names.
 func isObservabilityFunction(funcName, filePath string) bool {
 	n := strings.ToLower(funcName)
+	// Tazapay: incrementXxx… functions (Prometheus counter helpers)
+	if strings.HasPrefix(n, "increment") {
+		return true
+	}
+	// Tazapay: trackXxxMetrics functions (OTel span/gauge helpers)
+	if strings.HasPrefix(n, "track") && strings.HasSuffix(n, "metrics") {
+		return true
+	}
 	// Name-based: metric counter/gauge/histogram helpers
 	if strings.HasSuffix(n, "metric") || strings.HasSuffix(n, "metrics") {
 		return true
