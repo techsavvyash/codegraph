@@ -839,6 +839,12 @@ const batchSize = 500
 // call-graph indexing pipeline. These types belong to other subsystems
 // (document indexer, generated-context) and inflate write volume without
 // contributing to any RPC context query.
+//
+// TEMPORARILY suppressed during testing to reduce graph noise:
+//   - "Reference": creates one node per call-site occurrence, inflating the
+//     graph with ~50K+ nodes that add no signal to cross-service RPC queries.
+//   - "Class": Go struct/type definitions are not needed for RPC traversal;
+//     suppressed until we decide how to surface them cleanly.
 var noiseNodeLabels = map[string]bool{
 	"Document":             true,
 	"DocumentChunk":        true,
@@ -846,6 +852,8 @@ var noiseNodeLabels = map[string]bool{
 	"PullRequest":          true,
 	"GeneratedDoc":         true,
 	"GenerationDiagnostic": true,
+	"Reference":            true, // suppressed: per-call-site nodes inflate graph during testing
+	"Class":                true, // suppressed: Go type nodes not needed for RPC traversal during testing
 }
 
 // noiseRelTypes lists relationship types that must never be written by the
@@ -1118,75 +1126,87 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 	fmt.Printf("  Built %d reference items from %d symbols\n", len(refItems), len(symbolDefs))
 
-	// 1. Batch merge all Reference nodes (deduplicated)
-	refBatch := make([]map[string]any, len(refItems))
-	for i, ri := range refItems {
-		refBatch[i] = map[string]any{
-			"nodeKey": ri.nodeKey,
-			"scopeId": si.scopeCtx.ScopeID,
-			"props":   ri.props,
+	// Reference node creation is suppressed while "Reference" is in noiseNodeLabels
+	// (reduces graph noise during testing — re-enable by removing "Reference" from that map).
+	var (
+		refIDs        map[string]string
+		referencesRels []map[string]any
+		refContainsRels []map[string]any
+		tMergeRef       time.Duration
+		tRelReferences  time.Duration
+		tRelRefContains time.Duration
+	)
+	if !noiseNodeLabels["Reference"] {
+		// 1. Batch merge all Reference nodes (deduplicated)
+		refBatch := make([]map[string]any, len(refItems))
+		for i, ri := range refItems {
+			refBatch[i] = map[string]any{
+				"nodeKey": ri.nodeKey,
+				"scopeId": si.scopeCtx.ScopeID,
+				"props":   ri.props,
+			}
 		}
-	}
-	refBatch = dedupeByNodeKey(refBatch)
-	fmt.Printf("  After dedup: %d unique Reference nodes to merge (batchSize=%d, batches=%d)\n",
-		len(refBatch), batchSize, (len(refBatch)+batchSize-1)/batchSize)
+		refBatch = dedupeByNodeKey(refBatch)
+		fmt.Printf("  After dedup: %d unique Reference nodes to merge (batchSize=%d, batches=%d)\n",
+			len(refBatch), batchSize, (len(refBatch)+batchSize-1)/batchSize)
 
-	t = time.Now()
-	refIDs, err := si.client.MergeNodesBatch(ctx, "Reference", refBatch, batchSize)
-	tMergeRef := time.Since(t)
-	if err != nil {
-		fmt.Printf("Warning: batch merge Reference nodes failed: %v\n", err)
+		t = time.Now()
+		refIDs, err = si.client.MergeNodesBatch(ctx, "Reference", refBatch, batchSize)
+		tMergeRef = time.Since(t)
+		if err != nil {
+			fmt.Printf("Warning: batch merge Reference nodes failed: %v\n", err)
+			refIDs = make(map[string]string)
+		}
+		fmt.Printf("  Merged %d Reference nodes in %s\n", len(refIDs), tMergeRef)
+
+		// 2. Batch create REFERENCES rels (refID → symbolID)
+		for _, ri := range refItems {
+			fromID, ok1 := refIDs[ri.nodeKey]
+			toID, ok2 := symbolIDs[ri.symbolNodeKey]
+			if ok1 && ok2 {
+				referencesRels = append(referencesRels, map[string]any{
+					"fromId": fromID,
+					"toId":   toID,
+					"props":  ri.refRelProps,
+				})
+			}
+		}
+		if !isNoiseRelType(models.ReferencesRel) {
+			fmt.Printf("  Creating %d REFERENCES rels (%d batches)...\n",
+				len(referencesRels), (len(referencesRels)+batchSize-1)/batchSize)
+			t = time.Now()
+			if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
+				fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
+			}
+			tRelReferences = time.Since(t)
+			fmt.Printf("  Created REFERENCES rels in %s\n", tRelReferences)
+		}
+
+		// 3. Batch create CONTAINS rels (fileID → refID)
+		for _, ri := range refItems {
+			refID, ok1 := refIDs[ri.nodeKey]
+			fileID, ok2 := fileNodes[ri.filePath]
+			if ok1 && ok2 {
+				refContainsRels = append(refContainsRels, map[string]any{
+					"fromId": fileID,
+					"toId":   refID,
+					"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
+				})
+			}
+		}
+		fmt.Printf("  Creating %d CONTAINS rels for refs (%d batches)...\n",
+			len(refContainsRels), (len(refContainsRels)+batchSize-1)/batchSize)
+
+		t = time.Now()
+		if err := si.client.CreateRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
+			fmt.Printf("Warning: batch create ref CONTAINS rels failed: %v\n", err)
+		}
+		tRelRefContains = time.Since(t)
+		fmt.Printf("  Created CONTAINS rels for refs in %s\n", tRelRefContains)
+	} else {
+		fmt.Printf("  Skipping Reference node creation (suppressed via noiseNodeLabels — %d items not written)\n", len(refItems))
 		refIDs = make(map[string]string)
 	}
-	fmt.Printf("  Merged %d Reference nodes in %s\n", len(refIDs), tMergeRef)
-
-	// 2. Batch create REFERENCES rels (refID → symbolID)
-	var referencesRels []map[string]any
-	for _, ri := range refItems {
-		fromID, ok1 := refIDs[ri.nodeKey]
-		toID, ok2 := symbolIDs[ri.symbolNodeKey]
-		if ok1 && ok2 {
-			referencesRels = append(referencesRels, map[string]any{
-				"fromId": fromID,
-				"toId":   toID,
-				"props":  ri.refRelProps,
-			})
-		}
-	}
-	tRelReferences := time.Duration(0)
-	if !isNoiseRelType(models.ReferencesRel) {
-		fmt.Printf("  Creating %d REFERENCES rels (%d batches)...\n",
-			len(referencesRels), (len(referencesRels)+batchSize-1)/batchSize)
-		t = time.Now()
-		if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
-			fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
-		}
-		tRelReferences = time.Since(t)
-		fmt.Printf("  Created REFERENCES rels in %s\n", tRelReferences)
-	}
-
-	// 3. Batch create CONTAINS rels (fileID → refID)
-	var refContainsRels []map[string]any
-	for _, ri := range refItems {
-		refID, ok1 := refIDs[ri.nodeKey]
-		fileID, ok2 := fileNodes[ri.filePath]
-		if ok1 && ok2 {
-			refContainsRels = append(refContainsRels, map[string]any{
-				"fromId": fileID,
-				"toId":   refID,
-				"props":  map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID},
-			})
-		}
-	}
-	fmt.Printf("  Creating %d CONTAINS rels for refs (%d batches)...\n",
-		len(refContainsRels), (len(refContainsRels)+batchSize-1)/batchSize)
-
-	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create ref CONTAINS rels failed: %v\n", err)
-	}
-	tRelRefContains := time.Since(t)
-	fmt.Printf("  Created CONTAINS rels for refs in %s\n", tRelRefContains)
 
 	if si.timer != nil {
 		si.timer.Stop(len(refItems), fmt.Sprintf("%d refs", len(refItems)))
