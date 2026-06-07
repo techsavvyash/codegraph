@@ -566,6 +566,7 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 	operation := inferOperationFromRepoMethod(methodName)
 	table := camelToSnake(repoName)
 
+	var repositoryFilePath string
 	// Override with real SQL-derived values if the pre-scanner found this method.
 	if info, ok := d.repoSQLMap[repoName+"."+methodName]; ok {
 		if info.Table != "" {
@@ -574,6 +575,7 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 		if info.Operation != "" {
 			operation = info.Operation
 		}
+		repositoryFilePath = info.FilePath
 	}
 
 	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, line)
@@ -592,6 +594,9 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 		"line":                line,
 		"createdAt":           time.Now().UTC().Unix(),
 		"updatedAt":           time.Now().UTC().Unix(),
+	}
+	if repositoryFilePath != "" {
+		setProps["repositoryFilePath"] = repositoryFilePath
 	}
 	maps.Copy(setProps, d.scopeCtx.Props())
 

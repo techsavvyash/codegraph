@@ -13,6 +13,7 @@ import (
 type RepoMethodInfo struct {
 	Table     string // e.g. "collection_account_documents"
 	Operation string // SELECT, INSERT, UPDATE, DELETE
+	FilePath  string // relative path from service root, e.g. "pgx/lookup_payout_error.go"
 }
 
 // RepoSQLMap maps "InterfaceName.MethodName" → resolved DB info.
@@ -45,7 +46,11 @@ func ScanRepositorySQL(projectPath string) (RepoSQLMap, error) {
 			continue
 		}
 		path := filepath.Join(pgxDir, entry.Name())
-		if err := scanPgxFile(path, result); err != nil {
+		relPath, relErr := filepath.Rel(projectPath, path)
+		if relErr != nil {
+			relPath = filepath.Join("pgx", entry.Name())
+		}
+		if err := scanPgxFile(path, relPath, result); err != nil {
 			// Non-fatal: skip bad files and continue.
 			continue
 		}
@@ -55,7 +60,7 @@ func ScanRepositorySQL(projectPath string) (RepoSQLMap, error) {
 }
 
 // scanPgxFile parses a single pgx/*.go file and adds its method SQL info to m.
-func scanPgxFile(path string, m RepoSQLMap) error {
+func scanPgxFile(path, relFilePath string, m RepoSQLMap) error {
 	fset := token.NewFileSet()
 	f, err := goparser.ParseFile(fset, path, nil, 0)
 	if err != nil {
@@ -109,7 +114,7 @@ func scanPgxFile(path string, m RepoSQLMap) error {
 		}
 
 		key := interfaceName + "." + methodName
-		m[key] = RepoMethodInfo{Table: table, Operation: operation}
+		m[key] = RepoMethodInfo{Table: table, Operation: operation, FilePath: relFilePath}
 	}
 
 	return nil

@@ -942,7 +942,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			symbolProps:   symProps,
 		}
 
-		if info.FilePath != "" {
+		if info.FilePath != "" && sd.GetDefinitionReference() != nil {
 			lbl, nk, props := si.computeDefinitionProps(info)
 			di.defLabel = lbl
 			di.defNodeKey = nk
@@ -1468,6 +1468,9 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	if flushErr := callBuffer.flush(ctx, si.client); flushErr != nil {
 		return fmt.Errorf("failed to flush call-node buffer: %w", flushErr)
 	}
+	if resolveErr := si.resolveDBCallMethods(ctx); resolveErr != nil {
+		fmt.Printf("Warning: DBCall→Method resolution failed: %v\n", resolveErr)
+	}
 	return nil
 }
 
@@ -1501,6 +1504,77 @@ func (si *SCIPIndexer) loadFunctionIDs(ctx context.Context) (map[string]string, 
 		}
 	}
 	return m, nil
+}
+
+// resolveDBCallMethods links DBCall nodes to the Method nodes they resolve to:
+//   - Interface methods in repository/intf/ directories (confidence 0.9)
+//   - Concrete pgx implementations in pgx/ directories (confidence 0.85 with file match, 0.75 fallback)
+//
+// This runs after all nodes and CALLS_DB edges have been flushed so both sides exist.
+func (si *SCIPIndexer) resolveDBCallMethods(ctx context.Context) error {
+	// Pass A: interface method match via repository/intf/ path + table-name substring.
+	// SCIP stores method names with descriptor suffix (e.g. "Upsert()."), so match
+	// with both exact name and STARTS WITH name + "(" to cover both forms.
+	passA := `
+		MATCH (db:DBCall)
+		WHERE db.repositoryInterface IS NOT NULL
+		  AND db.repositoryMethod IS NOT NULL
+		  AND db.scopeId = $scopeId
+		WITH db
+		MATCH (m:Method)
+		WHERE m.scopeId = $scopeId
+		  AND (m.name = db.repositoryMethod OR m.name STARTS WITH (db.repositoryMethod + '('))
+		  AND m.filePath CONTAINS 'repository/intf/'
+		  AND m.filePath CONTAINS db.table
+		MERGE (db)-[r:RESOLVES_TO]->(m)
+		ON CREATE SET
+		  r.confidence       = 0.9,
+		  r.resolutionMethod = 'interface_method_match'
+		RETURN count(r) AS linked
+	`
+	// Pass B: pgx concrete implementation match.
+	// Uses repositoryFilePath for an exact file match when available; falls back to
+	// table-name substring in the pgx/ directory. Path check uses 'pgx/' (no leading
+	// slash) to match relative paths like "pgx/lookup_payout_error.go".
+	passB := `
+		MATCH (db:DBCall)
+		WHERE db.repositoryInterface IS NOT NULL
+		  AND db.repositoryMethod IS NOT NULL
+		  AND db.scopeId = $scopeId
+		WITH db
+		MATCH (m:Method)
+		WHERE m.scopeId = $scopeId
+		  AND (m.name = db.repositoryMethod OR m.name STARTS WITH (db.repositoryMethod + '('))
+		  AND m.filePath CONTAINS 'pgx/'
+		  AND (
+		    (db.repositoryFilePath IS NOT NULL AND (m.filePath = db.repositoryFilePath OR m.filePath ENDS WITH ('/' + db.repositoryFilePath)))
+		    OR
+		    (db.repositoryFilePath IS NULL AND m.filePath CONTAINS db.table)
+		  )
+		MERGE (db)-[r:RESOLVES_TO]->(m)
+		ON CREATE SET
+		  r.confidence       = CASE WHEN db.repositoryFilePath IS NOT NULL THEN 0.85 ELSE 0.75 END,
+		  r.resolutionMethod = CASE WHEN db.repositoryFilePath IS NOT NULL
+		                            THEN 'pgx_file_match'
+		                            ELSE 'pgx_naming_convention_match' END
+		RETURN count(r) AS linked
+	`
+
+	params := map[string]any{"scopeId": si.scopeCtx.ScopeID}
+	totalLinked := int64(0)
+	for _, q := range []string{passA, passB} {
+		results, err := si.client.ExecuteQuery(ctx, q, params)
+		if err != nil {
+			return err
+		}
+		if len(results) > 0 {
+			if n, ok := results[0].AsMap()["linked"].(int64); ok {
+				totalLinked += n
+			}
+		}
+	}
+	fmt.Printf("  DBCall→Method resolution: %d RESOLVES_TO edges created\n", totalLinked)
+	return nil
 }
 
 // isTestFilePath returns true if the file path belongs to a test file across
