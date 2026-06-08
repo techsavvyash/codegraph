@@ -47,13 +47,14 @@ type callEdgeData struct {
 }
 
 // SCIPCallGraphBuilder infers CALLS relationships between Functions/Methods
-// by correlating SCIP Reference nodes with Go AST function body ranges.
+// by correlating Go AST call sites with indexed Function/Method nodes.
 type SCIPCallGraphBuilder struct {
 	client      *neo4j.Client
 	projectPath string
 	modulePath  string // Go module path from go.mod, used to filter external targets
 	serviceName string // Service node name used to restrict listGoFiles to this module only
 	scopeCtx    models.ScopeContext
+	moduleNodes map[string]string // service-wide funcName → elementId for cross-file callee resolution
 }
 
 // NewSCIPCallGraphBuilder creates a new call graph builder.
@@ -101,6 +102,14 @@ func (cg *SCIPCallGraphBuilder) SetScope(scope models.ScopeContext) {
 // BuildCallGraph infers CALLS relationships for all Go source files in the graph.
 func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	fmt.Println("Building call graph from SCIP references...")
+
+	// Pre-load all Function/Method IDs for the service so processFile can resolve
+	// cross-file callees without querying Reference nodes (which are suppressed).
+	if err := cg.loadModuleNodes(ctx); err != nil {
+		fmt.Printf("Warning: failed to pre-load module nodes: %v\n", err)
+		cg.moduleNodes = make(map[string]string)
+	}
+	fmt.Printf("  Pre-loaded %d function/method nodes for cross-file resolution\n", len(cg.moduleNodes))
 
 	// Get all Go source files in the graph.
 	files, err := cg.listGoFiles(ctx)
@@ -319,145 +328,131 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
 	}
 
-	// Query: find all references in this file that point to symbols which
-	// have a DEFINES edge from a Function or Method.
-	// Filter targets to only intra-project calls when modulePath is set.
-	// (CONTAINS "" is always true, so empty modulePath disables filtering.)
-	//
-	// IMPLEMENTS traversal: if the direct target has incoming IMPLEMENTS
-	// edges from concrete types, return those instead (may-call fan-out).
-	// Otherwise fall back to the direct target.
-	query := `
-		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
-		      -[:REFERENCES]->(sym:Symbol)
-		      <-[:DEFINES]-(directTarget)
-		WHERE (directTarget:Function OR directTarget:Method)
-		  AND directTarget.signature CONTAINS $modulePath
-		OPTIONAL MATCH (concreteTarget)-[:IMPLEMENTS]->(directTarget)
-		WHERE (concreteTarget:Function OR concreteTarget:Method)
-		  AND concreteTarget.signature CONTAINS $modulePath
-		WITH ref, directTarget,
-		     COLLECT(DISTINCT concreteTarget) AS concretes
-		UNWIND
-		  CASE WHEN SIZE(concretes) > 0 THEN concretes
-		       ELSE [directTarget]
-		  END AS target
-		RETURN ref.startLine AS refLine,
-		       elementId(target) AS targetId,
-		       target.name AS targetName
-	`
-
-	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath":   filePath,
-		"scopeId":    cg.scopeCtx.ScopeID,
-		"modulePath": cg.modulePath,
-	})
-	if err != nil {
-		return 0, err
+	// Build per-function call sites from the Go AST.
+	// Reference nodes are suppressed in noiseNodeLabels so there are no
+	// Reference → Symbol → DEFINES → Function chains to query. We derive
+	// CALLS edges directly from the parsed AST instead.
+	astCalls, astErr := parseASTCallsPerFunc(fullPath)
+	if astErr != nil {
+		fmt.Printf("Warning: AST call parse failed for %s: %v\n", filePath, astErr)
+		astCalls = make(map[int][]astCallSite)
 	}
 
 	created := 0
 	seen := map[string]bool{}
 	var conditionalCalls []callEdgeData
 
-	for _, rec := range results {
-		rm := rec.AsMap()
-		refLine := int(getInt64FromMap(rm, "refLine"))
-		targetID := getStringFromMap(rm, "targetId")
-		targetName := strings.TrimSuffix(getStringFromMap(rm, "targetName"), "().")
-
-		caller := findEnclosingCaller(callers, refLine)
-		if caller == nil {
+	for _, fr := range funcRanges {
+		callerBaseName := fr.Name
+		if idx := strings.LastIndex(callerBaseName, "."); idx >= 0 {
+			callerBaseName = callerBaseName[idx+1:]
+		}
+		callerID, ok := graphNodes[callerBaseName]
+		if !ok {
 			continue
 		}
 
-		pairKey := caller.ID + "->" + targetID
-		if caller.ID == targetID || seen[pairKey] {
-			continue
-		}
-		seen[pairKey] = true
-
-		// Compute control-flow / concurrent / tx scopes for this call site.
-		innerScope := findInnermostScope(cfScopes, refLine)
-		innerConc := findInnermostConcurrentScope(concScopes, refLine)
-		innerTx := findInnermostTxScope(txScopes, refLine)
-		var depth int
-		var isCond bool
-		if innerScope != nil {
-			depth = innerScope.Depth
-			isCond = true
-		}
-
-		setProps := map[string]any{
-			"line":          refLine,
-			"filePath":      filePath,
-			"branchDepth":   depth,
-			"isConditional": isCond,
-			"isParallel":    innerConc != nil,
-			"isInTx":        innerTx != nil,
-		}
-
-		// Attach AST-derived enrichment when the parsed metadata has a
-		// matching entry for this (line, targetName). Unknown keys fall
-		// through with only the base properties — preserving prior behaviour.
-		var meta callMeta
-		var hasMeta bool
-		if m, ok := callMetadata[fmt.Sprintf("%d:%s", refLine, targetName)]; ok {
-			meta = m
-			hasMeta = true
-			if meta.OrderIndex > 0 {
-				setProps["orderIndex"] = meta.OrderIndex
+		for _, call := range astCalls[fr.DeclLine] {
+			// Prefer same-file resolution (unambiguous); fall back to service-wide map
+			// for cross-file calls within the same service.
+			calleeID := graphNodes[call.TargetName]
+			if calleeID == "" {
+				calleeID = cg.moduleNodes[call.TargetName]
 			}
-			if len(meta.LiteralArgs) > 0 {
-				setProps["literalArgs"] = meta.LiteralArgs
+			if calleeID == "" {
+				continue // external or unindexed callee
 			}
-			if meta.NearestComment != "" {
-				setProps["nearestComment"] = meta.NearestComment
-			}
-			if len(meta.ReceiverChain) > 0 {
-				setProps["receiverChain"] = meta.ReceiverChain
-			}
-		}
 
-		_, err := cg.client.MergeRelationship(ctx, caller.ID, targetID, string(models.CallsRel),
-			nil, setProps)
-		if err != nil {
-			fmt.Printf("Warning: failed to create CALLS edge: %v\n", err)
-			continue
-		}
-		created++
-
-		// Reify the call as a CallEdge whenever it belongs to *any* scope
-		// (control-flow, concurrent, or transactional). The scope keys that
-		// don't apply remain empty, and the upsert step only links the ones
-		// that are set.
-		if innerScope != nil || innerConc != nil || innerTx != nil {
-			ced := callEdgeData{
-				NodeKey:     fmt.Sprintf("calledge:%s:%s:%d:%s", cg.scopeCtx.ScopeID, filePath, refLine, targetName),
-				CallerID:    caller.ID,
-				CalleeID:    targetID,
-				FilePath:    filePath,
-				Line:        refLine,
-				TargetName:  targetName,
-				BranchDepth: depth,
+			// Skip DB/repository call sites — these are already represented as
+			// CALLS_DB edges created by the DBCallDetector. Creating a CALLS edge
+			// on top of them is redundant noise. We detect them via the receiver
+			// chain stored in callMetadata (computed from the same AST).
+			if cm, hasCM := callMetadata[fmt.Sprintf("%d:%s", call.Line, call.TargetName)]; hasCM {
+				if isDBCallSite(call.TargetName, cm.ReceiverChain) {
+					continue
+				}
 			}
+
+			pairKey := callerID + "->" + calleeID
+			if callerID == calleeID || seen[pairKey] {
+				continue
+			}
+			seen[pairKey] = true
+
+			innerScope := findInnermostScope(cfScopes, call.Line)
+			innerConc := findInnermostConcurrentScope(concScopes, call.Line)
+			innerTx := findInnermostTxScope(txScopes, call.Line)
+			var depth int
+			var isCond bool
 			if innerScope != nil {
-				ced.ScopeKey = innerScope.NodeKey
+				depth = innerScope.Depth
+				isCond = true
 			}
-			if innerConc != nil {
-				ced.ConcurrentScopeKey = innerConc.NodeKey
-				ced.ConcurrentForkLine = innerConc.StartLine
+
+			setProps := map[string]any{
+				"line":          call.Line,
+				"filePath":      filePath,
+				"branchDepth":   depth,
+				"isConditional": isCond,
+				"isParallel":    innerConc != nil,
+				"isInTx":        innerTx != nil,
 			}
-			if innerTx != nil {
-				ced.TxScopeKey = innerTx.NodeKey
+
+			var meta callMeta
+			var hasMeta bool
+			if m, ok := callMetadata[fmt.Sprintf("%d:%s", call.Line, call.TargetName)]; ok {
+				meta = m
+				hasMeta = true
+				if meta.OrderIndex > 0 {
+					setProps["orderIndex"] = meta.OrderIndex
+				}
+				if len(meta.LiteralArgs) > 0 {
+					setProps["literalArgs"] = meta.LiteralArgs
+				}
+				if meta.NearestComment != "" {
+					setProps["nearestComment"] = meta.NearestComment
+				}
+				if len(meta.ReceiverChain) > 0 {
+					setProps["receiverChain"] = meta.ReceiverChain
+				}
 			}
-			if hasMeta {
-				ced.OrderIndex = meta.OrderIndex
-				ced.LiteralArgs = meta.LiteralArgs
-				ced.NearestComment = meta.NearestComment
-				ced.ReceiverChain = meta.ReceiverChain
+
+			_, err := cg.client.MergeRelationship(ctx, callerID, calleeID, string(models.CallsRel),
+				nil, setProps)
+			if err != nil {
+				fmt.Printf("Warning: failed to create CALLS edge: %v\n", err)
+				continue
 			}
-			conditionalCalls = append(conditionalCalls, ced)
+			created++
+
+			if innerScope != nil || innerConc != nil || innerTx != nil {
+				ced := callEdgeData{
+					NodeKey:     fmt.Sprintf("calledge:%s:%s:%d:%s", cg.scopeCtx.ScopeID, filePath, call.Line, call.TargetName),
+					CallerID:    callerID,
+					CalleeID:    calleeID,
+					FilePath:    filePath,
+					Line:        call.Line,
+					TargetName:  call.TargetName,
+					BranchDepth: depth,
+				}
+				if innerScope != nil {
+					ced.ScopeKey = innerScope.NodeKey
+				}
+				if innerConc != nil {
+					ced.ConcurrentScopeKey = innerConc.NodeKey
+					ced.ConcurrentForkLine = innerConc.StartLine
+				}
+				if innerTx != nil {
+					ced.TxScopeKey = innerTx.NodeKey
+				}
+				if hasMeta {
+					ced.OrderIndex = meta.OrderIndex
+					ced.LiteralArgs = meta.LiteralArgs
+					ced.NearestComment = meta.NearestComment
+					ced.ReceiverChain = meta.ReceiverChain
+				}
+				conditionalCalls = append(conditionalCalls, ced)
+			}
 		}
 	}
 
@@ -521,26 +516,6 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 		}
 	}
 	return m, nil
-}
-
-
-// findEnclosingCaller finds the innermost callerInfo whose body range
-// contains the given line number.
-func findEnclosingCaller(callers []callerInfo, line int) *callerInfo {
-	var best *callerInfo
-	bestSpan := int(^uint(0) >> 1)
-
-	for i := range callers {
-		c := &callers[i]
-		if line >= c.StartLine && line <= c.EndLine {
-			span := c.EndLine - c.StartLine
-			if span < bestSpan {
-				best = c
-				bestSpan = span
-			}
-		}
-	}
-	return best
 }
 
 // parseFuncRanges parses a Go source file and returns the line ranges for each
@@ -917,4 +892,109 @@ func findEnclosingFunc(ranges []funcRange, line int) *funcRange {
 // isGoFile checks whether a path ends with .go
 func isGoFile(path string) bool {
 	return strings.HasSuffix(path, ".go")
+}
+
+// isDBCallSite reports whether a call site is a repository/DB operation that
+// is already captured by the DBCallDetector as a CALLS_DB edge. Such sites must
+// not also produce a CALLS edge — doing so creates a redundant parallel path.
+//
+// Two patterns are blocked:
+//  1. The repository accessor call itself (target == "Pgx") — e.g. repository.Pgx()
+//  2. Any call whose receiver chain passes through the accessor — e.g. the chain
+//     ["repository", "Pgx()", "PayoutDocument", "GetByID"] for a .GetByID() call.
+//
+// "Pgx()" (with the "()" suffix) is the marker written by extractReceiverChain
+// when a segment was itself an invocation, making this a precise signal.
+func isDBCallSite(targetName string, receiverChain []string) bool {
+	if targetName == "Pgx" {
+		return true
+	}
+	for _, part := range receiverChain {
+		if part == "Pgx()" {
+			return true
+		}
+	}
+	return false
+}
+
+// loadModuleNodes pre-loads all Function/Method node IDs for the service into
+// moduleNodes, keyed by bare function name. Called once before the per-file loop
+// to enable cross-file callee resolution without Reference nodes.
+// When multiple functions share the same base name, last-write wins; same-file
+// graphNodes lookups in processFile take priority over this map.
+func (cg *SCIPCallGraphBuilder) loadModuleNodes(ctx context.Context) error {
+	query := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND fn.scopeId = $scopeId
+		RETURN fn.name AS name, elementId(fn) AS id
+	`
+	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
+		"scopeId": cg.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return err
+	}
+	cg.moduleNodes = make(map[string]string, len(results))
+	for _, rec := range results {
+		rm := rec.AsMap()
+		name := getStringFromMap(rm, "name")
+		id := getStringFromMap(rm, "id")
+		if name == "" || id == "" {
+			continue
+		}
+		// Strip SCIP descriptor suffixes (e.g. "GetByID().").
+		name = strings.TrimSuffix(name, "().")
+		name = strings.TrimSuffix(name, "()")
+		cg.moduleNodes[name] = id
+	}
+	return nil
+}
+
+// astCallSite holds an AST-derived call site's line and bare callee name.
+type astCallSite struct {
+	Line       int
+	TargetName string
+}
+
+// parseASTCallsPerFunc parses filePath and returns per-function call sites.
+// Result is keyed by the function's declaration line (funcRange.DeclLine).
+// Uses callTargetName/callTargetPos from call_metadata.go to extract the
+// same bare identifier that the SCIP metadata enrichment uses as its key.
+func parseASTCallsPerFunc(filePath string) (map[int][]astCallSite, error) {
+	src, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filePath, src, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[int][]astCallSite)
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		declLine := fset.Position(fn.Name.Pos()).Line
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			ce, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name := callTargetName(ce)
+			if name == "" {
+				return true
+			}
+			line := fset.Position(callTargetPos(ce)).Line
+			out[declLine] = append(out[declLine], astCallSite{
+				Line:       line,
+				TargetName: name,
+			})
+			return true
+		})
+	}
+	return out, nil
 }

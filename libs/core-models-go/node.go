@@ -114,33 +114,37 @@ type Interface struct {
 // Function represents a standalone function or static method
 type Function struct {
 	BaseNode
-	Name        string `json:"name" neo4j:"name"`
-	Signature   string `json:"signature" neo4j:"signature"`
-	ReturnType  string `json:"returnType" neo4j:"returnType"`
-	FilePath    string `json:"filePath" neo4j:"filePath"`
-	StartLine   int    `json:"startLine" neo4j:"startLine"`
-	EndLine     int    `json:"endLine" neo4j:"endLine"`
-	IsExported  bool   `json:"isExported" neo4j:"isExported"`
-	IsAsync     bool   `json:"isAsync" neo4j:"isAsync"`
-	Complexity  int    `json:"complexity" neo4j:"complexity"`
-	Docstring   string `json:"docstring" neo4j:"docstring"`
+	Name             string `json:"name" neo4j:"name"`
+	Signature        string `json:"signature" neo4j:"signature"`
+	ReturnType       string `json:"returnType" neo4j:"returnType"`
+	FilePath         string `json:"filePath" neo4j:"filePath"`
+	AbsoluteFilePath string `json:"absoluteFilePath" neo4j:"absoluteFilePath"`
+	StartLine        int    `json:"startLine" neo4j:"startLine"`
+	EndLine          int    `json:"endLine" neo4j:"endLine"`
+	IsExported       bool   `json:"isExported" neo4j:"isExported"`
+	IsAsync          bool   `json:"isAsync" neo4j:"isAsync"`
+	Complexity       int    `json:"complexity" neo4j:"complexity"`
+	Docstring        string `json:"docstring" neo4j:"docstring"`
+	IsRPCHandler     bool   `json:"isRPCHandler" neo4j:"isRPCHandler"`
 }
 
 // Method represents an instance method belonging to a class
 type Method struct {
 	BaseNode
-	Name           string `json:"name" neo4j:"name"`
-	Signature      string `json:"signature" neo4j:"signature"`
-	ReturnType     string `json:"returnType" neo4j:"returnType"`
-	AccessModifier string `json:"accessModifier" neo4j:"accessModifier"`
-	FilePath       string `json:"filePath" neo4j:"filePath"`
-	StartLine      int    `json:"startLine" neo4j:"startLine"`
-	EndLine        int    `json:"endLine" neo4j:"endLine"`
-	IsStatic       bool   `json:"isStatic" neo4j:"isStatic"`
-	IsAbstract     bool   `json:"isAbstract" neo4j:"isAbstract"`
-	IsOverride     bool   `json:"isOverride" neo4j:"isOverride"`
-	Complexity     int    `json:"complexity" neo4j:"complexity"`
-	Docstring      string `json:"docstring" neo4j:"docstring"`
+	Name             string `json:"name" neo4j:"name"`
+	Signature        string `json:"signature" neo4j:"signature"`
+	ReturnType       string `json:"returnType" neo4j:"returnType"`
+	AccessModifier   string `json:"accessModifier" neo4j:"accessModifier"`
+	FilePath         string `json:"filePath" neo4j:"filePath"`
+	AbsoluteFilePath string `json:"absoluteFilePath" neo4j:"absoluteFilePath"`
+	StartLine        int    `json:"startLine" neo4j:"startLine"`
+	EndLine          int    `json:"endLine" neo4j:"endLine"`
+	IsStatic         bool   `json:"isStatic" neo4j:"isStatic"`
+	IsAbstract       bool   `json:"isAbstract" neo4j:"isAbstract"`
+	IsOverride       bool   `json:"isOverride" neo4j:"isOverride"`
+	Complexity       int    `json:"complexity" neo4j:"complexity"`
+	Docstring        string `json:"docstring" neo4j:"docstring"`
+	IsRPCHandler     bool   `json:"isRPCHandler" neo4j:"isRPCHandler"`
 }
 
 // Variable represents a variable declaration

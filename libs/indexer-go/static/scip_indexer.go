@@ -44,6 +44,7 @@ type SCIPIndexer struct {
 	scopeCtx         models.ScopeContext
 	timer            PipelineTimer
 	fileContentCache map[string][]byte // cache for calculateByteOffsets
+	projectPath      string            // absolute project root, set in IndexProject for absoluteFilePath
 
 	// Tri-store support: secondary stores populated after Neo4j indexing.
 	embeddingService    search.EmbeddingService
@@ -87,6 +88,13 @@ func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repo
 // IndexProject indexes a project using SCIP
 func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) error {
 	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
+
+	// Resolve to absolute so absoluteFilePath can join relative SCIP paths.
+	if absPath, err := filepath.Abs(projectPath); err == nil {
+		si.projectPath = absPath
+	} else {
+		si.projectPath = projectPath
+	}
 
 	// Step 1: Generate SCIP index file
 	if si.timer != nil {
@@ -784,16 +792,17 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 	}
 
 	props = map[string]any{
-		"name":        symbolInfo.DisplayName,
-		"nodeKey":     nodeKey,
-		"signature":   symbolInfo.Signature,
-		"filePath":    symbolInfo.FilePath,
-		"startLine":   symbolInfo.StartLine,
-		"endLine":     symbolInfo.EndLine,
-		"startColumn": symbolInfo.StartColumn,
-		"endColumn":   symbolInfo.EndColumn,
-		"scope":       si.scopeCtx.Scope,
-		"scopeId":     si.scopeCtx.ScopeID,
+		"name":             symbolInfo.DisplayName,
+		"nodeKey":          nodeKey,
+		"signature":        symbolInfo.Signature,
+		"filePath":         symbolInfo.FilePath,
+		"absoluteFilePath": si.absoluteFilePath(symbolInfo.FilePath),
+		"startLine":        symbolInfo.StartLine,
+		"endLine":          symbolInfo.EndLine,
+		"startColumn":      symbolInfo.StartColumn,
+		"endColumn":        symbolInfo.EndColumn,
+		"scope":            si.scopeCtx.Scope,
+		"scopeId":          si.scopeCtx.ScopeID,
 	}
 
 	if label == "Function" || label == "Method" {
@@ -1728,6 +1737,16 @@ func isTestFunction(name, filePath string) bool {
 	}
 
 	return false
+}
+
+// absoluteFilePath returns the absolute path by joining si.projectPath with the
+// SCIP-relative relPath. Returns relPath unchanged when projectPath is unset or
+// relPath is already absolute.
+func (si *SCIPIndexer) absoluteFilePath(relPath string) string {
+	if si.projectPath == "" || filepath.IsAbs(relPath) {
+		return relPath
+	}
+	return filepath.Join(si.projectPath, relPath)
 }
 
 // calculateByteOffsets calculates the start and end byte positions for a code location

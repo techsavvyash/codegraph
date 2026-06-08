@@ -177,6 +177,7 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 	}
 
 	created := 0
+	handlerIDs := make([]string, 0, len(records))
 	for _, rec := range records {
 		rm := rec.AsMap()
 		fnID := getStringFromMap(rm, "fnId")
@@ -185,6 +186,7 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 		if fnID == "" || name == "" {
 			continue
 		}
+		handlerIDs = append(handlerIDs, fnID)
 
 		hasExternal, _ := rm["hasExternal"].(bool)
 		isCrossPkg, _ := rm["isCrossPkg"].(bool)
@@ -234,6 +236,21 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 			continue
 		}
 		created++
+	}
+
+	// Batch-tag all detected entry-point handlers so tools can distinguish them
+	// from internal helper functions without re-traversing the graph.
+	if len(handlerIDs) > 0 {
+		tagCypher := `
+			UNWIND $fnIds AS id
+			MATCH (fn) WHERE elementId(fn) = id
+			SET fn.isRPCHandler = true
+		`
+		if _, tagErr := d.client.ExecuteQuery(ctx, tagCypher, map[string]any{"fnIds": handlerIDs}); tagErr != nil {
+			fmt.Printf("Warning: failed to batch-tag isRPCHandler: %v\n", tagErr)
+		} else {
+			fmt.Printf("  Tagged %d functions as isRPCHandler\n", len(handlerIDs))
+		}
 	}
 
 	fmt.Printf("  Strategy 3: created %d APIRoute nodes with EXPOSES_API edges\n", created)
