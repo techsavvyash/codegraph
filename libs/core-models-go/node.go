@@ -197,6 +197,8 @@ type GRPCCall struct {
 	TargetService string `json:"targetService" neo4j:"targetService"`
 	TargetMethod  string `json:"targetMethod"  neo4j:"targetMethod"`
 	ProtoPackage  string `json:"protoPackage"  neo4j:"protoPackage"`
+	ProtoService  string `json:"protoService"  neo4j:"protoService"`
+	ProtoMethod   string `json:"protoMethod"   neo4j:"protoMethod"`
 	FilePath      string `json:"filePath"      neo4j:"filePath"`
 	Line          int    `json:"line"          neo4j:"line"`
 }

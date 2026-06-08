@@ -172,9 +172,15 @@ func (d *RPCCallDetector) processAssignment(assign *ast.AssignStmt) {
 	// Stored with "Client" suffix so the existing method-call detection in processCallExpr works.
 	if pkgIdent, ok := sel.X.(*ast.Ident); ok {
 		if pkgIdent.Name == "grpcclient" && strings.HasPrefix(funcName, "Get") && strings.HasSuffix(funcName, "Service") {
-			svcName := strings.TrimPrefix(funcName, "Get") // "AccountService"
+			svcName := strings.TrimPrefix(funcName, "Get") // "BalanceService"
 			d.varTypeMap[lhsIdent.Name] = svcName + "Client"
-			d.varPkgMap[lhsIdent.Name] = "grpcclient"
+			// Store the bare lowercase service name (not "grpcclient") so resolveTargetServiceFull
+			// can match it against Service nodes. e.g. "GetBalanceService" → "balance".
+			bareName := strings.TrimSuffix(svcName, "Service")
+			if bareName == "" {
+				bareName = svcName
+			}
+			d.varPkgMap[lhsIdent.Name] = strings.ToLower(bareName)
 			return
 		}
 	}
@@ -227,11 +233,23 @@ func (d *RPCCallDetector) processCallExpr(
 	targetMethod := fmt.Sprintf("%s.%s", serviceName, methodName)
 	nodeKey := fmt.Sprintf("grpccall:%s:%s:%s:%d", d.serviceName, filePath, targetMethod, line)
 
+	// Derive target service name: protoPackage now stores the bare service name (e.g. "balance")
+	// set in processAssignment for the grpcclient pattern. Fall back to stripping "Service" suffix
+	// from the proto service name (e.g. "BalanceService" → "balance").
+	targetServiceName := protoPackage
+	if targetServiceName == "" || targetServiceName == "grpcclient" {
+		bare := strings.TrimSuffix(serviceName, "Service")
+		if bare == "" {
+			bare = serviceName
+		}
+		targetServiceName = strings.ToLower(bare)
+	}
+
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
 		"nodeKey":       nodeKey,
 		"callerService": d.serviceName,
-		"targetService": "",
+		"targetService": targetServiceName,
 		"targetMethod":  targetMethod,
 		"protoPackage":  protoPackage,
 		"protoService":  serviceName,

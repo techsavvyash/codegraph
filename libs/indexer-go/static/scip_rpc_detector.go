@@ -263,18 +263,26 @@ func (d *SCIPRPCDetector) findEnclosingFunction(ctx context.Context, filePath st
 
 // writeGRPCCallNode creates a GRPCCall node and its CALLS_API / CALLS_SERVICE edges.
 func (d *SCIPRPCDetector) writeGRPCCallNode(ctx context.Context, ref scipCallRef, callerID string) error {
-	targetService, methodName := parseGRPCSymbol(ref.symbol, ref.displayName)
+	protoService, methodName := parseGRPCSymbol(ref.symbol, ref.displayName)
 
 	nodeKey := fmt.Sprintf("grpccall:scip:%s:%s:%s.%s:%d",
-		d.serviceName, ref.filePath, targetService, methodName, ref.line)
+		d.serviceName, ref.filePath, protoService, methodName, ref.line)
+
+	// Derive bare target service name from protoService: "BalanceService" → "balance".
+	targetServiceName := strings.ToLower(strings.TrimSuffix(protoService, "Service"))
+	if targetServiceName == "" {
+		targetServiceName = strings.ToLower(protoService)
+	}
 
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
 		"nodeKey":       nodeKey,
 		"callerService": d.serviceName,
-		"targetService": "",
-		"targetMethod":  targetService + "." + methodName,
+		"targetService": targetServiceName,
+		"targetMethod":  protoService + "." + methodName,
 		"protoPackage":  extractProtoPackage(ref.symbol),
+		"protoService":  protoService,
+		"protoMethod":   methodName,
 		"filePath":      ref.filePath,
 		"line":          ref.line,
 		"createdAt":     time.Now().UTC().Unix(),
@@ -285,8 +293,8 @@ func (d *SCIPRPCDetector) writeGRPCCallNode(ctx context.Context, ref scipCallRef
 	if d.callBuffer != nil {
 		d.callBuffer.addGRPCCall(nodeKey, setProps)
 		d.callBuffer.addCallsAPIEdge(callerID, nodeKey, map[string]any{"line": ref.line})
-		if targetService != "" {
-			targetSvcID := d.resolveSCIPTargetService(ctx, targetService)
+		if protoService != "" {
+			targetSvcID := d.resolveSCIPTargetService(ctx, protoService)
 			if targetSvcID != "" {
 				d.callBuffer.addCallsServiceEdge(nodeKey, targetSvcID, map[string]any{"protocol": "grpc"})
 			}
@@ -305,8 +313,8 @@ func (d *SCIPRPCDetector) writeGRPCCallNode(ctx context.Context, ref scipCallRef
 		log.Printf("Warning: SCIP gRPC CALLS_API: %v", err)
 	}
 
-	if targetService != "" {
-		targetSvcID := d.resolveSCIPTargetService(ctx, targetService)
+	if protoService != "" {
+		targetSvcID := d.resolveSCIPTargetService(ctx, protoService)
 		if targetSvcID != "" {
 			if _, err := d.client.MergeRelationship(ctx, grpcCallID, targetSvcID,
 				string(models.CallsServiceRel), map[string]any{}, map[string]any{"protocol": "grpc"},

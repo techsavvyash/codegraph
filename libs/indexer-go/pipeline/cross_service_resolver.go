@@ -45,13 +45,21 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 		log.Printf("[CrossServiceResolver] gRPC resolution error: %v", err)
 	}
 
+	// Second pass: link GRPCCall nodes that have no CALLS_SERVICE edge yet by matching
+	// protoService+protoMethod against handler receiverType across all indexed services.
+	unlinkedCount, err := r.resolveGRPCUnlinked(ctx)
+	if err != nil {
+		log.Printf("[CrossServiceResolver] gRPC unlinked resolution error: %v", err)
+	}
+
 	httpCount, err := r.resolveHTTP(ctx)
 	if err != nil {
 		log.Printf("[CrossServiceResolver] HTTP resolution error: %v", err)
 	}
 
-	total := grpcCount + httpCount
-	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (%d gRPC, %d HTTP)", total, grpcCount, httpCount)
+	total := grpcCount + unlinkedCount + httpCount
+	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (%d gRPC-linked, %d gRPC-unlinked, %d HTTP)",
+		total, grpcCount, unlinkedCount, httpCount)
 	return total, nil
 }
 
@@ -153,6 +161,91 @@ func (r *CrossServiceHandlerResolver) resolveGRPC(ctx context.Context) (int, err
 			continue
 		}
 
+		if err := r.writeResolvesToEdge(ctx, gcId, fId, confidence, resolutionMethod); err != nil {
+			log.Printf("[CrossServiceResolver] RESOLVES_TO write failed (%s → %s): %v", gcId, fId, err)
+			continue
+		}
+		written++
+	}
+	return written, nil
+}
+
+// resolveGRPCUnlinked handles GRPCCall nodes that have no CALLS_SERVICE edge yet.
+// It searches all indexed services for a handler whose receiverType matches
+// protoService+"Server" and whose name matches protoMethod, then writes both
+// CALLS_SERVICE (GRPCCall→Service) and RESOLVES_TO (GRPCCall→Method) edges.
+func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (int, error) {
+	// Fetch GRPCCall nodes with protoService set but no CALLS_SERVICE edge yet.
+	callsQuery := `
+		MATCH (gc:GRPCCall)
+		WHERE gc.protoService IS NOT NULL AND gc.protoService <> ''
+		  AND gc.protoMethod  IS NOT NULL AND gc.protoMethod  <> ''
+		  AND NOT (gc)-[:CALLS_SERVICE]->()
+		RETURN elementId(gc) AS gcId,
+		       gc.protoService AS protoService,
+		       gc.protoMethod  AS protoMethod
+	`
+	rows, err := r.client.ExecuteQuery(ctx, callsQuery, map[string]any{})
+	if err != nil {
+		return 0, fmt.Errorf("resolveGRPCUnlinked: fetch unlinked: %w", err)
+	}
+
+	written := 0
+	for _, row := range rows {
+		rm := row.AsMap()
+		gcId := getString(rm, "gcId")
+		protoService := getString(rm, "protoService")
+		protoMethod := getString(rm, "protoMethod")
+
+		if gcId == "" || protoService == "" || protoMethod == "" {
+			continue
+		}
+
+		// Search all services for a method whose receiverType = protoService+"Server"
+		// and whose name = protoMethod. This is the canonical gRPC server handler signature.
+		protoServerType := protoService + "Server"
+		handlerQuery := `
+			MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
+			WHERE (f:Function OR f:Method)
+			  AND f.name = $methodName
+			  AND f.receiverType = $protoServerType
+			RETURN elementId(svc) AS svcId, elementId(f) AS fId, f.nodeKey AS nodeKey
+			ORDER BY f.nodeKey ASC
+			LIMIT 3
+		`
+		handlers, err := r.client.ExecuteQuery(ctx, handlerQuery, map[string]any{
+			"methodName":      protoMethod,
+			"protoServerType": protoServerType,
+		})
+		if err != nil || len(handlers) == 0 {
+			continue
+		}
+
+		best := handlers[0].AsMap()
+		svcId := getString(best, "svcId")
+		fId := getString(best, "fId")
+		if svcId == "" || fId == "" {
+			continue
+		}
+
+		// Write CALLS_SERVICE: GRPCCall → Service
+		if _, err := r.client.MergeRelationship(ctx,
+			gcId, svcId,
+			string(models.CallsServiceRel),
+			map[string]any{},
+			map[string]any{"protocol": "grpc", "resolved": true},
+		); err != nil {
+			log.Printf("[CrossServiceResolver] CALLS_SERVICE write failed (%s → %s): %v", gcId, svcId, err)
+			continue
+		}
+
+		// Write RESOLVES_TO: GRPCCall → handler Method
+		confidence := 1.0
+		resolutionMethod := "proto"
+		if len(handlers) > 1 {
+			confidence = 0.6
+			resolutionMethod = "heuristic"
+		}
 		if err := r.writeResolvesToEdge(ctx, gcId, fId, confidence, resolutionMethod); err != nil {
 			log.Printf("[CrossServiceResolver] RESOLVES_TO write failed (%s → %s): %v", gcId, fId, err)
 			continue
