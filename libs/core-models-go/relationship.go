@@ -20,8 +20,7 @@ const (
 	ImplementsRel   RelationshipType = "IMPLEMENTS"
 
 	// API Relationships
-	ExposesAPIRel RelationshipType = "EXPOSES_API"
-	CallsAPIRel   RelationshipType = "CALLS_API"
+	CallsAPIRel RelationshipType = "CALLS_API"
 
 	// Service Relationships
 	DependsOnRel     RelationshipType = "DEPENDS_ON"
@@ -44,7 +43,6 @@ const (
 
 	// Control-flow reification relationships (Change #2)
 	UnderControlFlowRel RelationshipType = "UNDER_CONTROL_FLOW"
-	HasCallEdgeRel      RelationshipType = "HAS_CALL_EDGE"
 
 	// Concurrent / transactional scope reification (Change #3)
 	InParallelWithRel RelationshipType = "IN_PARALLEL_WITH"
@@ -138,11 +136,6 @@ type ImplementsRelationship struct {
 	SubgraphSize     int     `json:"subgraphSize" neo4j:"subgraphSize"`         // Number of functions in implementing subgraph
 }
 
-// ExposesAPIRelationship connects code handlers to API endpoints
-type ExposesAPIRelationship struct {
-	BaseRelationship
-}
-
 // CallsAPIRelationship represents API calls between services
 type CallsAPIRelationship struct {
 	BaseRelationship
@@ -186,10 +179,6 @@ type UnderControlFlowRelationship struct {
 	BranchDepth int `json:"branchDepth" neo4j:"branchDepth"`
 }
 
-// HasCallEdgeRelationship connects a Function/Method to a reified CallEdge node for conditional calls.
-type HasCallEdgeRelationship struct {
-	BaseRelationship
-}
 
 // InParallelWithRelationship connects a CallEdge reified node to its enclosing ConcurrentScope.
 type InParallelWithRelationship struct {
@@ -266,8 +255,6 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &InheritsFromRelationship{BaseRelationship: base}
 	case ImplementsRel:
 		return &ImplementsRelationship{BaseRelationship: base}
-	case ExposesAPIRel:
-		return &ExposesAPIRelationship{BaseRelationship: base}
 	case CallsAPIRel:
 		return &CallsAPIRelationship{BaseRelationship: base}
 	case CallsServiceRel:
@@ -282,8 +269,6 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &CallsDBRelationship{BaseRelationship: base}
 	case UnderControlFlowRel:
 		return &UnderControlFlowRelationship{BaseRelationship: base}
-	case HasCallEdgeRel:
-		return &HasCallEdgeRelationship{BaseRelationship: base}
 	case InParallelWithRel:
 		return &InParallelWithRelationship{BaseRelationship: base}
 	case InTxRel:

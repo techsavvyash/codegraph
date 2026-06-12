@@ -403,9 +403,7 @@ func (g *ContextGenerator) GenerateDocstringSuggestionsForScope(ctx context.Cont
 		OPTIONAL MATCH (n)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
-		OPTIONAL MATCH (route:APIRoute)<-[:EXPOSES_API]-(n)
-		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
-		WITH n, count(DISTINCT caller) AS callerCount, count(DISTINCT route) AS apiExposureCount,
+		WITH n, count(DISTINCT caller) AS callerCount, 0 AS apiExposureCount,
 		     CASE
 		       WHEN toLower(coalesce(n.name, '')) CONTAINS 'handler' OR toLower(coalesce(n.name, '')) CONTAINS 'controller' THEN 18
 		       WHEN toLower(coalesce(n.name, '')) CONTAINS 'service' THEN 12
@@ -478,7 +476,7 @@ func (g *ContextGenerator) GenerateFlowSummariesForScope(ctx context.Context) (i
 		    MATCH (:GeneratedDoc {type: $docType, sourceKey: f.nodeKey})
 		  }
 		OPTIONAL MATCH (f)-[:HAS_STEP]->(step)
-		WHERE step:Function OR step:Method OR step:APIRoute
+		WHERE step:Function OR step:Method
 		WITH f, count(step) AS stepCount,
 		     CASE WHEN toLower(coalesce(f.name, '')) CONTAINS '/api/' OR toLower(coalesce(f.name, '')) CONTAINS 'http' THEN 25 ELSE 0 END AS apiSignal
 		RETURN f.nodeKey AS nodeKey, f.name AS name, f.flowType AS flowType,
@@ -716,7 +714,7 @@ func (g *ContextGenerator) loadRelatedEvidence(ctx context.Context, sourceKey st
 		WHERE nbr.nodeKey IS NOT NULL
 		  AND nbr.nodeKey <> $sourceKey
 		  AND (nbr.scopeId = $scopeId OR nbr.scopeId = 'main')
-		  AND (nbr:File OR nbr:Function OR nbr:Method OR nbr:Flow OR nbr:APIRoute OR nbr:DocumentChunk OR nbr:Service OR nbr:PullRequest)
+		  AND (nbr:File OR nbr:Function OR nbr:Method OR nbr:Flow OR nbr:DocumentChunk OR nbr:Service OR nbr:PullRequest)
 		WITH nbr, count(r) AS edgeWeight
 		RETURN nbr.nodeKey AS nodeKey,
 		       labels(nbr)[0] AS nodeType,

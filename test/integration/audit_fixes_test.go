@@ -509,46 +509,19 @@ func TestP3c_GenerateFromAPIEndpoints_ScopeFilter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Build: APIRoute -> (EXPOSES_API) <- handler:Function -> (CALLS) -> callee:Function
+	// Build: isRPCHandler:Function -> (CALLS) -> callee:Function
 	// Main-scope handler + main-scope callee.
-	routeKey := prefix + "api:GET:/users"
-	_, err := client.MergeNode(ctx, []string{"APIRoute"},
-		map[string]any{"nodeKey": routeKey, "scopeId": "main"},
-		map[string]any{
-			"nodeKey": routeKey, "method": "GET", "path": "/users",
-			"scope": "main", "scopeId": "main",
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	handlerKey := prefix + "func:handler.go#GetUsers(...)"
-	handlerID, err := client.MergeNode(ctx, []string{"Function"},
+	_, err := client.MergeNode(ctx, []string{"Function"},
 		map[string]any{"nodeKey": handlerKey, "scopeId": "main"},
 		map[string]any{
 			"nodeKey": handlerKey, "name": "GetUsers",
-			"scope": "main", "scopeId": "main",
+			"scope": "main", "scopeId": "main", "isRPCHandler": true,
 		})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// EXPOSES_API: handler -> route (the query matches route<-[:EXPOSES_API]-handler)
-	_, err = client.CreateRelationship(ctx, handlerID, routeKey, "EXPOSES_API", nil)
-	if err != nil {
-		// CreateRelationship expects elementId, not nodeKey. We need to get the route elementId.
-		// Let's use Cypher directly for this.
-	}
-
-	// Use Cypher to create the EXPOSES_API relationship by nodeKey.
-	_, err = client.ExecuteQuery(ctx, `
-		MATCH (h:Function {nodeKey: $handlerKey, scopeId: 'main'})
-		MATCH (r:APIRoute {nodeKey: $routeKey, scopeId: 'main'})
-		MERGE (h)-[:EXPOSES_API]->(r)
-	`, map[string]any{"handlerKey": handlerKey, "routeKey": routeKey})
-	if err != nil {
-		t.Fatalf("EXPOSES_API creation failed: %v", err)
-	}
+	routeKey := handlerKey // used below in step assertions
 
 	// Main-scope callee — should be included in flow.
 	calleeKey := prefix + "func:repo.go#FindAll(...)"
@@ -641,34 +614,14 @@ func TestP3c_HAS_STEP_ScopeProps(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Build minimal graph: APIRoute + handler Function.
-	routeKey := prefix + "api:GET:/items"
-	_, err := client.MergeNode(ctx, []string{"APIRoute"},
-		map[string]any{"nodeKey": routeKey, "scopeId": "main"},
-		map[string]any{
-			"nodeKey": routeKey, "method": "GET", "path": "/items",
-			"scope": "main", "scopeId": "main",
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	// Build minimal graph: isRPCHandler Function.
 	handlerKey := prefix + "func:items.go#ListItems(...)"
-	_, err = client.MergeNode(ctx, []string{"Function"},
+	_, err := client.MergeNode(ctx, []string{"Function"},
 		map[string]any{"nodeKey": handlerKey, "scopeId": "main"},
 		map[string]any{
 			"nodeKey": handlerKey, "name": "ListItems",
-			"scope": "main", "scopeId": "main",
+			"scope": "main", "scopeId": "main", "isRPCHandler": true,
 		})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.ExecuteQuery(ctx, `
-		MATCH (h:Function {nodeKey: $hKey, scopeId: 'main'})
-		MATCH (r:APIRoute {nodeKey: $rKey, scopeId: 'main'})
-		MERGE (h)-[:EXPOSES_API]->(r)
-	`, map[string]any{"hKey": handlerKey, "rKey": routeKey})
 	if err != nil {
 		t.Fatal(err)
 	}

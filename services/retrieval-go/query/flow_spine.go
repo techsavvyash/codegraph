@@ -50,74 +50,54 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 		maxDepth = 2
 	}
 
-	// Find API endpoints and their handler functions.
+	// APIRoute nodes no longer exist — flow generation via structural entrypoints.
 	cypher := `
-		MATCH (route:APIRoute)
-		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
-		OPTIONAL MATCH (route)<-[:EXPOSES_API]-(handler)
-		WHERE handler:Function OR handler:Method
-		RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
-		       handler.nodeKey AS handlerKey, handler.name AS handlerName,
-		       labels(handler) AS handlerLabels`
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isRPCHandler, false) = true
+		RETURN fn.nodeKey AS handlerKey, fn.name AS handlerName, labels(fn) AS handlerLabels`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{"scopeId": g.scopeCtx.ScopeID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query API endpoints: %w", err)
+		return nil, fmt.Errorf("failed to query entry points: %w", err)
 	}
 
 	var results []FlowSpineResult
 	for _, r := range records {
 		m := r.AsMap()
-		routeKey := strVal(m, "routeKey")
-		method := strVal(m, "method")
-		path := strVal(m, "path")
 		handlerKey := strVal(m, "handlerKey")
 		handlerName := strVal(m, "handlerName")
-
-		if routeKey == "" {
+		if handlerKey == "" {
 			continue
 		}
 
-		flowName := fmt.Sprintf("%s %s", method, path)
-		flowNodeKey := models.FlowNodeKey("api", routeKey)
-
-		steps := []FlowStep{
-			{NodeKey: routeKey, Name: flowName, Label: "APIRoute", Order: 0},
-		}
-
-		// If there's a handler, traverse its call graph.
-		if handlerKey != "" {
-			handlerLabel := "Function"
-			if labels, ok := m["handlerLabels"].([]any); ok {
-				for _, l := range labels {
-					if s, ok := l.(string); ok && s == "Method" {
-						handlerLabel = "Method"
-						break
-					}
+		flowNodeKey := models.FlowNodeKey("api", handlerKey)
+		handlerLabel := "Function"
+		if labels, ok := m["handlerLabels"].([]any); ok {
+			for _, l := range labels {
+				if s, ok := l.(string); ok && s == "Method" {
+					handlerLabel = "Method"
+					break
 				}
 			}
-			steps = append(steps, FlowStep{
-				NodeKey: handlerKey, Name: handlerName, Label: handlerLabel, Order: 1,
-			})
-
-			// Traverse CALLS edges from handler.
-			callees, err := g.traceCallees(ctx, handlerKey, maxDepth-1, 2)
-			if err != nil {
-				fmt.Printf("Warning: failed to trace callees for %s: %v\n", handlerKey, err)
-			} else {
-				steps = append(steps, callees...)
-			}
 		}
 
-		// Persist the Flow node and HAS_STEP edges.
-		if err := g.persistFlow(ctx, flowNodeKey, flowName, "api", routeKey, maxDepth, steps); err != nil {
-			fmt.Printf("Warning: failed to persist flow %s: %v\n", flowName, err)
+		steps := []FlowStep{{NodeKey: handlerKey, Name: handlerName, Label: handlerLabel, Order: 0}}
+		callees, err := g.traceCallees(ctx, handlerKey, maxDepth-1, 1)
+		if err != nil {
+			fmt.Printf("Warning: failed to trace callees for %s: %v\n", handlerKey, err)
+		} else {
+			steps = append(steps, callees...)
+		}
+
+		if err := g.persistFlow(ctx, flowNodeKey, handlerName, "api", handlerKey, maxDepth, steps); err != nil {
+			fmt.Printf("Warning: failed to persist flow %s: %v\n", handlerName, err)
 			continue
 		}
-
 		results = append(results, FlowSpineResult{
 			FlowNodeKey: flowNodeKey,
-			FlowName:    flowName,
+			FlowName:    handlerName,
 			FlowType:    "api",
 			Steps:       steps,
 		})
@@ -204,7 +184,7 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 	for _, step := range steps {
 		cypher := `
 			MATCH (target {nodeKey: $targetKey})
-			WHERE (target:Function OR target:Method OR target:APIRoute OR target:Service)
+			WHERE (target:Function OR target:Method OR target:Service)
 			  AND (target.scopeId = $scopeId OR target.scopeId = 'main')
 			WITH target LIMIT 1
 			MATCH (flow:Flow {nodeKey: $flowKey, scopeId: $scopeId})
@@ -271,7 +251,7 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		if labels, ok := m["stepLabels"].([]any); ok {
 			for _, l := range labels {
 				if s, ok := l.(string); ok {
-					if s == "Method" || s == "APIRoute" || s == "Service" {
+					if s == "Method" || s == "Service" {
 						stepLabel = s
 						break
 					}

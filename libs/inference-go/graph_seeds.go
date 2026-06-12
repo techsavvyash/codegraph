@@ -14,15 +14,13 @@ import (
 type GraphSeedType string
 
 const (
-	GraphSeedAPIExposed    GraphSeedType = "api_exposed"     // Tier 1: EXPOSES_API edge
-	GraphSeedInterfaceImpl GraphSeedType = "interface_impl"  // Tier 2: IMPLEMENTS with inDegree=0
-	GraphSeedTopoRoot      GraphSeedType = "topological_root" // Tier 3: inDegree=0, outDegree>0, exported
-	GraphSeedCentrality    GraphSeedType = "centrality_entry" // Tier 4: high betweenness, no higher-centrality caller
+	GraphSeedInterfaceImpl GraphSeedType = "interface_impl"   // Tier 1: IMPLEMENTS with inDegree=0
+	GraphSeedTopoRoot      GraphSeedType = "topological_root" // Tier 2: inDegree=0, outDegree>0, exported
+	GraphSeedCentrality    GraphSeedType = "centrality_entry" // Tier 3: high betweenness, no higher-centrality caller
 )
 
 // graphSeedTierPriority maps seed types to their base priority.
 var graphSeedTierPriority = map[GraphSeedType]int{
-	GraphSeedAPIExposed:    100,
 	GraphSeedInterfaceImpl: 85,
 	GraphSeedTopoRoot:      70,
 	GraphSeedCentrality:    60,
@@ -75,19 +73,19 @@ func (f *GraphSeedFinder) SetBudget(budget TraversalBudget) {
 func (f *GraphSeedFinder) FindSeeds(ctx context.Context) ([]GraphSeed, error) {
 	seedMap := make(map[string]GraphSeed) // nodeKey -> best seed
 
-	// Tier 1: API-exposed handlers
-	tier1, err := f.findAPIExposedSeeds(ctx)
+	// Tier 1: Interface implementations with no callers
+	tier1, err := f.findInterfaceImplSeeds(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("tier 1 (api_exposed): %w", err)
+		return nil, fmt.Errorf("tier 1 (interface_impl): %w", err)
 	}
 	for _, s := range tier1 {
 		seedMap[s.NodeKey] = s
 	}
 
-	// Tier 2: Interface implementations with no callers
-	tier2, err := f.findInterfaceImplSeeds(ctx)
+	// Tier 2: Topological roots
+	tier2, err := f.findTopologicalRootSeeds(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("tier 2 (interface_impl): %w", err)
+		return nil, fmt.Errorf("tier 2 (topological_root): %w", err)
 	}
 	for _, s := range tier2 {
 		if existing, ok := seedMap[s.NodeKey]; !ok || s.Tier < existing.Tier {
@@ -95,24 +93,13 @@ func (f *GraphSeedFinder) FindSeeds(ctx context.Context) ([]GraphSeed, error) {
 		}
 	}
 
-	// Tier 3: Topological roots
-	tier3, err := f.findTopologicalRootSeeds(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("tier 3 (topological_root): %w", err)
-	}
-	for _, s := range tier3 {
-		if existing, ok := seedMap[s.NodeKey]; !ok || s.Tier < existing.Tier {
-			seedMap[s.NodeKey] = s
-		}
-	}
-
-	// Tier 4: Centrality-based entries
-	tier4, err := f.findCentralitySeeds(ctx)
+	// Tier 3: Centrality-based entries
+	tier3, err := f.findCentralitySeeds(ctx)
 	if err != nil {
 		// Non-fatal: centrality data may not exist if GDS wasn't run.
-		fmt.Printf("Warning: tier 4 (centrality) query failed: %v\n", err)
+		fmt.Printf("Warning: tier 3 (centrality) query failed: %v\n", err)
 	} else {
-		for _, s := range tier4 {
+		for _, s := range tier3 {
 			if existing, ok := seedMap[s.NodeKey]; !ok || s.Tier < existing.Tier {
 				seedMap[s.NodeKey] = s
 			}
@@ -133,68 +120,6 @@ func (f *GraphSeedFinder) FindSeeds(ctx context.Context) ([]GraphSeed, error) {
 		seeds = seeds[:f.budget.MaxSteps]
 	}
 
-	return seeds, nil
-}
-
-// findAPIExposedSeeds returns functions/methods that are connected to APIRoute
-// nodes via EXPOSES_API edges. These are the highest-confidence entry points.
-// Sub-priority within Tier 1 is based on detection confidence:
-//   - Both external-params + cross-pkg: priority 100
-//   - External-params only: priority 95
-//   - Cross-pkg only: priority 90
-//   - Legacy framework-detected: priority 85
-func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed, error) {
-	cypher := `
-		MATCH (fn)-[:EXPOSES_API]->(route:APIRoute)
-		WHERE (fn:Function OR fn:Method)
-		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
-		  AND (route.scopeId = $scopeId OR route.scopeId = 'main')
-		  AND coalesce(fn.isTestFunction, false) = false
-		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
-		       coalesce(fn.hasExternalParams, false) AS hasExternal,
-		       coalesce(fn.isCrossPkgTarget, false) AS isCrossPkg,
-		       coalesce(route.detectionSource, '') AS detectionSource
-	`
-
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var seeds []GraphSeed
-	for _, r := range records {
-		m := r.AsMap()
-		nodeKey := strValMap(m, "nodeKey")
-		name := strValMap(m, "name")
-		if nodeKey == "" || name == "" {
-			continue
-		}
-
-		hasExternal, _ := m["hasExternal"].(bool)
-		isCrossPkg, _ := m["isCrossPkg"].(bool)
-
-		// Sub-priority based on detection confidence.
-		priority := 85 // legacy framework-detected fallback
-		switch {
-		case hasExternal && isCrossPkg:
-			priority = 100
-		case hasExternal:
-			priority = 95
-		case isCrossPkg:
-			priority = 90
-		}
-
-		seeds = append(seeds, GraphSeed{
-			NodeKey:  nodeKey,
-			Name:     name,
-			NodeType: labelType(m),
-			SeedType: GraphSeedAPIExposed,
-			Priority: priority,
-			Tier:     1,
-		})
-	}
 	return seeds, nil
 }
 

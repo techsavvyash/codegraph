@@ -18,7 +18,6 @@ const (
 	VariableNode  NodeType = "Variable"
 	ParameterNode NodeType = "Parameter"
 	SymbolNode    NodeType = "Symbol"
-	APIRouteNode   NodeType = "APIRoute"
 	GRPCCallNode   NodeType = "GRPCCall"
 	HTTPCallNode   NodeType = "HTTPCall"
 	OutboxCallNode NodeType = "OutboxCall"
@@ -26,7 +25,6 @@ const (
 	CommentNode          NodeType = "Comment"
 	FlowNode             NodeType = "Flow"
 	ControlFlowScopeNode NodeType = "ControlFlowScope"
-	CallEdgeNode         NodeType = "CallEdge"
 	ConcurrentScopeNode  NodeType = "ConcurrentScope"
 	TxScopeNode          NodeType = "TxScope"
 	ProtoContractNode    NodeType = "ProtoContract"
@@ -177,17 +175,6 @@ type Symbol struct {
 	Kind          string `json:"kind" neo4j:"kind"`
 	DisplayName   string `json:"displayName" neo4j:"displayName"`
 	Documentation string `json:"documentation" neo4j:"documentation"`
-}
-
-// APIRoute represents an exposed API endpoint
-type APIRoute struct {
-	BaseNode
-	Path         string `json:"path" neo4j:"path"`
-	Method       string `json:"method" neo4j:"method"`
-	Protocol     string `json:"protocol" neo4j:"protocol"`
-	Description  string `json:"description" neo4j:"description"`
-	IsDeprecated bool   `json:"isDeprecated" neo4j:"isDeprecated"`
-	Version      string `json:"version" neo4j:"version"`
 }
 
 // GRPCCall represents a gRPC outbound call site within a function body.
@@ -343,22 +330,6 @@ type ControlFlowScope struct {
 	ParentScopeKey string `json:"parentScopeKey" neo4j:"parentScopeKey"` // nodeKey of enclosing scope, empty for top-level
 }
 
-// CallEdge is the reified form of a CALLS relationship for calls that are nested inside
-// a ControlFlowScope, ConcurrentScope, or TxScope. Linked to its enclosing scopes via
-// UNDER_CONTROL_FLOW, IN_PARALLEL_WITH, and IN_TX respectively.
-type CallEdge struct {
-	BaseNode
-	CallerID       string   `json:"callerID" neo4j:"callerID"`
-	CalleeID       string   `json:"calleeID" neo4j:"calleeID"`
-	FilePath       string   `json:"filePath" neo4j:"filePath"`
-	Line           int      `json:"line" neo4j:"line"`
-	TargetName     string   `json:"targetName" neo4j:"targetName"`
-	BranchDepth    int      `json:"branchDepth" neo4j:"branchDepth"`
-	OrderIndex     int      `json:"orderIndex,omitempty" neo4j:"orderIndex,omitempty"`
-	LiteralArgs    []string `json:"literalArgs,omitempty" neo4j:"literalArgs,omitempty"`
-	NearestComment string   `json:"nearestComment,omitempty" neo4j:"nearestComment,omitempty"`
-	ReceiverChain  []string `json:"receiverChain,omitempty" neo4j:"receiverChain,omitempty"`
-}
 
 // ConcurrentScope represents a `go func()`, `errgroup.Go` body, or similar concurrent
 // dispatch site. All calls whose source position falls inside its range execute in
@@ -448,10 +419,6 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		return &Symbol{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
-	case APIRouteNode:
-		return &APIRoute{
-			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
-		}
 	case GRPCCallNode:
 		return &GRPCCall{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
@@ -502,10 +469,6 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case ControlFlowScopeNode:
 		return &ControlFlowScope{
-			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
-		}
-	case CallEdgeNode:
-		return &CallEdge{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case ConcurrentScopeNode:

@@ -107,13 +107,6 @@ func TestFeatureNodeKey(t *testing.T) {
 	}
 }
 
-func TestAPIRouteNodeKey(t *testing.T) {
-	key := APIRouteNodeKey("GET", "/api/users")
-	if key != "api:GET:/api/users" {
-		t.Errorf("expected api:GET:/api/users, got %s", key)
-	}
-}
-
 func TestCommentNodeKey(t *testing.T) {
 	key := CommentNodeKey("pkg/models/node.go", 10)
 	if key != "comment:pkg/models/node.go:10" {
@@ -184,7 +177,6 @@ func TestNodeKeysAreUnique(t *testing.T) {
 		"parameter": ParameterNodeKey("pkg/neo4j/client.go", "MergeNode(...)", "ctx", 0),
 		"document":  DocumentNodeKey("docs/README.md"),
 		"feature":   FeatureNodeKey("SCIP Indexing"),
-		"api":       APIRouteNodeKey("GET", "/api/users"),
 		"sdkcall":   SDKCallNodeKey("go-http-client.Get"),
 		"comment":   CommentNodeKey("pkg/models/node.go", 10),
 		"reference": ReferenceNodeKey("pkg/models/node.go", 42, 5),
@@ -335,7 +327,6 @@ func TestAllNodeKeysDeterministicAcrossReindex(t *testing.T) {
 		{"DocumentNodeKey", func() string { return DocumentNodeKey("docs/x.md") }},
 		{"DocumentChunkNodeKey", func() string { return DocumentChunkNodeKey("doc:docs/x.md", 2) }},
 		{"FeatureNodeKey", func() string { return FeatureNodeKey("auth") }},
-		{"APIRouteNodeKey", func() string { return APIRouteNodeKey("POST", "/login") }},
 		{"CommentNodeKey", func() string { return CommentNodeKey("pkg/a.go", 7) }},
 		{"ReferenceNodeKey", func() string { return ReferenceNodeKey("pkg/a.go", 7, 3) }},
 		{"FlowNodeKey", func() string { return FlowNodeKey("api", "api:GET:/x") }},

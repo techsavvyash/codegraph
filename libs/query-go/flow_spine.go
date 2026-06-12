@@ -245,92 +245,8 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 		maxDepth = 2
 	}
 
-	// Find API endpoints and their handler functions.
-	cypher := fmt.Sprintf(`
-		MATCH (route:APIRoute)<-[:EXPOSES_API]-(handler)
-		WHERE (route.scopeId = $scopeId OR route.scopeId = 'main')
-                  AND (handler:Function OR handler:Method)
-                  AND (handler.scopeId = $scopeId OR handler.scopeId = 'main')
-                  %s
-                RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
-		       handler.nodeKey AS handlerKey, handler.name AS handlerName,
-                       labels(handler) AS handlerLabels`, serviceConstraintClause("handler"))
-
-	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(nil))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query API endpoints: %w", err)
-	}
-
-	var results []FlowSpineResult
-	for _, r := range records {
-		m := r.AsMap()
-		routeKey := strVal(m, "routeKey")
-		method := strVal(m, "method")
-		path := strVal(m, "path")
-		handlerKey := strVal(m, "handlerKey")
-		handlerName := strVal(m, "handlerName")
-
-		if routeKey == "" {
-			continue
-		}
-
-		flowName := fmt.Sprintf("%s %s", method, path)
-		flowNodeKey := models.FlowNodeKey("api", routeKey)
-
-		steps := []FlowStep{
-			{NodeKey: routeKey, Name: flowName, Label: "APIRoute", Order: 0},
-		}
-
-		// If there's a handler, traverse its call graph.
-		if handlerKey != "" {
-			handlerLabel := "Function"
-			if labels, ok := m["handlerLabels"].([]any); ok {
-				for _, l := range labels {
-					if s, ok := l.(string); ok && s == "Method" {
-						handlerLabel = "Method"
-						break
-					}
-				}
-			}
-			steps = append(steps, FlowStep{
-				NodeKey: handlerKey, Name: handlerName, Label: handlerLabel, Order: 1,
-			})
-
-			// Traverse CALLS edges from handler.
-			callees, err := g.traceCallees(ctx, handlerKey, maxDepth-1, 2)
-			if err != nil {
-				fmt.Printf("Warning: failed to trace callees for %s: %v\n", handlerKey, err)
-			} else {
-				steps = append(steps, callees...)
-			}
-		}
-
-		// Deduplicate and filter steps through the traversal budget.
-		steps = g.deduplicateSteps(steps)
-
-		// Persist the Flow node and HAS_STEP edges.
-		if err := g.persistFlow(ctx, flowNodeKey, flowName, "api", routeKey, maxDepth, steps); err != nil {
-			fmt.Printf("Warning: failed to persist flow %s: %v\n", flowName, err)
-			continue
-		}
-
-		results = append(results, FlowSpineResult{
-			FlowNodeKey: flowNodeKey,
-			FlowName:    flowName,
-			FlowType:    "api",
-			Steps:       steps,
-		})
-	}
-
-	if len(results) == 0 {
-		fallback, err := g.GenerateFromStructuralEntrypoints(ctx, maxDepth)
-		if err != nil {
-			return nil, err
-		}
-		return fallback, nil
-	}
-
-	return results, nil
+	// APIRoute nodes no longer exist — delegate directly to structural entrypoints.
+	return g.GenerateFromStructuralEntrypoints(ctx, maxDepth)
 }
 
 // GenerateFromStructuralEntrypoints builds flows from framework-agnostic entrypoint
@@ -355,15 +271,12 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
                 WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
-		OPTIONAL MATCH (fn)-[:EXPOSES_API]->(route:APIRoute)
-		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
 		WITH fn,
 		     count(DISTINCT caller) AS incomingCalls,
-		     count(DISTINCT callee) AS outgoingCalls,
-		     count(DISTINCT route) AS apiLinks
+		     count(DISTINCT callee) AS outgoingCalls
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.isExported, false) AS isExported, coalesce(fn.filePath, '') AS filePath,
-		       incomingCalls, outgoingCalls, apiLinks`
+		       incomingCalls, outgoingCalls, 0 AS apiLinks`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(nil))
 	if err != nil {
@@ -485,9 +398,7 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		fanout = 10
 	}
 
-	// LIMIT is applied before the OPTIONAL MATCHes so fanout capping is not
-	// affected by the join expansion. ORDER BY orderIndex replaces the old
-	// name-based ordering so callees are returned in source execution order.
+	// ORDER BY orderIndex returns callees in source execution order.
 	cypher := fmt.Sprintf(`
 		MATCH (caller {nodeKey: $nodeKey})-[ce:CALLS]->(callee)
 		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
@@ -496,19 +407,12 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
 		  AND NOT callee.nodeKey CONTAINS 'github.com/golang/go/src'
 		  %s
-		WITH caller, ce, callee
-		ORDER BY coalesce(ce.orderIndex, 99999) ASC, callee.name ASC, callee.nodeKey ASC
-		LIMIT %d
-		OPTIONAL MATCH (caller)-[:HAS_CALL_EDGE]->(ced:CallEdge)
-		WHERE ced.calleeID = elementId(callee)
-		OPTIONAL MATCH (ced)-[:UNDER_CONTROL_FLOW]->(cfs:ControlFlowScope)
-		OPTIONAL MATCH (ced)-[:IN_PARALLEL_WITH]->(csc:ConcurrentScope)
 		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels,
 		       coalesce(ce.orderIndex, 0) AS orderIndex,
 		       coalesce(ce.isParallel, false) AS isParallel,
-		       coalesce(ce.isInTx, false) AS isInTx,
-		       cfs.condition AS branchCondition,
-		       csc.nodeKey AS parallelGroupKey`,
+		       coalesce(ce.isInTx, false) AS isInTx
+		ORDER BY coalesce(ce.orderIndex, 99999) ASC, callee.name ASC, callee.nodeKey ASC
+		LIMIT %d`,
 		serviceConstraintClause("callee"), fanout)
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKey": nodeKey}))
@@ -544,34 +448,21 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 			continue
 		}
 
-		// Decode spine v2 enrichment fields from the CALLS edge and linked scopes.
 		stepIndex := 0
 		if v, ok := m["orderIndex"].(int64); ok {
 			stepIndex = int(v)
-		}
-		isParallel := false
-		if v, ok := m["isParallel"].(bool); ok {
-			isParallel = v
 		}
 		isInTx := false
 		if v, ok := m["isInTx"].(bool); ok {
 			isInTx = v
 		}
-		branchKey := strVal(m, "branchCondition")
-		parallelGroup := ""
-		if isParallel {
-			parallelGroup = strVal(m, "parallelGroupKey")
-		}
-
 		steps = append(steps, FlowStep{
-			NodeKey:       calleeKey,
-			Name:          calleeName,
-			Label:         calleeLabel,
-			Order:         order,
-			StepIndex:     stepIndex,
-			BranchKey:     branchKey,
-			ParallelGroup: parallelGroup,
-			InTx:          isInTx,
+			NodeKey:   calleeKey,
+			Name:      calleeName,
+			Label:     calleeLabel,
+			Order:     order,
+			StepIndex: stepIndex,
+			InTx:      isInTx,
 		})
 		order++
 
@@ -613,7 +504,7 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 	for _, step := range steps {
 		cypher := `
 			MATCH (target {nodeKey: $targetKey})
-			WHERE (target:Function OR target:Method OR target:APIRoute OR target:Service)
+			WHERE (target:Function OR target:Method OR target:Service)
 			  AND (target.scopeId = $scopeId OR target.scopeId = 'main')
 			WITH target LIMIT 1
 			MATCH (flow:Flow {nodeKey: $flowKey, scopeId: $scopeId})
@@ -700,7 +591,7 @@ func (g *FlowSpineGenerator) GetFlow(ctx context.Context, flowNodeKey string) (*
 		if labels, ok := m["stepLabels"].([]any); ok {
 			for _, l := range labels {
 				if s, ok := l.(string); ok {
-					if s == "Method" || s == "APIRoute" || s == "Service" {
+					if s == "Method" || s == "Service" {
 						stepLabel = s
 						break
 					}
@@ -789,28 +680,6 @@ func (g *FlowSpineGenerator) GenerateCrossServiceFlows(ctx context.Context, maxD
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cross-service query failed: %w", err)
-	}
-
-	// Also find API-mediated cross-service calls.
-	apiCypher := `
-		MATCH (caller)-[:CALLS_API]->(route:APIRoute)<-[:EXPOSES_API]-(handler)
-		MATCH (s1:Service)-[:CONTAINS*2..3]->(caller)
-		MATCH (s2:Service)-[:CONTAINS*2..3]->(handler)
-		WHERE s1 <> s2
-		  AND (s1.scopeId = $scopeId OR s1.scopeId = 'main')
-		  AND (s2.scopeId = $scopeId OR s2.scopeId = 'main')
-		RETURN caller.nodeKey AS callerKey, caller.name AS callerName, labels(caller) AS callerLabels,
-		       s1.name AS callerService,
-		       handler.nodeKey AS calleeKey, handler.name AS calleeName, labels(handler) AS calleeLabels,
-		       s2.name AS calleeService
-	`
-	apiRecords, err := g.client.ExecuteQuery(ctx, apiCypher, map[string]any{
-		"scopeId": g.scopeCtx.ScopeID,
-	})
-	if err != nil {
-		fmt.Printf("Warning: API cross-service query failed: %v\n", err)
-	} else {
-		records = append(records, apiRecords...)
 	}
 
 	// Deduplicate by caller->callee pair and build flows.

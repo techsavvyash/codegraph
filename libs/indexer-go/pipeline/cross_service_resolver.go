@@ -283,7 +283,7 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 }
 
 // resolveHTTP processes HTTPCall → CALLS_SERVICE → Service edges and writes
-// RESOLVES_TO edges to the handler Function that EXPOSES_API the matching APIRoute.
+// RESOLVES_TO edges to the handler Function that matches the target route path.
 func (r *CrossServiceHandlerResolver) resolveHTTP(ctx context.Context) (int, error) {
 	callsQuery := `
 		MATCH (hc:HTTPCall)-[:CALLS_SERVICE]->(svc:Service)
@@ -319,16 +319,16 @@ func (r *CrossServiceHandlerResolver) resolveHTTP(ctx context.Context) (int, err
 			httpMethod = "ANY"
 		}
 
-		// Find handler Functions that EXPOSES_API to a matching APIRoute in the target service.
+		// APIRoute nodes no longer exist — HTTP handler resolution via route path unavailable.
 		handlerQuery := `
-			MATCH (svc)-[:CONTAINS*1..5]->(f)-[:EXPOSES_API]->(ar:APIRoute)
+			MATCH (svc)-[:CONTAINS*1..5]->(f)
 			WHERE elementId(svc) = $svcId
 			  AND (f:Function OR f:Method)
-			  AND (toLower(ar.path) CONTAINS toLower($urlPath)
-			       OR toLower($urlPath) CONTAINS toLower(ar.path))
-			  AND ($httpMethod = 'ANY' OR ar.method = $httpMethod OR ar.method IS NULL)
-			RETURN elementId(f) AS fId, f.name AS fName, ar.path AS routePath
-			ORDER BY size(ar.path) DESC
+			  AND f.nodeKey IS NOT NULL
+			  AND (toLower(coalesce(f.name,'')) CONTAINS toLower($urlPath)
+			       OR toLower($urlPath) CONTAINS toLower(coalesce(f.name,'')))
+			RETURN elementId(f) AS fId, f.name AS fName, f.name AS routePath
+			ORDER BY size(coalesce(f.name,'')) DESC
 			LIMIT 5
 		`
 		handlers, err := r.client.ExecuteQuery(ctx, handlerQuery, map[string]any{

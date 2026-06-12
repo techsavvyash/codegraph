@@ -113,7 +113,7 @@ func (g *BehavioralSummaryGenerator) loadEnrichedSteps(ctx context.Context, flow
 		WHERE f.scopeId = $scopeId OR f.scopeId = 'main'
 		OPTIONAL MATCH (f)-[r:HAS_STEP]->(step)
 		WHERE (step.scopeId = $scopeId OR step.scopeId = 'main')
-		  AND (step:Function OR step:Method OR step:APIRoute)
+		  AND (step:Function OR step:Method)
 		OPTIONAL MATCH (step)-[:CALLS_API]->(grpc:GRPCCall)
 		  WHERE grpc.scopeId = $scopeId OR grpc.scopeId = 'main'
 		OPTIONAL MATCH (step)-[:CALLS_API]->(http:HTTPCall)
@@ -160,7 +160,7 @@ func (g *BehavioralSummaryGenerator) loadEnrichedSteps(ctx context.Context, flow
 		label := "Function"
 		if labels, ok := m["stepLabels"].([]any); ok {
 			for _, l := range labels {
-				if s, ok := l.(string); ok && (s == "Method" || s == "APIRoute") {
+				if s, ok := l.(string); ok && s == "Method" {
 					label = s
 					break
 				}

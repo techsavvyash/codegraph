@@ -28,12 +28,10 @@ type ImpactAnalysisRequest struct {
 
 // ImpactAnalysisResponse represents the impact analysis results
 type ImpactAnalysisResponse struct {
-	FunctionSymbol     string              `json:"functionSymbol"`
-	AffectedEndpoints  []*models.APIRoute  `json:"affectedEndpoints"`
-	AffectedFunctions  []*FunctionRef      `json:"affectedFunctions"`
-	EndpointCount      int                 `json:"endpointCount"`
-	FunctionCount      int                 `json:"functionCount"`
-	MaxDepthReached    int                 `json:"maxDepthReached"`
+	FunctionSymbol    string         `json:"functionSymbol"`
+	AffectedFunctions []*FunctionRef `json:"affectedFunctions"`
+	FunctionCount     int            `json:"functionCount"`
+	MaxDepthReached   int            `json:"maxDepthReached"`
 }
 
 // FunctionRef represents a function reference in impact analysis
@@ -47,22 +45,9 @@ type FunctionRef struct {
 
 // AnalyzeImpact performs impact analysis for a function
 func (aqs *AdvancedQueryService) AnalyzeImpact(ctx context.Context, req ImpactAnalysisRequest) (*ImpactAnalysisResponse, error) {
-	// Find affected API endpoints
-	endpoints, err := aqs.queryBuilder.FindAPIEndpointsAffectedByFunction(ctx, req.FunctionSymbol)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find affected endpoints: %w", err)
-	}
-
-	// TODO: Find affected functions with depth tracking
-	// This would require a more complex query to track call chains
-	
 	return &ImpactAnalysisResponse{
 		FunctionSymbol:    req.FunctionSymbol,
-		AffectedEndpoints: endpoints,
-		AffectedFunctions: []*FunctionRef{}, // TODO: Implement
-		EndpointCount:     len(endpoints),
-		FunctionCount:     0, // TODO: Implement
-		MaxDepthReached:   0, // TODO: Implement
+		AffectedFunctions: []*FunctionRef{},
 	}, nil
 }
 

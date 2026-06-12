@@ -26,7 +26,7 @@ var DefaultTraversalBudget = TraversalBudget{
 	MaxFanout: 10,
 	MaxSteps:  50,
 	AllowedNodeTypes: []string{
-		"Function", "Method", "APIRoute", "Service",
+		"Function", "Method", "Service",
 	},
 	BlockedPatterns: []string{
 		"log", "print", "debug", "trace",

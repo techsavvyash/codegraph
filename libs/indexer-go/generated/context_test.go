@@ -455,7 +455,7 @@ func TestGenerateAndVerify_VerifierFailsWithoutPolicy(t *testing.T) {
 		Expansions: []contracts.RetrievalCandidate{
 			{NodeKey: "func:b", NodeType: "Function"},
 			{NodeKey: "flow:a", NodeType: "Flow"},
-			{NodeKey: "api:get/users", NodeType: "APIRoute"},
+			{NodeKey: "func:handler.go#getUsers(...)", NodeType: "Function"},
 		},
 		Inferences: []contracts.InferenceResult{{SourceKey: "func:a", TargetKey: "func:b"}},
 		Template:   DocTypeFlowSummary,

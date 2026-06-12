@@ -146,18 +146,6 @@ func GetIndexes() []Index {
 			Properties: []string{"kind"},
 			Type:       "BTREE",
 		},
-		{
-			Name:       "api_route_path_idx",
-			NodeLabel:  "APIRoute",
-			Properties: []string{"path"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "api_route_method_idx",
-			NodeLabel:  "APIRoute",
-			Properties: []string{"method"},
-			Type:       "BTREE",
-		},
 		// Note: Full-text search requires Neo4j Enterprise
 		// Using regular BTREE indexes for basic search functionality
 		// (search_name_idx removed: duplicate of function_name_idx on Function.name)
@@ -238,12 +226,6 @@ func GetIndexes() []Index {
 		{
 			Name:       "parameter_nodekey_idx",
 			NodeLabel:  "Parameter",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "apiroute_nodekey_idx",
-			NodeLabel:  "APIRoute",
 			Properties: []string{"nodeKey"},
 			Type:       "BTREE",
 		},
@@ -562,13 +544,6 @@ func GetIndexes() []Index {
 			Properties: []string{"filePath"},
 			Type:       "BTREE",
 		},
-		// CallEdge indexes (Change #2 — control-flow reification)
-		{
-			Name:       "calledge_nodekey_idx",
-			NodeLabel:  "CallEdge",
-			Properties: []string{"nodeKey", "scopeId"},
-			Type:       "BTREE",
-		},
 		// ConcurrentScope indexes (Change #3 — concurrent + tx scope reification)
 		{
 			Name:       "concurrentscope_nodekey_idx",
@@ -601,13 +576,6 @@ func GetIndexes() []Index {
 			Name:       "grpccall_targetmethod_idx",
 			NodeLabel:  "GRPCCall",
 			Properties: []string{"targetMethod"},
-			Type:       "BTREE",
-		},
-		// APIRoute composite index accelerates path + method lookups during HTTP resolution.
-		{
-			Name:       "apiroute_path_method_idx",
-			NodeLabel:  "APIRoute",
-			Properties: []string{"path", "method"},
 			Type:       "BTREE",
 		},
 	}

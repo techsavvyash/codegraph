@@ -122,18 +122,6 @@ func GetIndexes() []Index {
 			Type:       "BTREE",
 		},
 		{
-			Name:       "api_route_path_idx",
-			NodeLabel:  "APIRoute",
-			Properties: []string{"path"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "api_route_method_idx",
-			NodeLabel:  "APIRoute",
-			Properties: []string{"method"},
-			Type:       "BTREE",
-		},
-		{
 			Name:       "document_title_idx",
 			NodeLabel:  "Document",
 			Properties: []string{"title"},
@@ -236,12 +224,6 @@ func GetIndexes() []Index {
 		{
 			Name:       "parameter_nodekey_idx",
 			NodeLabel:  "Parameter",
-			Properties: []string{"nodeKey"},
-			Type:       "BTREE",
-		},
-		{
-			Name:       "apiroute_nodekey_idx",
-			NodeLabel:  "APIRoute",
 			Properties: []string{"nodeKey"},
 			Type:       "BTREE",
 		},

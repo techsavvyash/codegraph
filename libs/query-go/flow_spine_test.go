@@ -28,22 +28,21 @@ func TestFlowSpineResult_Fields(t *testing.T) {
 		FlowName:    "GET /api/users",
 		FlowType:    "api",
 		Steps: []FlowStep{
-			{NodeKey: "api:GET:/api/users", Name: "GET /api/users", Label: "APIRoute", Order: 0},
-			{NodeKey: "func:pkg/handler.go#HandleUser(...)", Name: "HandleUser", Label: "Function", Order: 1},
+			{NodeKey: "func:pkg/handler.go#HandleUser(...)", Name: "HandleUser", Label: "Function", Order: 0},
 		},
 	}
 
 	if result.FlowType != "api" {
 		t.Errorf("expected FlowType 'api', got %s", result.FlowType)
 	}
-	if len(result.Steps) != 2 {
-		t.Errorf("expected 2 steps, got %d", len(result.Steps))
+	if len(result.Steps) != 1 {
+		t.Errorf("expected 1 step, got %d", len(result.Steps))
 	}
-	if result.Steps[0].Label != "APIRoute" {
-		t.Errorf("expected first step label 'APIRoute', got %s", result.Steps[0].Label)
+	if result.Steps[0].Label != "Function" {
+		t.Errorf("expected first step label 'Function', got %s", result.Steps[0].Label)
 	}
-	if result.Steps[1].Order != 1 {
-		t.Errorf("expected second step order 1, got %d", result.Steps[1].Order)
+	if result.Steps[0].Order != 0 {
+		t.Errorf("expected first step order 0, got %d", result.Steps[0].Order)
 	}
 }
 
@@ -126,9 +125,8 @@ func TestFlowStep_ScopeAwareFields(t *testing.T) {
 	// Cypher queries. This test verifies that the struct works correctly with
 	// the expected data shapes.
 	steps := []FlowStep{
-		{NodeKey: "api:GET:/users", Name: "GET /users", Label: "APIRoute", Order: 0},
-		{NodeKey: "func:handler.go#GetUsers(...)", Name: "GetUsers", Label: "Function", Order: 1},
-		{NodeKey: "method:repo.go#FindAll(...)", Name: "FindAll", Label: "Method", Order: 2},
+		{NodeKey: "func:handler.go#GetUsers(...)", Name: "GetUsers", Label: "Function", Order: 0},
+		{NodeKey: "method:repo.go#FindAll(...)", Name: "FindAll", Label: "Method", Order: 1},
 	}
 
 	for i, step := range steps {

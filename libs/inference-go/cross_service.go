@@ -74,35 +74,6 @@ RETURN caller.nodeKey AS callerKey, s1.name AS callerService,
 		})
 	}
 
-	// 2. API-mediated calls.
-	apiQuery := `
-MATCH (caller)-[:CALLS_API]->(route:APIRoute)<-[:EXPOSES_API]-(handler)
-MATCH (s1:Service)-[:CONTAINS*2..3]->(caller)
-MATCH (s2:Service)-[:CONTAINS*2..3]->(handler)
-WHERE s1 <> s2
-  AND (s1.scopeId = $scopeId OR s1.scopeId = 'main')
-  AND (s2.scopeId = $scopeId OR s2.scopeId = 'main')
-RETURN caller.nodeKey AS callerKey, s1.name AS callerService,
-       handler.nodeKey AS calleeKey, s2.name AS calleeService`
-
-	apiRecords, err := d.client.ExecuteQuery(ctx, apiQuery, params)
-	if err != nil {
-		return nil, fmt.Errorf("API cross-service query failed: %w", err)
-	}
-	for _, rec := range apiRecords {
-		callerKey, _ := rec.Get("callerKey")
-		callerService, _ := rec.Get("callerService")
-		calleeKey, _ := rec.Get("calleeKey")
-		calleeService, _ := rec.Get("calleeService")
-		boundaries = append(boundaries, CrossServiceBoundary{
-			CallerNodeKey: fmt.Sprintf("%v", callerKey),
-			CallerService: fmt.Sprintf("%v", callerService),
-			CalleeNodeKey: fmt.Sprintf("%v", calleeKey),
-			CalleeService: fmt.Sprintf("%v", calleeService),
-			BoundaryType:  "api_call",
-		})
-	}
-
 	// 3. Message queue boundaries (consumer side only).
 	mqQuery := `
 MATCH (fn)

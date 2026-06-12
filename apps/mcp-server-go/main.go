@@ -435,25 +435,6 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 			},
 		},
 		{
-			Name:        "codegraph_service_api_endpoints",
-			Description: "Get all API endpoints (EXPOSES_API) exposed by a service, including HTTP method, path, and framework",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"service_name": map[string]interface{}{
-						"type":        "string",
-						"description": "Name of the service to get API endpoints for",
-					},
-					"limit": map[string]interface{}{
-						"type":        "number",
-						"description": "Maximum number of endpoints to return (default: 50)",
-						"default":     50,
-					},
-				},
-				"required": []string{"service_name"},
-			},
-		},
-		{
 			Name:        "codegraph_service_api_calls",
 			Description: "Get all API calls (CALLS_API) made by a service to other services or external APIs",
 			InputSchema: map[string]interface{}{
@@ -748,8 +729,6 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleListServicesTool(ctx, toolCall.Arguments)
 	case "codegraph_service_dependencies":
 		response = s.handleServiceDependenciesTool(ctx, toolCall.Arguments)
-	case "codegraph_service_api_endpoints":
-		response = s.handleServiceAPIEndpointsTool(ctx, toolCall.Arguments)
 	case "codegraph_service_api_calls":
 		response = s.handleServiceAPICallsTool(ctx, toolCall.Arguments)
 	case "codegraph_cross_service_calls":
@@ -2204,60 +2183,6 @@ func (s *CodeGraphMCPServer) handleServiceDependenciesTool(ctx context.Context, 
 	}
 }
 
-// handleServiceAPIEndpointsTool gets API endpoints exposed by a service
-func (s *CodeGraphMCPServer) handleServiceAPIEndpointsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
-	serviceName, ok := args["service_name"].(string)
-	if !ok {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: "Error: service_name is required"}},
-			IsError: true,
-		}
-	}
-
-	query := `
-		MATCH (s:Service {name: $serviceName})-[:CONTAINS*]->(f:Function)-[e:EXPOSES_API]->(api:APIRoute)
-		RETURN f.name AS functionName, api.method AS method, api.endpoint AS endpoint,
-		       api.line AS line, f.file AS filePath
-		ORDER BY api.endpoint, api.method
-	`
-
-	params := map[string]interface{}{
-		"serviceName": serviceName,
-	}
-
-	result, err := s.client.ExecuteQuery(ctx, query, params)
-	if err != nil {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
-			IsError: true,
-		}
-	}
-
-	var output strings.Builder
-	output.WriteString(fmt.Sprintf("# API Endpoints for %s\n\n", serviceName))
-
-	if len(result) == 0 {
-		output.WriteString("No API endpoints found.\n")
-	} else {
-		output.WriteString("| Method | Endpoint | Function | File |\n")
-		output.WriteString("|--------|----------|----------|------|\n")
-		for _, record := range result {
-			recordMap := record.AsMap()
-			method := getStringFromRecord(recordMap, "method")
-			endpoint := getStringFromRecord(recordMap, "endpoint")
-			functionName := getStringFromRecord(recordMap, "functionName")
-			filePath := getStringFromRecord(recordMap, "filePath")
-
-			output.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-				method, endpoint, functionName, filePath))
-		}
-	}
-
-	return ToolCallResponse{
-		Content: []ToolContent{{Type: "text", Text: output.String()}},
-	}
-}
-
 // handleServiceAPICallsTool gets API calls made by a service (6a: fixed node types, 2-hop traversal)
 func (s *CodeGraphMCPServer) handleServiceAPICallsTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	serviceName, ok := args["service_name"].(string)
@@ -2427,17 +2352,13 @@ func (s *CodeGraphMCPServer) handleServiceArchitectureTool(ctx context.Context, 
 		OPTIONAL MATCH (s)-[:DEPENDS_ON]->(dep:Service)
 		WITH s, collect(DISTINCT dep.name) AS dependencies
 
-		// Get API endpoints
-		OPTIONAL MATCH (s)-[:CONTAINS*]->(f:Function)-[:EXPOSES_API]->(api:APIRoute)
-		WITH s, dependencies, count(DISTINCT api) AS apiCount
-
 		// Get API calls (2-hop traversal; GRPCCall/HTTPCall/OutboxCall)
 		OPTIONAL MATCH (s)-[:CONTAINS]->(file2:File)-[:CONTAINS]->(f2:Function)-[:CALLS_API]->(call)
 		WHERE call:GRPCCall OR call:HTTPCall OR call:OutboxCall
-		WITH s, dependencies, apiCount, count(DISTINCT call) AS callCount
+		WITH s, dependencies, count(DISTINCT call) AS callCount
 
 		RETURN s.name AS name, s.packageName AS packageName,
-		       dependencies, apiCount, callCount
+		       dependencies, callCount
 		ORDER BY s.name
 	`
 
@@ -2467,14 +2388,12 @@ func (s *CodeGraphMCPServer) handleServiceArchitectureTool(ctx context.Context, 
 			if deps, ok := recordMap["dependencies"].([]interface{}); ok {
 				dependencies = deps
 			}
-			apiCount := getIntFromRecord(recordMap, "apiCount")
 			callCount := getIntFromRecord(recordMap, "callCount")
 
 			output.WriteString(fmt.Sprintf("## %s\n\n", name))
 			if packageName != "" {
 				output.WriteString(fmt.Sprintf("- **Package**: %s\n", packageName))
 			}
-			output.WriteString(fmt.Sprintf("- **API Endpoints**: %d\n", apiCount))
 			output.WriteString(fmt.Sprintf("- **API Calls**: %d\n", callCount))
 
 			if len(dependencies) > 0 {
@@ -2537,47 +2456,8 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 	seen := make(map[string]bool)
 	var entries []entryPoint
 
-	// Tier 1: API-exposed functions
+	// Tier 1: Interface implementations with no callers
 	if tierFilter == 0 || tierFilter == 1 {
-		cypher := fmt.Sprintf(`
-			MATCH (fn)-[:EXPOSES_API]->(r:APIRoute)
-			WHERE (fn:Function OR fn:Method)
-			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
-			  AND (r.scopeId = $scopeId OR r.scopeId = 'main')
-			  AND coalesce(fn.isTestFunction, false) = false
-			  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
-			  %s
-			RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, coalesce(fn.filePath, '') AS filePath,
-			       r.detectionSource AS detectionSource, r.protocol AS protocol
-			ORDER BY fn.name`, serviceFilterClause("fn"))
-		records, err := s.client.ExecuteQuery(ctx, cypher, params)
-		if err == nil {
-			for _, r := range records {
-				m := r.AsMap()
-				nodeKey := getStringFromRecord(m, "nodeKey")
-				name := getStringFromRecord(m, "name")
-				filePath := getStringFromRecord(m, "filePath")
-				if nodeKey == "" || name == "" || seen[nodeKey] {
-					continue
-				}
-				if filePath != "" && !s.fileInWorkspace(filePath) {
-					continue
-				}
-				seen[nodeKey] = true
-				source := getStringFromRecord(m, "detectionSource")
-				if source == "" {
-					source = getStringFromRecord(m, "protocol")
-				}
-				entries = append(entries, entryPoint{
-					NodeKey: nodeKey, Name: name, FilePath: filePath,
-					Tier: 1, TierLabel: "API-exposed", DetectionSource: source,
-				})
-			}
-		}
-	}
-
-	// Tier 2: Interface implementations with no callers
-	if tierFilter == 0 || tierFilter == 2 {
 		cypher := fmt.Sprintf(`
 			MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
 			WHERE (fn:Function OR fn:Method)
@@ -2609,14 +2489,14 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 				seen[nodeKey] = true
 				entries = append(entries, entryPoint{
 					NodeKey: nodeKey, Name: name, FilePath: filePath,
-					Tier: 2, TierLabel: "Interface impl", DetectionSource: "implements " + getStringFromRecord(m, "ifaceName"),
+					Tier: 1, TierLabel: "Interface impl", DetectionSource: "implements " + getStringFromRecord(m, "ifaceName"),
 				})
 			}
 		}
 	}
 
-	// Tier 3: Topological roots (exported, no callers, has callees)
-	if tierFilter == 0 || tierFilter == 3 {
+	// Tier 2: Topological roots (exported, no callers, has callees)
+	if tierFilter == 0 || tierFilter == 2 {
 		cypher := fmt.Sprintf(`
 			MATCH (fn)
 			WHERE (fn:Function OR fn:Method)
@@ -2655,14 +2535,14 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 				calleeCount := getIntFromRecord(m, "calleeCount")
 				entries = append(entries, entryPoint{
 					NodeKey: nodeKey, Name: name, FilePath: filePath,
-					Tier: 3, TierLabel: "Topological root", DetectionSource: fmt.Sprintf("exported, %d callees", calleeCount),
+					Tier: 2, TierLabel: "Topological root", DetectionSource: fmt.Sprintf("exported, %d callees", calleeCount),
 				})
 			}
 		}
 	}
 
-	// Tier 4: High centrality (functions with many callers AND callees)
-	if tierFilter == 0 || tierFilter == 4 {
+	// Tier 3: High centrality (functions with many callers AND callees)
+	if tierFilter == 0 || tierFilter == 3 {
 		cypher := fmt.Sprintf(`
 			MATCH (fn)
 			WHERE (fn:Function OR fn:Method)
@@ -2701,7 +2581,7 @@ func (s *CodeGraphMCPServer) handleGetEntryPointsTool(ctx context.Context, args 
 				outDeg := getIntFromRecord(m, "outDeg")
 				entries = append(entries, entryPoint{
 					NodeKey: nodeKey, Name: name, FilePath: filePath,
-					Tier: 4, TierLabel: "High centrality", DetectionSource: fmt.Sprintf("%d callers, %d callees", inDeg, outDeg),
+					Tier: 3, TierLabel: "High centrality", DetectionSource: fmt.Sprintf("%d callers, %d callees", inDeg, outDeg),
 				})
 			}
 		}

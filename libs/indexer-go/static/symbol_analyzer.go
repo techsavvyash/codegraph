@@ -142,7 +142,7 @@ type symbolMatch struct {
 // isn't yet implemented.
 //
 // AnalyzeBySymbols queries the graph for references to known framework symbols,
-// extracts route paths from source lines, and creates APIRoute / SDKCall nodes.
+// extracts route paths from source lines, and creates SDKCall nodes.
 func (sa *SymbolAnalyzer) AnalyzeBySymbols(ctx context.Context) error {
 	fmt.Println("Starting symbol-based API analysis...")
 
@@ -184,11 +184,7 @@ func (sa *SymbolAnalyzer) AnalyzeBySymbols(ctx context.Context) error {
 
 		switch m.Pattern.Type {
 		case "endpoint":
-			if err := sa.createEndpointNode(ctx, m, routePath); err != nil {
-				fmt.Printf("Warning: failed to create endpoint node: %v\n", err)
-			} else {
-				endpointCount++
-			}
+			// APIRoute creation suppressed — noise removed.
 		case "client":
 			if err := sa.createClientCallNode(ctx, m, routePath); err != nil {
 				fmt.Printf("Warning: failed to create client call node: %v\n", err)
@@ -289,40 +285,6 @@ func (sa *SymbolAnalyzer) extractRouteInfoFromSource(filePath string, startLine 
 func (sa *SymbolAnalyzer) extractRoutePathFromSource(filePath string, startLine int) string {
 	path, _ := sa.extractRouteInfoFromSource(filePath, startLine)
 	return path
-}
-
-// createEndpointNode creates an APIRoute node and EXPOSES_API relationship.
-func (sa *SymbolAnalyzer) createEndpointNode(ctx context.Context, m symbolMatch, routePath string) error {
-	if routePath == "" {
-		// No route path extracted — skip to avoid false positives.
-		return nil
-	}
-
-	nodeKey := models.APIRouteNodeKey(m.Pattern.HTTPMethod, routePath)
-	routeProps := map[string]any{
-		"path":      routePath,
-		"method":    m.Pattern.HTTPMethod,
-		"nodeKey":   nodeKey,
-		"protocol":  "HTTP",
-		"framework": m.Pattern.Framework,
-		"scope":     sa.scopeCtx.Scope,
-		"scopeId":   sa.scopeCtx.ScopeID,
-	}
-
-	routeID, err := sa.client.MergeNode(ctx, []string{"APIRoute"},
-		map[string]any{"nodeKey": nodeKey, "scopeId": sa.scopeCtx.ScopeID}, routeProps)
-	if err != nil {
-		return fmt.Errorf("failed to create APIRoute node: %w", err)
-	}
-
-	// Find the containing function to create EXPOSES_API
-	funcID, err := sa.findContainingFunction(ctx, m.FilePath, m.StartLine)
-	if err != nil || funcID == "" {
-		return nil // No enclosing function; skip relationship
-	}
-
-	_, err = sa.client.MergeRelationship(ctx, funcID, routeID, string(models.ExposesAPIRel), nil, nil)
-	return err
 }
 
 // createClientCallNode creates an SDKCall node and CALLS_API relationship.

@@ -199,48 +199,6 @@ func (qb *QueryBuilder) FindImplementations(ctx context.Context, interfaceSymbol
 	return classes, nil
 }
 
-// FindAPIEndpointsAffectedByFunction performs impact analysis
-func (qb *QueryBuilder) FindAPIEndpointsAffectedByFunction(ctx context.Context, functionSymbol string) ([]*models.APIRoute, error) {
-	cypher := `
-		MATCH (startFunc)-[:DEFINES]->(:Symbol {symbol: $functionSymbol})
-		WHERE startFunc:Function OR startFunc:Method
-
-		// Find all functions and methods called by startFunc, up to 10 levels deep
-		MATCH (startFunc)-[:CALLS*1..10]->(downstream)
-		WHERE downstream:Function OR downstream:Method
-
-		// From the set of downstream functions, find any that directly handle an API route
-		MATCH (downstream)-[:EXPOSES_API]->(route:APIRoute)
-
-		RETURN DISTINCT
-			route.protocol AS protocol,
-			route.method AS httpMethod,
-			route.path AS apiPath,
-			route.description AS description
-	`
-
-	params := map[string]any{"functionSymbol": functionSymbol}
-	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find affected API endpoints: %w", err)
-	}
-
-	var routes []*models.APIRoute
-	for _, record := range result {
-		recordMap := record.AsMap()
-
-		route := &models.APIRoute{
-			Protocol:    getString(recordMap, "protocol"),
-			Method:      getString(recordMap, "httpMethod"),
-			Path:        getString(recordMap, "apiPath"),
-			Description: getString(recordMap, "description"),
-		}
-		routes = append(routes, route)
-	}
-
-	return routes, nil
-}
-
 // TraceDataFlow traces the flow of data from a parameter to function calls
 func (qb *QueryBuilder) TraceDataFlow(ctx context.Context, paramSymbol string) ([]*models.SymbolReference, error) {
 	cypher := `

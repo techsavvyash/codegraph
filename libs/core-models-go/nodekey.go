@@ -77,11 +77,6 @@ func FeatureNodeKey(name string) string {
 	return "feat:" + name
 }
 
-// APIRouteNodeKey returns "api:{method}:{path}".
-func APIRouteNodeKey(method, path string) string {
-	return "api:" + method + ":" + path
-}
-
 // CommentNodeKey returns "comment:{filePath}:{startLine}".
 func CommentNodeKey(filePath string, startLine int) string {
 	return fmt.Sprintf("comment:%s:%d", filePath, startLine)
