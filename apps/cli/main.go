@@ -89,6 +89,9 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(resolveCmd)
+	resolveCmd.Flags().String("scope", "", "Scope type (default: main)")
+	resolveCmd.Flags().String("scope-id", "", "Scope ID (default: main)")
 	rootCmd.AddCommand(schemaCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(queryCmd)
@@ -162,6 +165,53 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("Edition: %s\n", edition)
 		}
 
+		return nil
+	},
+}
+
+// resolveCmd runs the cross-service handler resolver as a standalone pass.
+// Use this after indexing multiple services to (re-)link GRPCCall/HTTPCall
+// nodes to their concrete handler Functions without re-indexing everything.
+var resolveCmd = &cobra.Command{
+	Use:   "resolve",
+	Short: "Resolve cross-service RPC links",
+	Long: `Re-run the cross-service handler resolver on the current graph.
+
+This writes CALLS_SERVICE edges from GRPCCall/HTTPCall nodes to the target
+Service node, and RESOLVES_TO edges to the concrete handler Function/Method.
+
+Useful after indexing one or more services to wire up the cross-service call
+graph without doing a full re-index of every service.
+
+Example:
+  # After indexing both settlement and balance services:
+  ./bin/codegraph resolve
+  ./bin/codegraph resolve --scope-id main`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		ctx := context.Background()
+
+		scopeFlag, _ := cmd.Flags().GetString("scope")
+		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		scopeCtx, err := models.ParseScopeFlags(scopeFlag, scopeIDFlag)
+		if err != nil {
+			return fmt.Errorf("invalid scope flags: %w", err)
+		}
+
+		resolver := pipeline.NewCrossServiceHandlerResolver(client)
+		resolver.SetScope(scopeCtx)
+
+		fmt.Printf("Running cross-service resolver (scopeId=%s)...\n", scopeCtx.ScopeID)
+		n, err := resolver.Resolve(ctx)
+		if err != nil {
+			return fmt.Errorf("resolver failed: %w", err)
+		}
+		fmt.Printf("Done. Wrote %d RESOLVES_TO edges.\n", n)
 		return nil
 	},
 }

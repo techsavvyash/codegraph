@@ -105,13 +105,18 @@ func (r *CrossServiceHandlerResolver) resolveGRPC(ctx context.Context) (int, err
 		resolutionMethod := "name_match"
 
 		if protoService != "" {
+			// receiverType may be stored with or without a pointer prefix
+			// ("*BalanceServiceServer" or "BalanceServiceServer") depending on whether
+			// the handler uses a pointer receiver — use ENDS WITH to match both.
+			// SCIP indexers suffix method names with a descriptor like "()." so we
+			// match both "GetBalance" and "GetBalance()." with STARTS WITH.
 			protoServerType := protoService + "Server"
 			protoHandlerQuery := `
 				MATCH (svc)-[:CONTAINS*1..5]->(f)
 				WHERE elementId(svc) = $svcId
 				  AND (f:Function OR f:Method)
-				  AND f.name = $methodName
-				  AND f.receiverType = $protoServerType
+				  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
+				  AND f.receiverType ENDS WITH $protoServerType
 				RETURN elementId(f) AS fId, f.name AS fName, f.nodeKey AS nodeKey
 				ORDER BY f.nodeKey ASC
 				LIMIT 3
@@ -134,7 +139,7 @@ func (r *CrossServiceHandlerResolver) resolveGRPC(ctx context.Context) (int, err
 				MATCH (svc)-[:CONTAINS*1..5]->(f)
 				WHERE elementId(svc) = $svcId
 				  AND (f:Function OR f:Method)
-				  AND f.name = $methodName
+				  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
 				RETURN elementId(f) AS fId, f.name AS fName, f.nodeKey AS nodeKey
 				ORDER BY f.nodeKey ASC
 				LIMIT 5
@@ -201,14 +206,15 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 			continue
 		}
 
-		// Search all services for a method whose receiverType = protoService+"Server"
-		// and whose name = protoMethod. This is the canonical gRPC server handler signature.
+		// Search all services for a method whose receiverType ends with protoService+"Server"
+		// and whose name = protoMethod. Use ENDS WITH to handle both plain and pointer-prefixed
+		// receiver types ("BalanceServiceServer" and "*BalanceServiceServer").
 		protoServerType := protoService + "Server"
 		handlerQuery := `
 			MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
 			WHERE (f:Function OR f:Method)
-			  AND f.name = $methodName
-			  AND f.receiverType = $protoServerType
+			  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
+			  AND f.receiverType ENDS WITH $protoServerType
 			RETURN elementId(svc) AS svcId, elementId(f) AS fId, f.nodeKey AS nodeKey
 			ORDER BY f.nodeKey ASC
 			LIMIT 3
@@ -217,8 +223,29 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 			"methodName":      protoMethod,
 			"protoServerType": protoServerType,
 		})
-		if err != nil || len(handlers) == 0 {
+		if err != nil {
 			continue
+		}
+
+		// Fallback: receiver type match failed; try name-only across services that implement
+		// the proto server interface (finds the method even if receiverType wasn't stored).
+		if len(handlers) == 0 {
+			nameOnlyQuery := `
+				MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
+				WHERE (f:Function OR f:Method)
+				  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
+				  AND (f.receiverType CONTAINS $protoService OR f.signature CONTAINS $protoService)
+				RETURN elementId(svc) AS svcId, elementId(f) AS fId, f.nodeKey AS nodeKey
+				ORDER BY f.nodeKey ASC
+				LIMIT 3
+			`
+			handlers, err = r.client.ExecuteQuery(ctx, nameOnlyQuery, map[string]any{
+				"methodName":   protoMethod,
+				"protoService": protoService,
+			})
+			if err != nil || len(handlers) == 0 {
+				continue
+			}
 		}
 
 		best := handlers[0].AsMap()
@@ -378,12 +405,6 @@ func extractURLPath(rawURL string) string {
 	return "/" + rawURL
 }
 
-func scoreGRPCMatch(candidates int) (confidence float64, method string) {
-	if candidates == 1 {
-		return 0.9, "proto_matched"
-	}
-	return 0.6, "heuristic"
-}
 
 func scoreHTTPMatch(candidates int) (confidence float64, method string) {
 	if candidates == 1 {
