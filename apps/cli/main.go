@@ -985,12 +985,16 @@ var indexTombstoneCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		serviceFlag, _ := cmd.Flags().GetString("service")
 
 		if scopeFlag != "pr" {
 			return fmt.Errorf("tombstones can only be created in PR scope (use --scope=pr --scope-id=pr-<id>)")
 		}
 		if scopeIDFlag == "" {
 			return fmt.Errorf("--scope-id is required for tombstone creation")
+		}
+		if serviceFlag == "" {
+			return fmt.Errorf("--service is required for tombstone creation (must match the service the files were indexed under)")
 		}
 
 		prID := scopeIDFlag
@@ -1005,7 +1009,7 @@ var indexTombstoneCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		creator := static.NewTombstoneCreator(client, scopeCtx)
+		creator := static.NewTombstoneCreator(client, scopeCtx, serviceFlag)
 
 		fmt.Printf("Creating tombstones in scope %s for %d file(s)...\n", scopeCtx.ScopeID, len(args))
 		ctx := context.Background()
@@ -3084,6 +3088,7 @@ func init() {
 	// Flags for tombstone command
 	indexTombstoneCmd.Flags().String("scope", "pr", "Scope for tombstone creation (must be 'pr')")
 	indexTombstoneCmd.Flags().String("scope-id", "", "Scope ID for the PR (e.g., 'pr-42')")
+	indexTombstoneCmd.Flags().String("service", "", "Service the deleted files were indexed under (required; File node keys are service-scoped)")
 
 	// Flags for incremental command
 	indexIncrementalCmd.Flags().StringP("service", "s", "", "Service name")

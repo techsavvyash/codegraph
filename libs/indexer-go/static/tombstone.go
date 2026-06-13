@@ -12,15 +12,19 @@ import (
 // When files or symbols are deleted in a PR branch, tombstones are created
 // so that queries against the PR scope can hide the corresponding main-scope nodes.
 type TombstoneCreator struct {
-	client   *neo4j.Client
-	scopeCtx models.ScopeContext
+	client      *neo4j.Client
+	scopeCtx    models.ScopeContext
+	serviceName string
 }
 
-// NewTombstoneCreator creates a new TombstoneCreator.
-func NewTombstoneCreator(client *neo4j.Client, scopeCtx models.ScopeContext) *TombstoneCreator {
+// NewTombstoneCreator creates a new TombstoneCreator. serviceName must match the
+// service the deleted files were indexed under, because File node keys are
+// service-scoped (see models.FileNodeKey).
+func NewTombstoneCreator(client *neo4j.Client, scopeCtx models.ScopeContext, serviceName string) *TombstoneCreator {
 	return &TombstoneCreator{
-		client:   client,
-		scopeCtx: scopeCtx,
+		client:      client,
+		scopeCtx:    scopeCtx,
+		serviceName: serviceName,
 	}
 }
 
@@ -31,7 +35,7 @@ func (tc *TombstoneCreator) CreateFileDeletedTombstones(ctx context.Context, del
 	totalCreated := 0
 
 	for _, filePath := range deletedPaths {
-		fileNodeKey := models.FileNodeKey(filePath)
+		fileNodeKey := models.FileNodeKey(tc.serviceName, filePath)
 
 		// Create tombstone for the file itself
 		if err := tc.createTombstone(ctx, fileNodeKey, "File", models.TombstoneFileDeleted); err != nil {
@@ -39,14 +43,18 @@ func (tc *TombstoneCreator) CreateFileDeletedTombstones(ctx context.Context, del
 		}
 		totalCreated++
 
-		// Find all child definitions in main scope that belong to this file
+		// Find all child definitions in main scope that belong to this file.
+		// Traverse the file node's CONTAINS edges rather than matching on the
+		// filePath property: filePath is repo-relative and shared across
+		// services, whereas the File nodeKey is service-scoped, so this keeps
+		// the tombstone confined to this service's definitions.
 		cypher := `
-			MATCH (n)
-			WHERE n.filePath = $filePath AND n.scopeId = 'main' AND n.nodeKey IS NOT NULL
+			MATCH (f:File {nodeKey: $fileNodeKey, scopeId: 'main'})-[:CONTAINS]->(n)
+			WHERE n.nodeKey IS NOT NULL
 			RETURN n.nodeKey AS nodeKey, labels(n) AS labels
 		`
 		results, err := tc.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"filePath": filePath,
+			"fileNodeKey": fileNodeKey,
 		})
 		if err != nil {
 			fmt.Printf("Warning: failed to query child nodes for %s: %v\n", filePath, err)

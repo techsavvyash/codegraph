@@ -16,20 +16,20 @@ func TestTombstoneNodeKeyDerivation(t *testing.T) {
 		{
 			name:          "file tombstone",
 			scopeID:       "pr-42",
-			targetNodeKey: models.FileNodeKey("pkg/models/node.go"),
-			expected:      "tombstone:pr-42:file:pkg/models/node.go",
+			targetNodeKey: models.FileNodeKey("account", "pkg/models/node.go"),
+			expected:      "tombstone:pr-42:file:account:pkg/models/node.go",
 		},
 		{
 			name:          "function tombstone",
 			scopeID:       "pr-42",
-			targetNodeKey: models.FunctionNodeKey("pkg/neo4j/client.go", "MergeNode(...)"),
-			expected:      "tombstone:pr-42:func:pkg/neo4j/client.go#MergeNode(...)",
+			targetNodeKey: models.FunctionNodeKey("account", "pkg/neo4j/client.go", "MergeNode(...)"),
+			expected:      "tombstone:pr-42:func:account:pkg/neo4j/client.go#MergeNode(...)",
 		},
 		{
 			name:          "different PR scope",
 			scopeID:       "pr-99",
-			targetNodeKey: models.FileNodeKey("pkg/models/node.go"),
-			expected:      "tombstone:pr-99:file:pkg/models/node.go",
+			targetNodeKey: models.FileNodeKey("account", "pkg/models/node.go"),
+			expected:      "tombstone:pr-99:file:account:pkg/models/node.go",
 		},
 	}
 
@@ -45,11 +45,14 @@ func TestTombstoneNodeKeyDerivation(t *testing.T) {
 
 func TestTombstoneCreatorFieldSetup(t *testing.T) {
 	scope := models.NewPRScope("42")
-	tc := NewTombstoneCreator(nil, scope)
+	tc := NewTombstoneCreator(nil, scope, "account")
 	if tc.scopeCtx.ScopeID != "pr-42" {
 		t.Errorf("expected scopeId pr-42, got %s", tc.scopeCtx.ScopeID)
 	}
 	if tc.scopeCtx.Scope != "pr" {
 		t.Errorf("expected scope pr, got %s", tc.scopeCtx.Scope)
+	}
+	if tc.serviceName != "account" {
+		t.Errorf("expected serviceName account, got %s", tc.serviceName)
 	}
 }

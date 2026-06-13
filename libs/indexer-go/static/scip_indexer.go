@@ -722,7 +722,7 @@ func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
 
 // createFileNode creates a file node in Neo4j
 func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, serviceID string) (string, error) {
-	nodeKey := models.FileNodeKey(file.Path)
+	nodeKey := models.FileNodeKey(si.serviceName, file.Path)
 	fileProps := map[string]any{
 		"path":         file.Path,
 		"nodeKey":      nodeKey,
@@ -774,21 +774,21 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 
 	switch label {
 	case "Function":
-		nodeKey = models.FunctionNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+		nodeKey = models.FunctionNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature)
 	case "Method":
-		nodeKey = models.MethodNodeKey(symbolInfo.FilePath, symbolInfo.Signature)
+		nodeKey = models.MethodNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature)
 	case "Class":
-		nodeKey = models.ClassNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+		nodeKey = models.ClassNodeKey(si.serviceName, symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
 	case "Interface":
-		nodeKey = models.InterfaceNodeKey(symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
+		nodeKey = models.InterfaceNodeKey(si.serviceName, symbolInfo.Symbol.String(), symbolInfo.FilePath, symbolInfo.DisplayName)
 	case "Variable":
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+		nodeKey = models.VariableNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
 	case "Parameter":
-		nodeKey = models.ParameterNodeKey(symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
+		nodeKey = models.ParameterNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.Signature, symbolInfo.DisplayName, 0)
 	case "Module":
 		nodeKey = models.ModuleNodeKey(symbolInfo.Symbol.String())
 	default:
-		nodeKey = models.VariableNodeKey(symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
+		nodeKey = models.VariableNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
 	}
 
 	props = map[string]any{
@@ -1107,7 +1107,7 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 			if ref.IsDefinition {
 				continue
 			}
-			nk := models.ReferenceNodeKey(ref.FilePath, ref.StartLine, ref.StartColumn)
+			nk := models.ReferenceNodeKey(si.serviceName, ref.FilePath, ref.StartLine, ref.StartColumn)
 			refItems = append(refItems, refItem{
 				nodeKey: nk,
 				props: map[string]any{

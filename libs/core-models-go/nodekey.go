@@ -5,15 +5,25 @@ import "fmt"
 // NodeKey derivation functions.
 // Each function returns a deterministic, human-readable key for a node type.
 // These keys are used as merge identifiers to ensure idempotent indexing.
+//
+// Service-scoping: file paths produced by SCIP are repo-relative, so two
+// different services that happen to share a relative path (e.g. both have
+// "internal/db/pgx.go", or a common "grpcclient.go") would otherwise collapse
+// into a single node when indexed into the same scope. To keep per-service code
+// distinct, every path-derived key is prefixed with the owning service name.
+// Keys that are already globally unique (SCIP symbols, fully-qualified names)
+// are NOT service-scoped, because the SCIP symbol already embeds the package
+// path and would only be shared when the underlying definition is genuinely the
+// same.
 
 // ServiceNodeKey returns "svc:{name}".
 func ServiceNodeKey(name string) string {
 	return "svc:" + name
 }
 
-// FileNodeKey returns "file:{path}".
-func FileNodeKey(path string) string {
-	return "file:" + path
+// FileNodeKey returns "file:{service}:{path}".
+func FileNodeKey(service, path string) string {
+	return "file:" + service + ":" + path
 }
 
 // SymbolNodeKey returns the SCIP symbol string directly (already globally unique).
@@ -21,30 +31,32 @@ func SymbolNodeKey(scipSymbol string) string {
 	return scipSymbol
 }
 
-// FunctionNodeKey returns "func:{filePath}#{signature}".
-func FunctionNodeKey(filePath, signature string) string {
-	return "func:" + filePath + "#" + signature
+// FunctionNodeKey returns "func:{service}:{filePath}#{signature}".
+func FunctionNodeKey(service, filePath, signature string) string {
+	return "func:" + service + ":" + filePath + "#" + signature
 }
 
-// MethodNodeKey returns "method:{filePath}#{signature}".
-func MethodNodeKey(filePath, signature string) string {
-	return "method:" + filePath + "#" + signature
+// MethodNodeKey returns "method:{service}:{filePath}#{signature}".
+func MethodNodeKey(service, filePath, signature string) string {
+	return "method:" + service + ":" + filePath + "#" + signature
 }
 
-// ClassNodeKey returns "class:{fqn}" if fqn is non-empty, else "class:{filePath}#{name}".
-func ClassNodeKey(fqn, filePath, name string) string {
+// ClassNodeKey returns "class:{fqn}" if fqn is non-empty (already globally
+// unique), else the service-scoped fallback "class:{service}:{filePath}#{name}".
+func ClassNodeKey(service, fqn, filePath, name string) string {
 	if fqn != "" {
 		return "class:" + fqn
 	}
-	return "class:" + filePath + "#" + name
+	return "class:" + service + ":" + filePath + "#" + name
 }
 
-// InterfaceNodeKey returns "iface:{fqn}" if fqn is non-empty, else "iface:{filePath}#{name}".
-func InterfaceNodeKey(fqn, filePath, name string) string {
+// InterfaceNodeKey returns "iface:{fqn}" if fqn is non-empty (already globally
+// unique), else the service-scoped fallback "iface:{service}:{filePath}#{name}".
+func InterfaceNodeKey(service, fqn, filePath, name string) string {
 	if fqn != "" {
 		return "iface:" + fqn
 	}
-	return "iface:" + filePath + "#" + name
+	return "iface:" + service + ":" + filePath + "#" + name
 }
 
 // ModuleNodeKey returns "mod:{fqn}".
@@ -52,14 +64,14 @@ func ModuleNodeKey(fqn string) string {
 	return "mod:" + fqn
 }
 
-// VariableNodeKey returns "var:{filePath}#{name}:{startLine}".
-func VariableNodeKey(filePath, name string, startLine int) string {
-	return fmt.Sprintf("var:%s#%s:%d", filePath, name, startLine)
+// VariableNodeKey returns "var:{service}:{filePath}#{name}:{startLine}".
+func VariableNodeKey(service, filePath, name string, startLine int) string {
+	return fmt.Sprintf("var:%s:%s#%s:%d", service, filePath, name, startLine)
 }
 
-// ParameterNodeKey returns "param:{filePath}#{signature}:{name}:{index}".
-func ParameterNodeKey(filePath, signature, name string, index int) string {
-	return fmt.Sprintf("param:%s#%s:%s:%d", filePath, signature, name, index)
+// ParameterNodeKey returns "param:{service}:{filePath}#{signature}:{name}:{index}".
+func ParameterNodeKey(service, filePath, signature, name string, index int) string {
+	return fmt.Sprintf("param:%s:%s#%s:%s:%d", service, filePath, signature, name, index)
 }
 
 // DocumentNodeKey returns "doc:{sourceUrl}".
@@ -77,9 +89,9 @@ func FeatureNodeKey(name string) string {
 	return "feat:" + name
 }
 
-// CommentNodeKey returns "comment:{filePath}:{startLine}".
-func CommentNodeKey(filePath string, startLine int) string {
-	return fmt.Sprintf("comment:%s:%d", filePath, startLine)
+// CommentNodeKey returns "comment:{service}:{filePath}:{startLine}".
+func CommentNodeKey(service, filePath string, startLine int) string {
+	return fmt.Sprintf("comment:%s:%s:%d", service, filePath, startLine)
 }
 
 // FlowNodeKey returns "flow:{flowType}:{entrypointKey}".
@@ -107,7 +119,7 @@ func SDKCallNodeKey(target string) string {
 	return "sdkcall:" + target
 }
 
-// ReferenceNodeKey returns "ref:{filePath}:{startLine}:{startColumn}".
-func ReferenceNodeKey(filePath string, startLine, startColumn int) string {
-	return fmt.Sprintf("ref:%s:%d:%d", filePath, startLine, startColumn)
+// ReferenceNodeKey returns "ref:{service}:{filePath}:{startLine}:{startColumn}".
+func ReferenceNodeKey(service, filePath string, startLine, startColumn int) string {
+	return fmt.Sprintf("ref:%s:%s:%d:%d", service, filePath, startLine, startColumn)
 }

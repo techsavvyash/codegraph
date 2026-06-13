@@ -68,9 +68,9 @@ func TestTombstoneReasonConstantsDistinct(t *testing.T) {
 // This matters because tombstones and their targets must be separately addressable.
 func TestTombstoneNodeKeyDoesNotCollideWithTarget(t *testing.T) {
 	targets := []string{
-		FileNodeKey("pkg/models/node.go"),
-		FunctionNodeKey("pkg/neo4j/client.go", "MergeNode(...)"),
-		MethodNodeKey("pkg/neo4j/client.go", "(*Client).Close()"),
+		FileNodeKey("account", "pkg/models/node.go"),
+		FunctionNodeKey("account", "pkg/neo4j/client.go", "MergeNode(...)"),
+		MethodNodeKey("account", "pkg/neo4j/client.go", "(*Client).Close()"),
 	}
 	scopeID := "pr-42"
 	for _, target := range targets {
