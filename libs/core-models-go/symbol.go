@@ -124,6 +124,12 @@ type SymbolInfo struct {
 	DisplayName    string      `json:"displayName"`
 	Documentation  string      `json:"documentation"`
 	Signature      string      `json:"signature"`
+	// GoSignature is the human-readable source signature (e.g.
+	// "func FundPayout(ctx context.Context, req *FundPayoutRequest) (*FundPayoutResponse, error)")
+	// captured from SCIP SymbolInformation.SignatureDocumentation / Documentation.
+	// It is distinct from Signature, which in the SCIP path holds the SCIP symbol
+	// string used for nodeKey derivation and must not be overwritten.
+	GoSignature    string      `json:"goSignature,omitempty"`
 	ReturnType     string      `json:"returnType,omitempty"`
 	Parameters     []Parameter `json:"parameters,omitempty"`
 	FilePath       string      `json:"filePath"`

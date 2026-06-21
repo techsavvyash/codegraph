@@ -352,3 +352,22 @@ func (s *ComputeGraphMetricsStage) Run(ctx context.Context, cfg *PipelineConfig)
 
 	return totalWritten, nil
 }
+
+// --- Stage: GenerateNodeSummaries ---
+
+type GenerateNodeSummariesStage struct{}
+
+func (s *GenerateNodeSummariesStage) Name() StageName { return StageGenerateNodeSummaries }
+func (s *GenerateNodeSummariesStage) Optional() bool  { return true }
+
+// Run generates deterministic one-line summaries for all Function/Method nodes in
+// scope that lack one, and writes them back via a single UNWIND query.
+// Delegates to static.GenerateAndStoreNodeSummaries so the same logic also runs
+// inside IndexProjectPolyglot (the direct `index scip` path).
+func (s *GenerateNodeSummariesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	n, err := static.GenerateAndStoreNodeSummaries(ctx, cfg.Client, cfg.ScopeCtx)
+	if err != nil {
+		return 0, fmt.Errorf("GenerateNodeSummaries: %w", err)
+	}
+	return n, nil
+}

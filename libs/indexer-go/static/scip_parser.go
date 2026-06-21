@@ -144,6 +144,32 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 			// Add reference to symbol definition
 			targetSymbolDef.AddReference(ref)
 		}
+
+		// Enrich symbols with the doc comment and rendered Go signature carried
+		// on doc.Symbols. SCIP indexers (scip-go) attach both to the
+		// SymbolInformation in the document's Symbols list — data the occurrence
+		// loop above never sees, because occurrences only carry positions. Without
+		// this pass every locally-defined function has an empty docstring (so a
+		// summary can only reword the name) and no signature (so request/response
+		// types are unavailable). Only entries already created from occurrences
+		// are enriched; we never overwrite a value that is already set.
+		for _, symInfo := range doc.Symbols {
+			scipSymbol, err := models.ParseSCIPSymbol(symInfo.Symbol)
+			if err != nil {
+				continue
+			}
+			def, ok := symbolMap[scipSymbol.String()]
+			if !ok {
+				continue
+			}
+			sig, docText := extractSigAndDoc(symInfo)
+			if def.Info.GoSignature == "" && sig != "" {
+				def.Info.GoSignature = sig
+			}
+			if def.Info.Documentation == "" && docText != "" {
+				def.Info.Documentation = docText
+			}
+		}
 	}
 
 	// Convert map to slice
@@ -319,6 +345,53 @@ func extractSignature(symbolInfo *scip.SymbolInformation) string {
 	// For now, use the display name as signature
 	// In a full implementation, we might extract more detailed signature info
 	return symbolInfo.Symbol
+}
+
+// extractSigAndDoc pulls the rendered Go signature and the human doc comment out
+// of a SCIP SymbolInformation. SCIP carries the signature in one of two places
+// depending on indexer version: the dedicated SignatureDocumentation document
+// (preferred, scip v0.3+) or a fenced ```go code block inside Documentation.
+// Anything in Documentation that is not a code fence is the doc comment.
+func extractSigAndDoc(sym *scip.SymbolInformation) (signature, doc string) {
+	if sd := sym.GetSignatureDocumentation(); sd != nil {
+		signature = collapseWhitespace(sd.GetText())
+	}
+	var docParts []string
+	for _, d := range sym.Documentation {
+		t := strings.TrimSpace(d)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "```") {
+			if signature == "" {
+				signature = collapseWhitespace(stripCodeFence(t))
+			}
+			continue
+		}
+		docParts = append(docParts, t)
+	}
+	return signature, strings.Join(docParts, " ")
+}
+
+// stripCodeFence removes the surrounding ``` fences (and an optional language
+// tag on the opening line) from a markdown code block.
+func stripCodeFence(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```")
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		if firstLine := strings.TrimSpace(s[:nl]); firstLine == "go" || firstLine == "" {
+			s = s[nl+1:]
+		}
+	}
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
+}
+
+// collapseWhitespace flattens any run of whitespace (including newlines in a
+// multi-line signature) to single spaces.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func convertRange(scipRange []int32, isStart bool) (int, int) {

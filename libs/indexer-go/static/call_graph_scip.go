@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -34,7 +35,153 @@ type SCIPCallGraphBuilder struct {
 	modulePath  string // Go module path from go.mod, used to filter external targets
 	serviceName string // Service node name used to restrict listGoFiles to this module only
 	scopeCtx    models.ScopeContext
-	moduleNodes map[string]string // service-wide funcName → elementId for cross-file callee resolution
+	moduleNodes map[string]string // service-wide funcName → elementId for cross-file callee resolution (bare-name fallback)
+
+	// Precise resolution data, derived from SCIP occurrences (see LoadSCIPResolution).
+	// These let processFile bind a call site to the EXACT callee SCIP resolved,
+	// instead of guessing by bare name (which collides across receiver types and
+	// silently resolved to an arbitrary node under last-write-wins).
+	symbolToNodeID map[string]string // symbolNodeKey → elementId (Function/Method definitions)
+	occIndex       map[string]string // occKey(file,line,name) → callee symbolNodeKey
+	// ifaceToImpl bridges interface-method calls to their concrete implementation.
+	// SCIP resolves a call like repo.Payout.UpdateStatusByID(...) to the INTERFACE
+	// method symbol (no body, no DB effect); the effect-bearing node is the concrete
+	// impl, reachable via IMPLEMENTS. Keyed by interface-method symbolNodeKey →
+	// concrete impl elementId. Only unambiguous (single-impl) interfaces are kept.
+	ifaceToImpl map[string]string
+
+	// Resolution telemetry (logged at end of BuildCallGraph) so a single index run
+	// reveals whether precise resolution actually fired vs degraded to bare-name.
+	preciseHits  int
+	fallbackHits int
+}
+
+// LoadSCIPResolution populates the precise call-resolution maps from the parsed
+// SCIP symbol definitions and the node index produced by indexSymbols. After this
+// is called, processFile resolves callees by SCIP symbol identity (exact) and only
+// falls back to bare-name matching when no occurrence covers a call site.
+//
+//   - symbolToNodeID maps each Function/Method symbol to its graph node.
+//   - occIndex maps every call-site occurrence (file + line + method name) to the
+//     symbol it references, so a call site → exact callee lookup is O(1).
+//
+// SCIP ranges are 0-based; AST/token positions are 1-based, so occurrence lines
+// are normalised by +1 to match the call lines parsed from the AST.
+func (cg *SCIPCallGraphBuilder) LoadSCIPResolution(ctx context.Context, symbolDefs []*models.SymbolDefinition, idx *symbolIndex) {
+	cg.symbolToNodeID = make(map[string]string)
+	if idx != nil {
+		for symKey, defKey := range idx.symbolToDefKey {
+			if id, ok := idx.defIDs[defKey]; ok {
+				cg.symbolToNodeID[symKey] = id
+			}
+		}
+	}
+
+	cg.occIndex = make(map[string]string)
+	for _, sd := range symbolDefs {
+		if sd == nil || sd.Info == nil || sd.Info.Symbol == nil {
+			continue
+		}
+		symStr := sd.Info.Symbol.String()
+		// Index callable references: functions/methods, plus any type member
+		// (symbol contains '#'). The latter captures INTERFACE methods, which SCIP
+		// classifies as kind=Type but which call sites resolve to — these are bridged
+		// to their concrete impl via ifaceToImpl below. Package-level vars/consts
+		// (no '#', non-callable) are excluded to keep the index focused.
+		if !isFunctionReferenceKind(sd.Info.Kind) && !strings.Contains(symStr, "#") {
+			continue
+		}
+		symKey := models.SymbolNodeKey(symStr)
+		// DisplayName carries the SCIP descriptor suffix (e.g. "UpdateStatusByID().");
+		// strip it so the key matches the bare identifier the AST yields at call sites
+		// (call.TargetName == "UpdateStatusByID"). Without this every lookup misses and
+		// resolution silently degrades to bare-name matching.
+		name := normalizeIdent(sd.Info.DisplayName)
+		if name == "" {
+			continue
+		}
+		for _, ref := range sd.Refs {
+			if ref == nil || ref.IsDefinition {
+				continue // definitions are not call sites
+			}
+			astLine := ref.StartLine + 1 // SCIP 0-based → AST 1-based
+			cg.occIndex[occKey(ref.FilePath, astLine, name)] = symKey
+		}
+	}
+
+	cg.loadInterfaceImpls(ctx)
+
+	fmt.Printf("  Loaded SCIP resolution: %d symbol→node entries, %d call-site occurrences, %d interface→impl bridges\n",
+		len(cg.symbolToNodeID), len(cg.occIndex), len(cg.ifaceToImpl))
+}
+
+// loadInterfaceImpls builds the interface-method → concrete-impl bridge from the
+// IMPLEMENTS edges already written to the graph (concrete Method/Function →
+// interface Symbol). Only interfaces with a single implementation are kept: with
+// multiple impls the concrete callee can't be chosen without runtime type info, so
+// we leave those to bare-name fallback rather than bind arbitrarily.
+func (cg *SCIPCallGraphBuilder) loadInterfaceImpls(ctx context.Context) {
+	cg.ifaceToImpl = make(map[string]string)
+	rows, err := cg.client.ExecuteQuery(ctx, `
+		MATCH (m)-[:IMPLEMENTS]->(s:Symbol)
+		WHERE (m:Method OR m:Function) AND (m.scopeId = $scopeId OR m.scopeId = 'main')
+		RETURN s.symbol AS sym, elementId(m) AS implId`,
+		map[string]any{"scopeId": cg.scopeCtx.ScopeID})
+	if err != nil {
+		fmt.Printf("  Warning: interface-impl bridge query failed: %v\n", err)
+		return
+	}
+	ambiguous := make(map[string]bool)
+	for _, row := range rows {
+		rm := row.AsMap()
+		sym := getStringFromMap(rm, "sym")
+		implID := getStringFromMap(rm, "implId")
+		if sym == "" || implID == "" {
+			continue
+		}
+		key := models.SymbolNodeKey(sym)
+		if existing, ok := cg.ifaceToImpl[key]; ok {
+			if existing != implID {
+				ambiguous[key] = true
+			}
+			continue
+		}
+		cg.ifaceToImpl[key] = implID
+	}
+	for k := range ambiguous {
+		delete(cg.ifaceToImpl, k)
+	}
+}
+
+// occKey builds the composite key used by occIndex. NUL separators avoid any
+// collision between path/name segments.
+func occKey(filePath string, line int, name string) string {
+	return filePath + "\x00" + strconv.Itoa(line) + "\x00" + name
+}
+
+// resolvePreciseCallee returns the elementId of the exact callee SCIP resolved for
+// the call site at (filePath, line, name), or "" when no occurrence covers it. A
+// ±1 line tolerance absorbs any residual 0-/1-based drift between SCIP ranges and
+// AST token positions without sacrificing per-receiver precision.
+func (cg *SCIPCallGraphBuilder) resolvePreciseCallee(filePath string, line int, name string) string {
+	if len(cg.occIndex) == 0 {
+		return ""
+	}
+	for _, l := range [3]int{line, line - 1, line + 1} {
+		symKey, ok := cg.occIndex[occKey(filePath, l, name)]
+		if !ok {
+			continue
+		}
+		// Concrete function/method: bind directly.
+		if id, ok := cg.symbolToNodeID[symKey]; ok {
+			return id
+		}
+		// Interface method (no concrete node): bridge to its sole implementation.
+		if id, ok := cg.ifaceToImpl[symKey]; ok {
+			return id
+		}
+	}
+	return ""
 }
 
 // NewSCIPCallGraphBuilder creates a new call graph builder.
@@ -108,6 +255,7 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	fmt.Printf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
+	fmt.Printf("  Callee resolution: %d precise (SCIP symbol), %d bare-name fallback\n", cg.preciseHits, cg.fallbackHits)
 
 	// Compute in/out degree properties on all Function/Method nodes in scope.
 	if err := cg.ComputeDegreeProperties(ctx); err != nil {
@@ -332,11 +480,24 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		}
 
 		for _, call := range astCalls[fr.DeclLine] {
-			// Prefer same-file resolution (unambiguous); fall back to service-wide map
-			// for cross-file calls within the same service.
-			calleeID := graphNodes[call.TargetName]
+			// Prefer PRECISE resolution: bind to the exact callee SCIP resolved for
+			// this call site, disambiguating receiver types that share a method name
+			// (e.g. the many distinct Get()/UpdateStatusByID() across repositories).
+			calleeID := cg.resolvePreciseCallee(filePath, call.Line, call.TargetName)
+			if calleeID != "" {
+				cg.preciseHits++
+			}
+			// Fall back to bare-name matching only when no occurrence covers the site
+			// (preserves edges SCIP didn't resolve). Same-file first, then the
+			// service-wide map for cross-file calls.
 			if calleeID == "" {
-				calleeID = cg.moduleNodes[call.TargetName]
+				calleeID = graphNodes[call.TargetName]
+				if calleeID == "" {
+					calleeID = cg.moduleNodes[call.TargetName]
+				}
+				if calleeID != "" {
+					cg.fallbackHits++
+				}
 			}
 			if calleeID == "" {
 				continue // external or unindexed callee

@@ -261,6 +261,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
 			cgBuilder.SetScope(si.scopeCtx)
 			cgBuilder.SetServiceName(si.serviceName)
+			// Feed SCIP's precise occurrence resolution so callees bind to the exact
+			// symbol rather than an arbitrary bare-name match.
+			cgBuilder.LoadSCIPResolution(ctx, symbolDefs, symIdx)
 			if err := cgBuilder.BuildCallGraph(ctx); err != nil {
 				fmt.Printf("Warning: call graph construction failed: %v\n", err)
 			}
@@ -497,6 +500,16 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	if len(errs) == len(roots) {
 		return fmt.Errorf("all language roots failed to index: %v", errs)
 	}
+
+	// Generate and store one-line summaries for all Function/Method nodes that
+	// don't have one yet.  Two round-trips regardless of service size.
+	fmt.Println("Generating node summaries...")
+	if n, err := GenerateAndStoreNodeSummaries(ctx, si.client, si.scopeCtx); err != nil {
+		fmt.Printf("Warning: node summary generation failed: %v\n", err)
+	} else {
+		fmt.Printf("✓ Node summaries generated for %d functions/methods\n", n)
+	}
+
 	return nil
 }
 
@@ -828,6 +841,7 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		props["isExported"] = true
 		props["complexity"] = 1
 		props["docstring"] = symbolInfo.Documentation
+		props["goSignature"] = symbolInfo.GoSignature
 		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
 	case "Class":
 		props["fqn"] = symbolInfo.Symbol.String()

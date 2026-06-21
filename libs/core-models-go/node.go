@@ -124,6 +124,10 @@ type Function struct {
 	Complexity       int    `json:"complexity" neo4j:"complexity"`
 	Docstring        string `json:"docstring" neo4j:"docstring"`
 	IsRPCHandler     bool   `json:"isRPCHandler" neo4j:"isRPCHandler"`
+	// Summary is a one-line behavioural description generated deterministically at index
+	// time from the name, signature, and docstring. Used by MCP navigation tools so an
+	// LLM can decide relevance without opening the source file.
+	Summary          string `json:"summary" neo4j:"summary"`
 }
 
 // Method represents an instance method belonging to a class
@@ -143,6 +147,10 @@ type Method struct {
 	Complexity       int    `json:"complexity" neo4j:"complexity"`
 	Docstring        string `json:"docstring" neo4j:"docstring"`
 	IsRPCHandler     bool   `json:"isRPCHandler" neo4j:"isRPCHandler"`
+	// Summary is a one-line behavioural description generated deterministically at index
+	// time from the name, signature, and docstring. Used by MCP navigation tools so an
+	// LLM can decide relevance without opening the source file.
+	Summary          string `json:"summary" neo4j:"summary"`
 }
 
 // Variable represents a variable declaration

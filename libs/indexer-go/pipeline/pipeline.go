@@ -23,6 +23,7 @@ const (
 	StageComputeGraphMetrics             StageName = "ComputeGraphMetrics"
 	StageInferServiceDeps                StageName = "InferServiceDependencies"
 	StageResolveCrossServiceHandlers     StageName = "ResolveCrossServiceHandlers"
+	StageGenerateNodeSummaries           StageName = "GenerateNodeSummaries"
 	StageGenerateFlowSpines              StageName = "GenerateFlowSpines"
 	StageGenerateBehavioralSummaries     StageName = "GenerateBehavioralSummaries"
 	StageIngestDocuments                 StageName = "IngestDocuments"
@@ -98,6 +99,7 @@ func DefaultStages() []Stage {
 		&InferServiceDepsStage{},
 		&ResolveCrossServiceHandlersStage{},
 		&HelperCollapseStage{},
+		&GenerateNodeSummariesStage{},
 		&GenerateFlowSpinesStage{},
 		&GenerateBehavioralSummariesStage{},
 		&IngestDocumentsStage{},
