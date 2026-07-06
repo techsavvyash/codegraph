@@ -11,11 +11,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/search-go"
-	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 )
 
 // PipelineTimer is an optional interface for timing pipeline phases.
@@ -43,11 +40,6 @@ type SCIPIndexer struct {
 	timer            PipelineTimer
 	fileContentCache map[string][]byte // cache for calculateByteOffsets
 
-	// Tri-store support: secondary stores populated after Neo4j indexing.
-	embeddingService    search.EmbeddingService
-	vectorStore         search.VectorStore
-	textStore           textindex.TextIndexStore
-	skipSecondaryStores bool // true for sub-indexers in polyglot mode
 	// skipDependencyResolution defers the DEPENDS_ON-creation pass so the
 	// polyglot orchestrator can run it once at the end, after every sibling
 	// service exists in Neo4j (otherwise early sub-indexes resolve against an
@@ -308,31 +300,13 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
 	}
 
-	// Step 10b: Populate secondary stores (Qdrant + OpenSearch)
-	if !si.skipSecondaryStores && si.embeddingService != nil && si.vectorStore != nil {
-		if si.timer != nil {
-			si.timer.Start("Secondary stores")
-		}
-		fmt.Println("Populating secondary stores (Qdrant + OpenSearch)...")
-		si.ensureSecondaryStoreIndexes(ctx)
-		si.populateSecondaryStores(ctx)
-		if si.timer != nil {
-			si.timer.Stop(0, "")
-		}
-	}
-
-	// Step 11: Create PullRequest node for PR overlays (generated-doc creation
-	// is handled exclusively by pipeline Stage 6 — GenerateContextDocs).
+	// Step 11: Create PullRequest node for PR overlays.
 	if si.scopeCtx.Scope == models.ScopePR && si.client != nil {
-		ctxGen := generated.NewContextGenerator(si.client)
-		ctxGen.SetScope(si.scopeCtx)
-
 		// Extract PR ID from scopeId (format: "pr-{id}")
 		prID := strings.TrimPrefix(si.scopeCtx.ScopeID, "pr-")
 
-		if _, err := ctxGen.CreatePullRequestNode(ctx, prID,
-			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName),
-			"", "", "", ""); err != nil {
+		if _, err := si.createPullRequestNode(ctx, prID,
+			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName)); err != nil {
 			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
 		}
 	}
@@ -424,12 +398,6 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 		if si.timer != nil {
 			sub.SetBenchmarkTimer(si.timer)
 		}
-		// Propagate tri-store clients but skip per-root population;
-		// we populate once after all roots are indexed.
-		sub.SetEmbeddingService(si.embeddingService)
-		sub.SetVectorStore(si.vectorStore)
-		sub.SetTextStore(si.textStore)
-		sub.skipSecondaryStores = true
 		// Defer DEPENDS_ON resolution so all sibling services exist before
 		// any of them try to resolve imports against the service catalog.
 		sub.skipDependencyResolution = true
@@ -445,13 +413,6 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	// Resolve DEPENDS_ON edges after every root is indexed so cross-service
 	// references can find their targets.
 	si.resolveDeferredDependencies(ctx, indexedSubs)
-
-	// Populate secondary stores once after all roots are indexed.
-	if si.embeddingService != nil && si.vectorStore != nil {
-		fmt.Println("\nPopulating secondary stores (Qdrant + OpenSearch)...")
-		si.ensureSecondaryStoreIndexes(ctx)
-		si.populateSecondaryStores(ctx)
-	}
 
 	if len(errs) == len(roots) {
 		return fmt.Errorf("all language roots failed to index: %v", errs)
@@ -1415,19 +1376,26 @@ func (si *SCIPIndexer) SetBenchmarkTimer(timer PipelineTimer) {
 	si.timer = timer
 }
 
-// SetEmbeddingService sets the embedding service for vector generation.
-func (si *SCIPIndexer) SetEmbeddingService(svc search.EmbeddingService) {
-	si.embeddingService = svc
-}
+// createPullRequestNode creates a PullRequest node in the graph for PR-scope
+// overlay tracking. This is a plain graph write with no generation/LLM
+// involvement.
+func (si *SCIPIndexer) createPullRequestNode(ctx context.Context, prID, title string) (string, error) {
+	nodeKey := models.PullRequestNodeKey(prID)
+	props := map[string]any{
+		"prId":      prID,
+		"title":     title,
+		"status":    "open",
+		"nodeKey":   nodeKey,
+		"scope":     si.scopeCtx.Scope,
+		"scopeId":   si.scopeCtx.ScopeID,
+	}
 
-// SetVectorStore sets the vector store for embedding storage.
-func (si *SCIPIndexer) SetVectorStore(store search.VectorStore) {
-	si.vectorStore = store
-}
-
-// SetTextStore sets the text index store for BM25 search.
-func (si *SCIPIndexer) SetTextStore(store textindex.TextIndexStore) {
-	si.textStore = store
+	id, err := si.client.MergeNode(ctx, []string{"PullRequest"},
+		map[string]any{"nodeKey": nodeKey, "scopeId": si.scopeCtx.ScopeID}, props)
+	if err != nil {
+		return "", fmt.Errorf("failed to create PullRequest node: %w", err)
+	}
+	return id, nil
 }
 
 // GetLanguage returns the language this indexer is configured for

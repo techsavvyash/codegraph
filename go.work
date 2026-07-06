@@ -6,17 +6,13 @@ use (
 	./apps/mcp-server-go
 	./libs/benchmarks-go
 	./libs/core-models-go
-	./libs/evals-go
 	./libs/gds-go
-	./libs/generation-go
 	./libs/indexer-go
 	./libs/inference-go
 	./libs/intelligence-go
-	./libs/llm-go
 	./libs/neo4j-go
 	./libs/query-go
 	./libs/schema-go
 	./libs/search-go
 	./libs/text-index-client-go
-	./libs/verification-go
 )

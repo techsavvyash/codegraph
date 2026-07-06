@@ -8,25 +8,17 @@ import (
 	"time"
 
 	"github.com/context-maximiser/code-graph/libs/core-models-go"
-	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
-	"github.com/context-maximiser/code-graph/libs/intelligence-go/contracts"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/search-go"
-	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 )
 
 // StageName identifies a pipeline stage.
 type StageName string
 
 const (
-	StageIngestCode              StageName = "IngestCode"
-	StageComputeGraphMetrics     StageName = "ComputeGraphMetrics"
-	StageInferServiceDeps        StageName = "InferServiceDependencies"
-	StageGenerateFlowSpines      StageName = "GenerateFlowSpines"
-	StageIngestDocuments         StageName = "IngestDocuments"
-	StageLinkDocumentChunks      StageName = "LinkDocumentChunks"
-	StageGenerateContextDocs     StageName = "GenerateContextDocs"
-	StageRefreshRetrievalIndexes StageName = "RefreshRetrievalIndexes"
+	StageIngestCode          StageName = "IngestCode"
+	StageComputeGraphMetrics StageName = "ComputeGraphMetrics"
+	StageInferServiceDeps    StageName = "InferServiceDependencies"
+	StageGenerateFlowSpines  StageName = "GenerateFlowSpines"
 )
 
 // StageResult captures the outcome of a single stage.
@@ -58,26 +50,19 @@ type PipelineTimer interface {
 
 // PipelineConfig carries all dependencies and parameters through the pipeline.
 type PipelineConfig struct {
-	Client           *neo4j.Client
-	ScopeCtx         models.ScopeContext
-	ProjectPath      string
-	ServiceName      string
-	Version          string
-	RepoURL          string
-	Language         string // Auto-detected or explicit.
-	TenantID         string // Multi-tenant namespace (optional).
-	Repo             string // Repository identifier (optional).
-	EmbeddingService search.EmbeddingService
-	VectorStore      search.VectorStore
-	TextStore        textindex.TextIndexStore
-	DocPaths         []string // Paths to local docs (optional).
-	Timer            PipelineTimer // Optional phase timer for benchmarking.
-	Generator        contracts.Generator       // Optional: evidence-backed generation.
-	Verifier         contracts.Verifier        // Optional: citation verification.
-	Policy           generated.PolicyEvaluator // Optional: persistence policy gate.
+	Client      *neo4j.Client
+	ScopeCtx    models.ScopeContext
+	ProjectPath string
+	ServiceName string
+	Version     string
+	RepoURL     string
+	Language    string // Auto-detected or explicit.
+	TenantID    string // Multi-tenant namespace (optional).
+	Repo        string // Repository identifier (optional).
+	Timer       PipelineTimer // Optional phase timer for benchmarking.
 }
 
-// Pipeline orchestrates the 7-stage enrichment pipeline.
+// Pipeline orchestrates the code-indexing pipeline.
 type Pipeline struct {
 	stages []Stage
 }
@@ -87,17 +72,13 @@ func New(stages ...Stage) *Pipeline {
 	return &Pipeline{stages: stages}
 }
 
-// DefaultStages returns the 8 stages in canonical order.
+// DefaultStages returns the 4 stages in canonical order.
 func DefaultStages() []Stage {
 	return []Stage{
 		&IngestCodeStage{},
 		&ComputeGraphMetricsStage{},
 		&InferServiceDepsStage{},
 		&GenerateFlowSpinesStage{},
-		&IngestDocumentsStage{},
-		&LinkDocumentChunksStage{},
-		&GenerateContextDocsStage{},
-		&RefreshRetrievalIndexesStage{},
 	}
 }
 
@@ -155,16 +136,12 @@ type StageTier struct {
 // DefaultTiers returns the default parallel execution tiers.
 // Tier 0: IngestCode (required, must run first)
 // Tier 1: ComputeGraphMetrics (depends on ingested call graph)
-// Tier 2: InferServiceDeps, GenerateFlowSpines, IngestDocuments (independent)
-// Tier 3: LinkDocumentChunks, GenerateContextDocs (depend on tier 2)
-// Tier 4: RefreshRetrievalIndexes (final)
+// Tier 2: InferServiceDeps, GenerateFlowSpines (independent)
 func DefaultTiers() []StageTier {
 	return []StageTier{
 		{Stages: []Stage{&IngestCodeStage{}}},
 		{Stages: []Stage{&ComputeGraphMetricsStage{}}},
-		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}, &IngestDocumentsStage{}}},
-		{Stages: []Stage{&LinkDocumentChunksStage{}, &GenerateContextDocsStage{}}},
-		{Stages: []Stage{&RefreshRetrievalIndexesStage{}}},
+		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}}},
 	}
 }
 

@@ -1,4 +1,4 @@
-package documents
+package docsparked
 
 import (
 	"crypto/sha256"
@@ -8,51 +8,51 @@ import (
 )
 
 func TestChunkDocumentWithMeta_SingleChunk(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 1000}
+	c := NewChunker(1000)
 	content := "Hello world.\n\nThis is a test document."
 
-	chunks := parser.ChunkDocumentWithMeta(content)
+	chunks := c.ChunkDocumentWithMeta(content)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}
 
-	c := chunks[0]
-	if c.ChunkIndex != 0 {
-		t.Errorf("expected ChunkIndex 0, got %d", c.ChunkIndex)
+	chunk := chunks[0]
+	if chunk.ChunkIndex != 0 {
+		t.Errorf("expected ChunkIndex 0, got %d", chunk.ChunkIndex)
 	}
-	if c.TextHash == "" {
+	if chunk.TextHash == "" {
 		t.Error("TextHash should not be empty")
 	}
 	// Verify hash is correct.
-	h := sha256.Sum256([]byte(c.Content))
+	h := sha256.Sum256([]byte(chunk.Content))
 	expectedHash := hex.EncodeToString(h[:])
-	if c.TextHash != expectedHash {
-		t.Errorf("TextHash mismatch: %s != %s", c.TextHash, expectedHash)
+	if chunk.TextHash != expectedHash {
+		t.Errorf("TextHash mismatch: %s != %s", chunk.TextHash, expectedHash)
 	}
 }
 
 func TestChunkDocumentWithMeta_MultipleChunks(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 5} // Very small chunk size to force splitting.
+	c := NewChunker(5) // Very small chunk size to force splitting.
 
 	// Each paragraph has more than 5 words.
 	content := "This is the first paragraph with many words.\n\nThis is the second paragraph with enough words.\n\nThird paragraph here with some words."
 
-	chunks := parser.ChunkDocumentWithMeta(content)
+	chunks := c.ChunkDocumentWithMeta(content)
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks with chunkSize=5, got %d", len(chunks))
 	}
 
 	// Verify chunk indices are sequential.
-	for i, c := range chunks {
-		if c.ChunkIndex != i {
-			t.Errorf("chunk %d has ChunkIndex %d", i, c.ChunkIndex)
+	for i, chunk := range chunks {
+		if chunk.ChunkIndex != i {
+			t.Errorf("chunk %d has ChunkIndex %d", i, chunk.ChunkIndex)
 		}
 	}
 
 	// Verify all content is accounted for.
 	var allContent []string
-	for _, c := range chunks {
-		allContent = append(allContent, c.Content)
+	for _, chunk := range chunks {
+		allContent = append(allContent, chunk.Content)
 	}
 	joined := strings.Join(allContent, "\n\n")
 	if !strings.Contains(joined, "first paragraph") {
@@ -64,10 +64,10 @@ func TestChunkDocumentWithMeta_MultipleChunks(t *testing.T) {
 }
 
 func TestChunkDocumentWithMeta_HeadingTracking(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 1000}
+	c := NewChunker(1000)
 	content := "# Main Title\n\nIntro text.\n\n## Section One\n\nSection one content.\n\n## Section Two\n\nSection two content."
 
-	chunks := parser.ChunkDocumentWithMeta(content)
+	chunks := c.ChunkDocumentWithMeta(content)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk (large chunkSize), got %d", len(chunks))
 	}
@@ -79,11 +79,11 @@ func TestChunkDocumentWithMeta_HeadingTracking(t *testing.T) {
 }
 
 func TestChunkDocumentWithMeta_HeadingSplitAcrossChunks(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 5}
+	c := NewChunker(5)
 
 	content := "# Title\n\nFirst paragraph with many words enough.\n\n## Subsection\n\nSecond paragraph with many words enough."
 
-	chunks := parser.ChunkDocumentWithMeta(content)
+	chunks := c.ChunkDocumentWithMeta(content)
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
 	}
@@ -101,11 +101,11 @@ func TestChunkDocumentWithMeta_HeadingSplitAcrossChunks(t *testing.T) {
 }
 
 func TestChunkDocumentWithMeta_Determinism(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 50}
+	c := NewChunker(50)
 	content := "# Hello\n\nSome content here.\n\n## World\n\nMore content."
 
-	chunks1 := parser.ChunkDocumentWithMeta(content)
-	chunks2 := parser.ChunkDocumentWithMeta(content)
+	chunks1 := c.ChunkDocumentWithMeta(content)
+	chunks2 := c.ChunkDocumentWithMeta(content)
 
 	if len(chunks1) != len(chunks2) {
 		t.Fatalf("non-deterministic chunk count: %d vs %d", len(chunks1), len(chunks2))
@@ -122,8 +122,8 @@ func TestChunkDocumentWithMeta_Determinism(t *testing.T) {
 }
 
 func TestChunkDocumentWithMeta_EmptyDocument(t *testing.T) {
-	parser := &DocumentParser{chunkSize: 100}
-	chunks := parser.ChunkDocumentWithMeta("")
+	c := NewChunker(100)
+	chunks := c.ChunkDocumentWithMeta("")
 	if len(chunks) != 0 {
 		t.Errorf("expected 0 chunks for empty document, got %d", len(chunks))
 	}

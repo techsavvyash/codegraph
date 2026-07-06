@@ -276,35 +276,3 @@ func (lsp *LSPService) GetCompletion(ctx context.Context, req CompletionRequest)
 	}, nil
 }
 
-// HoverRequest represents a hover request
-type HoverRequest struct {
-	FilePath string `json:"filePath"`
-	Line     int    `json:"line"`
-	Column   int    `json:"column"`
-}
-
-// HoverResponse represents hover information
-type HoverResponse struct {
-	Content   string `json:"content"`
-	Range     *Range `json:"range,omitempty"`
-	Found     bool   `json:"found"`
-}
-
-// Range represents a text range
-type Range struct {
-	StartLine   int `json:"startLine"`
-	StartColumn int `json:"startColumn"`
-	EndLine     int `json:"endLine"`
-	EndColumn   int `json:"endColumn"`
-}
-
-// GetHover provides hover information for a symbol at a position
-func (lsp *LSPService) GetHover(ctx context.Context, req HoverRequest) (*HoverResponse, error) {
-	// This is a simplified implementation
-	// In a full implementation, we would need to map file positions to symbols
-	// For now, return a placeholder response
-	return &HoverResponse{
-		Content: "Hover information not yet implemented",
-		Found:   false,
-	}, nil
-}

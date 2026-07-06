@@ -15,8 +15,6 @@ import (
 
 	"github.com/context-maximiser/code-graph/libs/indexer-go/pipeline"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/search-go"
-	textindex "github.com/context-maximiser/code-graph/libs/text-index-client-go"
 )
 
 // RepoStats captures the shape of the repository being benchmarked.
@@ -32,19 +30,12 @@ type RepoStats struct {
 
 // SelfBenchmarkConfig configures a self-benchmark run.
 type SelfBenchmarkConfig struct {
-	RepoRoot    string   // Path to the repository root.
-	ServiceName string   // Service name for the graph scope.
-	Version     string   // Version tag.
-	RepoURL     string   // Repository URL.
-	DocPaths    []string // Paths to doc directories (relative to RepoRoot).
-	SkipStores  bool     // If true, skip Qdrant/OpenSearch (graph-only).
-	Incremental bool     // If true, run a second pass without DB wipe.
-	Parallel    bool     // If true, use tiered parallel execution.
-
-	// External stores (nil = skip that store).
-	EmbeddingService search.EmbeddingService
-	VectorStore      search.VectorStore
-	TextStore        textindex.TextIndexStore
+	RepoRoot    string // Path to the repository root.
+	ServiceName string // Service name for the graph scope.
+	Version     string // Version tag.
+	RepoURL     string // Repository URL.
+	Incremental bool   // If true, run a second pass without DB wipe.
+	Parallel    bool   // If true, use tiered parallel execution.
 }
 
 // SelfBenchmarkResult holds the output of a self-benchmark run.
@@ -67,7 +58,7 @@ type RunResult struct {
 // RunSelfBenchmark executes the full self-benchmark flow:
 // 1. Count repo stats
 // 2. Wipe database + create schema
-// 3. Run the full 7-stage pipeline with PhaseTimer
+// 3. Run the code-indexing pipeline with PhaseTimer
 // 4. Optionally run incremental pass
 func RunSelfBenchmark(ctx context.Context, cfg SelfBenchmarkConfig, client *neo4j.Client) (*SelfBenchmarkResult, error) {
 	result := &SelfBenchmarkResult{
@@ -119,24 +110,12 @@ func runPipeline(ctx context.Context, cfg SelfBenchmarkConfig, client *neo4j.Cli
 
 	// Build pipeline config.
 	pipeCfg := &pipeline.PipelineConfig{
-		Client:           client,
-		ProjectPath:      cfg.RepoRoot,
-		ServiceName:      cfg.ServiceName,
-		Version:          cfg.Version,
-		RepoURL:          cfg.RepoURL,
-		Timer:            timer,
-		EmbeddingService: cfg.EmbeddingService,
-		VectorStore:      cfg.VectorStore,
-		TextStore:        cfg.TextStore,
-	}
-
-	// Resolve doc paths.
-	for _, dp := range cfg.DocPaths {
-		if filepath.IsAbs(dp) {
-			pipeCfg.DocPaths = append(pipeCfg.DocPaths, dp)
-		} else {
-			pipeCfg.DocPaths = append(pipeCfg.DocPaths, filepath.Join(cfg.RepoRoot, dp))
-		}
+		Client:      client,
+		ProjectPath: cfg.RepoRoot,
+		ServiceName: cfg.ServiceName,
+		Version:     cfg.Version,
+		RepoURL:     cfg.RepoURL,
+		Timer:       timer,
 	}
 
 	// Execute pipeline.

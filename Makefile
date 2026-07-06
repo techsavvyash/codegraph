@@ -12,7 +12,6 @@ help: ## Show this help message
 # Workspace modules (in dependency order)
 GO_MODULES := \
 	libs/core-models-go \
-	libs/llm-go \
 	libs/text-index-client-go \
 	libs/neo4j-go \
 	libs/schema-go \

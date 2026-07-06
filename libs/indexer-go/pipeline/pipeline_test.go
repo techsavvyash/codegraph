@@ -195,8 +195,8 @@ func TestPipeline_ContextCancellation(t *testing.T) {
 
 func TestDefaultStages_Count(t *testing.T) {
 	stages := DefaultStages()
-	if len(stages) != 8 {
-		t.Fatalf("expected 8 default stages, got %d", len(stages))
+	if len(stages) != 4 {
+		t.Fatalf("expected 4 default stages, got %d", len(stages))
 	}
 }
 
@@ -207,10 +207,6 @@ func TestDefaultStages_Names(t *testing.T) {
 		StageComputeGraphMetrics,
 		StageInferServiceDeps,
 		StageGenerateFlowSpines,
-		StageIngestDocuments,
-		StageLinkDocumentChunks,
-		StageGenerateContextDocs,
-		StageRefreshRetrievalIndexes,
 	}
 
 	if len(stages) != len(expectedNames) {
@@ -232,10 +228,9 @@ func TestDefaultStages_FirstIsRequired(t *testing.T) {
 
 func TestDefaultStages_OptionalFlags(t *testing.T) {
 	stages := DefaultStages()
-	// IngestCode and GenerateContextDocs are required; others are optional.
+	// Only IngestCode is required; the rest are optional.
 	requiredStages := map[StageName]bool{
-		StageIngestCode:          true,
-		StageGenerateContextDocs: true,
+		StageIngestCode: true,
 	}
 	for i, stage := range stages {
 		if requiredStages[stage.Name()] {
@@ -252,14 +247,14 @@ func TestDefaultStages_OptionalFlags(t *testing.T) {
 
 func TestDefaultTiers_Count(t *testing.T) {
 	tiers := DefaultTiers()
-	if len(tiers) != 5 {
-		t.Fatalf("expected 5 tiers, got %d", len(tiers))
+	if len(tiers) != 3 {
+		t.Fatalf("expected 3 tiers, got %d", len(tiers))
 	}
 }
 
 func TestDefaultTiers_StageDistribution(t *testing.T) {
 	tiers := DefaultTiers()
-	expected := []int{1, 1, 3, 2, 1} // IngestCode | Metrics | (Deps,Flows,Docs) | (Link,Generate) | Refresh
+	expected := []int{1, 1, 2} // IngestCode | Metrics | (Deps,Flows)
 	if len(tiers) != len(expected) {
 		t.Fatalf("expected %d tiers, got %d", len(expected), len(tiers))
 	}
@@ -284,13 +279,10 @@ func TestDefaultTiers_TotalStagesMatch(t *testing.T) {
 func TestStageNameConstants(t *testing.T) {
 	// Freeze the string values — they're used in logs and might be referenced externally.
 	names := map[StageName]string{
-		StageIngestCode:              "IngestCode",
-		StageInferServiceDeps:        "InferServiceDependencies",
-		StageGenerateFlowSpines:      "GenerateFlowSpines",
-		StageIngestDocuments:         "IngestDocuments",
-		StageLinkDocumentChunks:      "LinkDocumentChunks",
-		StageGenerateContextDocs:     "GenerateContextDocs",
-		StageRefreshRetrievalIndexes: "RefreshRetrievalIndexes",
+		StageIngestCode:          "IngestCode",
+		StageInferServiceDeps:    "InferServiceDependencies",
+		StageGenerateFlowSpines:  "GenerateFlowSpines",
+		StageComputeGraphMetrics: "ComputeGraphMetrics",
 	}
 	for constant, expected := range names {
 		if string(constant) != expected {
@@ -358,44 +350,24 @@ func TestSummary_Empty(t *testing.T) {
 	}
 }
 
-func TestGenerateContextDocsStage_NilGeneratorFails(t *testing.T) {
-	stage := &GenerateContextDocsStage{}
-	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
-	// Generator is nil — Run should return an error.
-	_, err := stage.Run(context.Background(), cfg)
-	if err == nil {
-		t.Fatal("expected error when Generator is nil, got nil")
-	}
-	if !strings.Contains(err.Error(), "generator is required") {
-		t.Errorf("error should mention generator requirement, got: %v", err)
-	}
-}
-
-func TestGenerateContextDocsStage_NotOptional(t *testing.T) {
-	stage := &GenerateContextDocsStage{}
-	if stage.Optional() {
-		t.Error("GenerateContextDocsStage must not be optional")
-	}
-}
-
-func TestPipeline_Stage6AbortsPipeline(t *testing.T) {
+func TestPipeline_NonOptionalStageAbortsPipeline(t *testing.T) {
 	s1 := &fakeStage{name: "PreStage", items: 1}
-	// Simulate Stage 6 as non-optional with a failure.
-	s6 := &fakeStage{name: StageGenerateContextDocs, optional: false, err: errors.New("generator is required but was nil")}
-	s7 := &fakeStage{name: "PostStage", items: 1}
+	// Simulate a required stage failing.
+	s2 := &fakeStage{name: StageIngestCode, optional: false, err: errors.New("ingest failed")}
+	s3 := &fakeStage{name: "PostStage", items: 1}
 
-	p := New(s1, s6, s7)
+	p := New(s1, s2, s3)
 	cfg := &PipelineConfig{ScopeCtx: models.DefaultScope()}
 	results := p.Run(context.Background(), cfg)
 
-	// Pipeline should abort at Stage 6 — PostStage must not run.
-	if s7.ran {
-		t.Error("PostStage should not run after non-optional Stage 6 failure")
+	// Pipeline should abort at the required stage — PostStage must not run.
+	if s3.ran {
+		t.Error("PostStage should not run after non-optional stage failure")
 	}
 	if len(results) != 2 {
-		t.Fatalf("expected 2 results (aborted at Stage 6), got %d", len(results))
+		t.Fatalf("expected 2 results (aborted at required stage), got %d", len(results))
 	}
 	if results[1].Err == nil {
-		t.Error("Stage 6 result should contain an error")
+		t.Error("required stage result should contain an error")
 	}
 }

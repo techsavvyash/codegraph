@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
@@ -163,56 +162,6 @@ func (s *SystemTestSuite) TestSearchFunctionality() {
 	}
 }
 
-func (s *SystemTestSuite) TestDocumentIndexingCapability() {
-	s.T().Log("Testing document indexing capability")
-	
-	// Create a simple test document
-	testDir := "test_docs_temp"
-	os.MkdirAll(testDir, 0755)
-	defer os.RemoveAll(testDir)
-	
-	testDoc := `# Test Document
-
-## Introduction
-This is a test document for validating document indexing.
-
-## Features
-Feature: Test Feature
-- Implementation: Test implementation
-- Status: Testing
-
-The document mentions NEO4J and SCIP integration.
-`
-	
-	testFile := filepath.Join(testDir, "test.md")
-	err := os.WriteFile(testFile, []byte(testDoc), 0644)
-	require.NoError(s.T(), err)
-	
-	// Test document parsing
-	docIndexer := documents.NewDocumentIndexer(s.client)
-	
-	// Get initial document count
-	initialCount, err := s.getDocumentCount()
-	require.NoError(s.T(), err)
-	
-	// Index the test document
-	err = docIndexer.IndexDocument(s.ctx, testFile)
-	require.NoError(s.T(), err)
-	
-	// Verify document was indexed
-	finalCount, err := s.getDocumentCount()
-	require.NoError(s.T(), err)
-	
-	assert.Greater(s.T(), finalCount, initialCount, "Should have added at least one document")
-	s.T().Logf("✓ Document indexing successful: %d -> %d documents", initialCount, finalCount)
-	
-	// Test feature extraction
-	featureCount, err := s.getFeatureCount()
-	require.NoError(s.T(), err)
-	assert.Greater(s.T(), featureCount, int64(0), "Should have extracted features")
-	s.T().Logf("✓ Feature extraction successful: %d features found", featureCount)
-}
-
 func (s *SystemTestSuite) TestSCIPIndexingCapability() {
 	s.T().Log("Testing SCIP indexing capability")
 	
@@ -329,30 +278,6 @@ func (s *SystemTestSuite) TestSystemEnd2End() {
 	assert.GreaterOrEqual(s.T(), nodeTypes, int64(3), "Should have multiple node types")
 	
 	s.T().Logf("✓ System health: %d nodes across %d types", totalNodes, nodeTypes)
-}
-
-// Helper functions
-
-func (s *SystemTestSuite) getDocumentCount() (int64, error) {
-	result, err := s.client.ExecuteQuery(s.ctx, "MATCH (d:Document) RETURN count(d) as count", nil)
-	if err != nil {
-		return 0, err
-	}
-	if len(result) == 0 {
-		return 0, nil
-	}
-	return result[0].AsMap()["count"].(int64), nil
-}
-
-func (s *SystemTestSuite) getFeatureCount() (int64, error) {
-	result, err := s.client.ExecuteQuery(s.ctx, "MATCH (f:Feature) RETURN count(f) as count", nil)
-	if err != nil {
-		return 0, err
-	}
-	if len(result) == 0 {
-		return 0, nil
-	}
-	return result[0].AsMap()["count"].(int64), nil
 }
 
 // TestEnhancedLocationMetadata tests the enhanced location metadata functionality

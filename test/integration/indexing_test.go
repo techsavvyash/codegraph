@@ -3,16 +3,12 @@ package integration
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
-	"github.com/context-maximiser/code-graph/libs/search-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -21,9 +17,8 @@ import (
 // IndexingTestSuite tests the complete indexing functionality
 type IndexingTestSuite struct {
 	suite.Suite
-	client    *neo4j.Client
-	ctx       context.Context
-	testDir   string
+	client *neo4j.Client
+	ctx    context.Context
 }
 
 func TestIndexingTestSuite(t *testing.T) {
@@ -45,23 +40,11 @@ func (s *IndexingTestSuite) SetupSuite() {
 	s.client = client
 	s.ctx = context.Background()
 
-	// Use os.MkdirTemp (not s.T().TempDir()) because in testify v1.8+,
-	// SetupSuite runs inside the first test's subtest T. If we used
-	// s.T().TempDir(), the directory would be deleted when that first test
-	// finishes — before later tests (e.g. TestDocumentIndexingIntegration) run.
-	// os.MkdirTemp has no T lifecycle dependency; we clean it up in TearDownSuite.
-	dir, err := os.MkdirTemp("", "codegraph-integration-*")
-	require.NoError(s.T(), err)
-	s.testDir = dir
-	
 	// Setup test schema (clean slate)
 	s.setupTestSchema()
 }
 
 func (s *IndexingTestSuite) TearDownSuite() {
-	if s.testDir != "" {
-		os.RemoveAll(s.testDir)
-	}
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}
@@ -162,212 +145,6 @@ func (s *IndexingTestSuite) verifyCodeIndexing() {
 				"%s: %s. Expected >= %d, got %d", tt.name, tt.description, tt.expectedCount, count)
 			
 			t.Logf("✓ %s: %d (expected >= %d)", tt.description, count, tt.expectedCount)
-		})
-	}
-}
-
-func (s *IndexingTestSuite) TestDocumentIndexingIntegration() {
-	s.T().Log("Testing complete document indexing integration")
-	
-	// Create test documents
-	s.createTestDocuments()
-	
-	// Create document indexer
-	docIndexer := documents.NewDocumentIndexer(s.client)
-	
-	// Index test documents
-	err := docIndexer.IndexDirectory(s.ctx, s.testDir)
-	require.NoError(s.T(), err)
-	
-	// Verify document indexing
-	s.verifyDocumentIndexing()
-}
-
-func (s *IndexingTestSuite) createTestDocuments() {
-	// Test document 1: Architecture document
-	archDoc := `# Test Architecture Document
-
-## Introduction
-This document describes the test architecture for our system.
-
-## Features
-Feature: User Authentication
-- Implementation: OAuth 2.0
-- Status: Completed
-
-Feature: Data Processing Pipeline  
-- Implementation: Stream processing
-- Status: In Progress
-
-## Components
-The system implements several key components:
-- Authentication service
-- Data processor
-- API gateway
-
-## Neo4j Integration
-The system uses Neo4j for graph storage and provides indexing capabilities.
-`
-	
-	testFile1 := filepath.Join(s.testDir, "architecture.md")
-	err := os.WriteFile(testFile1, []byte(archDoc), 0644)
-	require.NoError(s.T(), err)
-	
-	// Test document 2: RFC document
-	rfcDoc := `# RFC 001: Test Feature Implementation
-
-## Summary
-This RFC proposes implementing the test feature using SCIP indexing.
-
-## Requirements
-Requirement: Code Intelligence
-- Must support Go projects
-- Must extract symbol information
-- Status: Planned
-
-## Implementation Plan
-1. Set up SCIP indexer
-2. Create Neo4j schema
-3. Index project symbols
-4. Build query interface
-
-The implementation uses `+"`IndexProject`"+` and `+"`NewSCIPIndexer`"+` functions.
-`
-	
-	testFile2 := filepath.Join(s.testDir, "rfc-001.md")
-	err = os.WriteFile(testFile2, []byte(rfcDoc), 0644)
-	require.NoError(s.T(), err)
-}
-
-func (s *IndexingTestSuite) verifyDocumentIndexing() {
-	tests := []struct {
-		name          string
-		query         string
-		expectedCount int
-		description   string
-	}{
-		{
-			name:          "Document nodes created",
-			query:         "MATCH (d:Document) RETURN count(d) as count",
-			expectedCount: 2,
-			description:   "Should have test document nodes",
-		},
-		{
-			name:          "Feature nodes extracted",
-			query:         "MATCH (f:Feature) RETURN count(f) as count",
-			expectedCount: 5, // At least 5 features from test docs
-			description:   "Should have extracted feature nodes",
-		},
-		{
-			name:          "Documents describe features",
-			query:         "MATCH (d:Document)-[:DESCRIBES]->(f:Feature) RETURN count(f) as count",
-			expectedCount: 3, // At least 3 features linked to docs
-			description:   "Documents should describe features",
-		},
-		{
-			name:          "Features have different statuses",
-			query:         "MATCH (f:Feature) RETURN DISTINCT f.status as status",
-			expectedCount: 2, // At least 2 different statuses
-			description:   "Features should have various statuses",
-		},
-	}
-	
-	for _, tt := range tests {
-		s.T().Run(tt.name, func(t *testing.T) {
-			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
-			require.NoError(t, err)
-			
-			if tt.name == "Features have different statuses" {
-				// Special case for distinct values
-				assert.GreaterOrEqual(t, len(result), tt.expectedCount, tt.description)
-				t.Logf("✓ %s: %d statuses found", tt.description, len(result))
-			} else {
-				require.Len(t, result, 1)
-				record := result[0].AsMap()
-				count, ok := record["count"].(int64)
-				require.True(t, ok, "Count should be an integer")
-				
-				assert.GreaterOrEqual(t, int(count), tt.expectedCount,
-					"%s: %s. Expected >= %d, got %d", tt.name, tt.description, tt.expectedCount, count)
-				
-				t.Logf("✓ %s: %d (expected >= %d)", tt.description, count, tt.expectedCount)
-			}
-		})
-	}
-}
-
-func (s *IndexingTestSuite) TestECrossContextIntegration() {
-	s.T().Log("Testing cross-context integration between code and documents")
-	
-	// Test cross-context queries
-	s.verifyCrossContextQueries()
-}
-
-func (s *IndexingTestSuite) verifyCrossContextQueries() {
-	tests := []struct {
-		name        string
-		query       string
-		description string
-	}{
-		{
-			name: "Find SCIP-related items across contexts",
-			query: `
-				MATCH (n)
-				WHERE (n:Symbol OR n:Feature OR n:Function OR n:Document)
-				  AND (
-					toLower(n.name) CONTAINS 'scip' OR
-					toLower(n.symbol) CONTAINS 'scip' OR
-					toLower(n.title) CONTAINS 'scip'
-				  )
-				RETURN labels(n) as nodeTypes, count(n) as count
-			`,
-			description: "Should find SCIP references in both code and documents",
-		},
-		{
-			name: "Find indexing-related items across contexts", 
-			query: `
-				MATCH (n)
-				WHERE (n:Symbol OR n:Feature OR n:Function OR n:File)
-				  AND (
-					toLower(n.name) CONTAINS 'index' OR
-					toLower(n.path) CONTAINS 'index' OR
-					toLower(n.description) CONTAINS 'index'
-				  )
-				RETURN labels(n) as nodeTypes, count(n) as count
-			`,
-			description: "Should find indexing references in both code and documents",
-		},
-		{
-			name: "Verify service-to-document traceability",
-			query: `
-				MATCH (s:Service), (d:Document)
-				OPTIONAL MATCH (s)-[:CONTAINS]->()-[:REFERENCES]->(sym:Symbol)
-				OPTIONAL MATCH (d)-[:DESCRIBES]->(f:Feature)
-				RETURN 
-					s.name as service,
-					count(DISTINCT sym) as codeSymbols,
-					count(DISTINCT f) as features,
-					count(DISTINCT d) as documents
-			`,
-			description: "Should show traceability from service to documents",
-		},
-	}
-	
-	for _, tt := range tests {
-		s.T().Run(tt.name, func(t *testing.T) {
-			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
-			require.NoError(t, err)
-			
-			assert.Greater(t, len(result), 0, "%s: %s", tt.name, tt.description)
-			
-			t.Logf("✓ %s: Found %d result rows", tt.description, len(result))
-			
-			// Log some sample results for debugging
-			for i, record := range result {
-				if i < 3 { // Show first 3 results
-					t.Logf("  Sample result %d: %+v", i+1, record.AsMap())
-				}
-			}
 		})
 	}
 }
@@ -539,176 +316,4 @@ func min(a, b int) int {
 }
 
 func (s *IndexingTestSuite) TearDownTest() {
-	// Note: s.testDir is shared across all tests in the suite and is cleaned
-	// up in TearDownSuite — do NOT remove it here or later tests will lose it.
-}
-
-// ===========================================================================
-// Phase 0 Guardrail Tests — Delayed Doc Ingestion & External Sync Linking
-// ===========================================================================
-
-// TestDelayedDocIngestion_ChunkLinking verifies that when code is indexed first
-// and business docs are indexed later, chunk-level MENTIONS links are created
-// deterministically. This is the core "delayed doc ingestion" scenario.
-func TestDelayedDocIngestion_ChunkLinking(t *testing.T) {
-	prefix := "phase0-delayed-"
-	client, cleanup := setupTestDB(t, prefix)
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	// Step 1: Index code first — create Function nodes that docs will reference.
-	fnKey := prefix + "func:pkg/api.go#HandleRequest(...)"
-	_, err := client.MergeNode(ctx, []string{"Function"},
-		map[string]any{"nodeKey": fnKey, "scopeId": "main"},
-		map[string]any{
-			"name": "HandleRequest()", "displayName": "HandleRequest()",
-			"nodeKey": fnKey, "signature": "HandleRequest(ctx context.Context) error",
-			"scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err, "failed to create Function node")
-
-	svcKey := prefix + "func:pkg/service.go#ProcessOrder(...)"
-	_, err = client.MergeNode(ctx, []string{"Function"},
-		map[string]any{"nodeKey": svcKey, "scopeId": "main"},
-		map[string]any{
-			"name": "ProcessOrder()", "displayName": "ProcessOrder()",
-			"nodeKey": svcKey, "signature": "ProcessOrder(order Order) error",
-			"scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err, "failed to create second Function node")
-
-	// Step 2: "Days later" — index a business doc that references these functions.
-	docNodeKey := prefix + "doc:architecture"
-	docContent := "# Architecture\n\nThe `HandleRequest()` function is the main entry point.\nIt delegates to `ProcessOrder()` for order processing."
-	docID, err := client.MergeNode(ctx, []string{"Document"},
-		map[string]any{"nodeKey": docNodeKey, "scopeId": "main"},
-		map[string]any{
-			"title": "Architecture", "content": docContent,
-			"sourceUrl": "architecture.md", "type": "Architecture",
-			"nodeKey": docNodeKey, "scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err, "failed to create Document node")
-
-	// Create DocumentChunk nodes (simulating what the doc indexer would create).
-	chunkKey := prefix + "chunk:architecture:0"
-	chunkID, err := client.MergeNode(ctx, []string{"DocumentChunk"},
-		map[string]any{"nodeKey": chunkKey, "scopeId": "main"},
-		map[string]any{
-			"nodeKey": chunkKey, "documentKey": docNodeKey,
-			"content": docContent, "headingPath": "Architecture",
-			"chunkIndex": 0, "scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err, "failed to create DocumentChunk node")
-
-	// Link Document -> Chunk.
-	_, err = client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
-		map[string]any{"chunkIndex": 0},
-		map[string]any{"chunkIndex": 0, "scope": "main", "scopeId": "main"})
-	require.NoError(t, err)
-
-	// Step 3: Run the chunk linker (simulating delayed linking).
-	cl := search.NewChunkLinker(client)
-	cl.SetScope("main")
-	linkCount, err := cl.LinkChunksForDocument(ctx, docNodeKey, "main")
-	require.NoError(t, err, "ChunkLinker failed")
-
-	// ASSERTION: Delayed doc ingestion must create MENTIONS links.
-	assert.GreaterOrEqual(t, linkCount, 1,
-		"delayed doc ingestion should create at least 1 MENTIONS link to existing code")
-
-	// Verify specific MENTIONS edges exist.
-	cypher := `
-		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})-[:MENTIONS]->(target)
-		RETURN target.nodeKey AS targetKey`
-	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey})
-	require.NoError(t, err)
-
-	targetKeys := make(map[string]bool)
-	for _, r := range records {
-		m := r.AsMap()
-		if tk, ok := m["targetKey"].(string); ok {
-			targetKeys[tk] = true
-		}
-	}
-
-	assert.True(t, targetKeys[fnKey] || targetKeys[svcKey],
-		"expected MENTIONS edges to HandleRequest or ProcessOrder, got: %v", targetKeys)
-}
-
-// TestExternalDocSync_ChunkLinking verifies that external doc sync (via connector)
-// creates chunk-level MENTIONS links just like local doc indexing does.
-// This test is expected to FAIL until Phase 1 is implemented.
-func TestExternalDocSync_ChunkLinking(t *testing.T) {
-	prefix := "phase0-extsync-"
-	client, cleanup := setupTestDB(t, prefix)
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	// Create code nodes that the external doc will reference.
-	fnKey := prefix + "func:pkg/auth.go#Authenticate(...)"
-	_, err := client.MergeNode(ctx, []string{"Function"},
-		map[string]any{"nodeKey": fnKey, "scopeId": "main"},
-		map[string]any{
-			"name": "Authenticate()", "displayName": "Authenticate()",
-			"nodeKey": fnKey, "scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err)
-
-	// Simulate external doc sync by creating Document + chunks manually,
-	// then running chunk linker — this mimics what indexExternalDocument should do.
-	docNodeKey := prefix + "doc:auth-spec"
-	docContent := "# Auth Spec\n\nThe `Authenticate()` function validates user credentials."
-	docID, err := client.MergeNode(ctx, []string{"Document"},
-		map[string]any{"nodeKey": docNodeKey, "scopeId": "main"},
-		map[string]any{
-			"title": "Auth Spec", "content": docContent,
-			"sourceUrl": "https://wiki.example.com/auth-spec", "type": "External/Confluence",
-			"nodeKey": docNodeKey, "scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err)
-
-	chunkKey := prefix + "chunk:auth-spec:0"
-	chunkID, err := client.MergeNode(ctx, []string{"DocumentChunk"},
-		map[string]any{"nodeKey": chunkKey, "scopeId": "main"},
-		map[string]any{
-			"nodeKey": chunkKey, "documentKey": docNodeKey,
-			"content": docContent, "headingPath": "Auth Spec",
-			"chunkIndex": 0, "scope": "main", "scopeId": "main",
-		})
-	require.NoError(t, err)
-
-	_, err = client.MergeRelationship(ctx, docID, chunkID, "HAS_CHUNK",
-		map[string]any{"chunkIndex": 0},
-		map[string]any{"chunkIndex": 0, "scope": "main", "scopeId": "main"})
-	require.NoError(t, err)
-
-	// Run chunk linker — in the real external sync path, this should be automatic.
-	// Phase 1 will wire this into indexExternalDocument.
-	cl := search.NewChunkLinker(client)
-	cl.SetScope("main")
-	linkCount, err := cl.LinkChunksForDocument(ctx, docNodeKey, "main")
-	require.NoError(t, err)
-
-	// ASSERTION: External doc sync should produce MENTIONS links.
-	assert.GreaterOrEqual(t, linkCount, 1,
-		"external doc sync should create chunk MENTIONS links to code nodes")
-
-	// Verify the edge has provenance metadata.
-	cypher := `
-		MATCH (chunk:DocumentChunk {nodeKey: $chunkKey})-[r:MENTIONS]->(target:Function)
-		RETURN r.confidence AS confidence, r.reasons AS reasons, r.model AS model, r.scopeId AS scopeId`
-	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"chunkKey": chunkKey})
-	require.NoError(t, err)
-
-	if len(records) > 0 {
-		m := records[0].AsMap()
-		assert.NotNil(t, m["confidence"], "MENTIONS edge should have confidence")
-		assert.NotNil(t, m["reasons"], "MENTIONS edge should have reasons")
-		assert.NotNil(t, m["model"], "MENTIONS edge should have model")
-		assert.Equal(t, "main", m["scopeId"], "MENTIONS edge should have correct scopeId")
-	}
 }
