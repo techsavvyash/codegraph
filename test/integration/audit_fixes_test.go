@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
-	"github.com/context-maximiser/code-graph/libs/core-models-go"
-	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	queryPkg "github.com/context-maximiser/code-graph/libs/query-go"
-	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/internal/ingest/scip"
+	"github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/graph"
+	queryPkg "github.com/context-maximiser/code-graph/internal/query"
+	"github.com/context-maximiser/code-graph/internal/graph/schema"
 )
 
 // ---------------------------------------------------------------------------

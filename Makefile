@@ -1,6 +1,6 @@
 # Code Graph Makefile
 
-.PHONY: help build test clean docker-up docker-down docker-logs install-deps generate-mocks lint format smoke-test workspace-init mod-tidy-all
+.PHONY: help build test clean docker-up docker-down docker-logs install-deps generate-mocks lint format smoke-test
 
 # Default target
 help: ## Show this help message
@@ -9,47 +9,18 @@ help: ## Show this help message
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# Workspace modules (in dependency order)
-GO_MODULES := \
-	libs/core-models-go \
-	libs/text-index-client-go \
-	libs/neo4j-go \
-	libs/schema-go \
-	libs/search-go \
-	libs/query-go \
-	libs/indexer-go \
-	libs/benchmarks-go \
-	apps/mcp-server-go \
-	apps/cli
-
 # Development
-workspace-init: ## Initialise go.work workspace: run go mod tidy in every sub-module
-	@echo "Running go mod tidy in each workspace module..."
-	@for mod in $(GO_MODULES); do \
-		echo "  tidy $$mod"; \
-		(cd $$mod && go mod tidy) || exit 1; \
-	done
+install-deps: ## Install Go dependencies
 	go mod tidy
-	go work sync
-	@echo "Workspace initialised."
-
-mod-tidy-all: workspace-init ## Alias for workspace-init
-
-install-deps: ## Install Go dependencies (workspace-aware)
-	go work sync
-	$(MAKE) workspace-init
 
 build: ## Build the CLI application
-	go build -o bin/codegraph ./apps/cli
+	go build -o bin/codegraph ./cmd/codegraph
 
 build-mcp: ## Build the MCP server
-	go build -o bin/codegraph-mcp ./apps/mcp-server-go
+	go build -o bin/codegraph-mcp ./cmd/codegraph-mcp
 
-test: ## Run unit tests across all workspace modules (excludes integration)
-	@for mod in $(GO_MODULES); do \
-		echo "--- testing $$mod ---"; \
-		(cd $$mod && go test ./...) || exit 1; \
-	done
+test: ## Run unit tests (excludes test/integration, which requires Neo4j)
+	go test $$(go list ./... | grep -v '/test/integration')
 
 test-integration: ## Run integration tests (requires Neo4j)
 	go test -v ./test/integration/...
@@ -66,41 +37,32 @@ test-correctness-update: ## Regenerate golden snapshots in test/fixtures/*/golde
 	go test -v -update-golden ./test/harness/
 
 benchmark: ## Run benchmarks
-	@for mod in $(GO_MODULES); do \
-		(cd $$mod && go test -bench=. -benchmem ./...); \
-	done
+	go test -bench=. -benchmem ./...
 
-benchmark-self: build ## Self-benchmark: full pipeline on this repo (graph only)
-	./bin/codegraph benchmark self . --doc-paths=docs
+benchmark-self: build ## Self-benchmark: run the code-indexing pipeline on this repo
+	./bin/codegraph benchmark self .
 
 benchmark-self-parallel: build ## Self-benchmark with parallel tier execution
-	./bin/codegraph benchmark self . --doc-paths=docs --parallel
+	./bin/codegraph benchmark self . --parallel
 
 benchmark-self-json: build ## Self-benchmark with JSON output (for CI)
-	./bin/codegraph benchmark self . --doc-paths=docs --json
+	./bin/codegraph benchmark self . --json
 
 benchmark-self-baseline: build ## Self-benchmark and save baseline
-	./bin/codegraph benchmark self . --doc-paths=docs --save-baseline
+	./bin/codegraph benchmark self . --save-baseline
 
 benchmark-self-compare: build ## Self-benchmark and compare to saved baseline
-	./bin/codegraph benchmark self . --doc-paths=docs --compare-baseline
+	./bin/codegraph benchmark self . --compare-baseline
 
 benchmark-pipeline-polyglot: build ## Benchmark SCIP pipeline in polyglot mode
 	./bin/codegraph benchmark pipeline . --polyglot
 
-lint: ## Run golangci-lint across all workspace modules
-	@for mod in $(GO_MODULES); do \
-		echo "--- lint $$mod ---"; \
-		(cd $$mod && golangci-lint run) || exit 1; \
-	done
-	golangci-lint run ./test/...
+lint: ## Run golangci-lint
+	golangci-lint run ./...
 
-format: ## Format Go code across all workspace modules
-	@for mod in $(GO_MODULES); do \
-		(cd $$mod && go fmt ./... && goimports -w .); \
-	done
-	go fmt ./test/...
-	goimports -w test/
+format: ## Format Go code
+	go fmt ./...
+	goimports -w .
 
 # Docker operations
 docker-up: ## Start Neo4j with docker-compose
@@ -122,23 +84,23 @@ docker-clean: ## Clean up Docker containers and volumes
 
 # Neo4j operations
 neo4j-status: ## Check Neo4j connection status
-	go run ./apps/cli status
+	go run ./cmd/codegraph status
 
 neo4j-schema: ## Create Neo4j schema (constraints and indexes)
-	go run ./apps/cli schema create
+	go run ./cmd/codegraph schema create
 
 neo4j-schema-drop: ## Drop Neo4j schema
-	go run ./apps/cli schema drop
+	go run ./cmd/codegraph schema drop
 
 neo4j-schema-info: ## Show schema information
-	go run ./apps/cli schema info
+	go run ./cmd/codegraph schema info
 
 # Code indexing operations
 index-self-scip: ## Index this project itself using SCIP (Go)
-	go run ./apps/cli index scip . --service="context-maximiser" --version="v1.0.0"
+	go run ./cmd/codegraph index scip . --service="context-maximiser" --version="v1.0.0"
 
 query-example: ## Run example queries
-	go run ./apps/cli query search "Client"
+	go run ./cmd/codegraph query search "Client"
 
 # Development workflow
 dev-setup: docker-up install-deps neo4j-schema ## Set up development environment
@@ -161,10 +123,10 @@ generate: ## Run go generate
 
 # Release
 release-build: ## Build release binaries
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-linux-amd64 ./apps/cli
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-darwin-amd64 ./apps/cli
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/codegraph-darwin-arm64 ./apps/cli
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-windows-amd64.exe ./apps/cli
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-linux-amd64 ./cmd/codegraph
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-darwin-amd64 ./cmd/codegraph
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/codegraph-darwin-arm64 ./cmd/codegraph
+	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/codegraph-windows-amd64.exe ./cmd/codegraph
 
 # Documentation
 docs-serve: ## Serve documentation locally
@@ -178,13 +140,13 @@ watch: ## Watch for changes and rebuild
 	air
 
 debug: ## Run with debug logging
-	DEBUG=true go run ./apps/cli --verbose
+	DEBUG=true go run ./cmd/codegraph --verbose
 
 # Quick development cycle
 dev-scip: build index-self-scip ## Build and index project with SCIP
 	@echo "Ready for development with SCIP indexing!"
 
-# Database utilities  
+# Database utilities
 db-reset: docker-down docker-up neo4j-schema ## Reset database completely
 	@echo "Database reset complete"
 
@@ -194,11 +156,8 @@ smoke-test: ## Run end-to-end smoke test (requires Neo4j + scip-go)
 
 # Testing utilities
 test-coverage: ## Generate test coverage report
-	@for mod in $(GO_MODULES); do \
-		(cd $$mod && go test -coverprofile=../../coverage-$$(basename $$mod).out ./...); \
-	done
-	go test -coverprofile=coverage.out ./test/...
-	@echo "Per-module coverage files: coverage-*.out"
+	go test -coverprofile=coverage.out ./...
+	@echo "Coverage file: coverage.out"
 
 # Pre-commit
 pre-commit: format lint build test ## Run all checks (format, lint, build, test)

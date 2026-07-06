@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
-	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/internal/ingest/scip"
+	"github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/graph/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"

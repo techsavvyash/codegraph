@@ -13,42 +13,27 @@ env:
 jobs:
   # ── Fast checks: lint + test + build (all PRs) ──────────────────────────
   affected:
-    name: Affected lint/test/build
+    name: Lint/test/build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # nx affected needs full history
 
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install pnpm
-        run: npm install -g pnpm
-
-      - name: Install Nx deps
-        run: pnpm install
-
-      - name: Set Nx base
-        run: echo "NX_BASE=origin/${{ github.base_ref || 'master' }}" >> $GITHUB_ENV
-
       - name: Lint
         run: |
           if command -v golangci-lint &>/dev/null; then
-            npx nx affected -t lint --base=$NX_BASE --head=HEAD || true
+            golangci-lint run ./...
           else
             go vet ./...
           fi
 
       - name: Unit tests
         # Exclude test/integration — those need Neo4j and run in the integration job
-        run: go test ./libs/... ./test -count=1 -timeout 120s
+        run: make test
 
       - name: Build
         run: make build
@@ -83,7 +68,7 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USERNAME: neo4j
           NEO4J_PASSWORD: password123
-        run: go test ./test/... -tags=integration -timeout 300s
+        run: go test -v ./test/integration/... -timeout 300s
 
   # ── Chat UI: typecheck + unit tests + Playwright e2e ────────────────────
   chat-ui:
@@ -99,23 +84,24 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm
 
-      - name: Install workspace deps
+      - name: Install deps
+        working-directory: web/chat-ui
         run: pnpm install
 
       - name: Typecheck
-        working-directory: apps/chat-ui
+        working-directory: web/chat-ui
         run: pnpm check
 
       - name: Unit tests
-        working-directory: apps/chat-ui
+        working-directory: web/chat-ui
         run: pnpm test:unit
 
       - name: Install Playwright browsers
-        working-directory: apps/chat-ui
+        working-directory: web/chat-ui
         run: pnpm exec playwright install --with-deps chromium
 
       - name: E2e tests
-        working-directory: apps/chat-ui
+        working-directory: web/chat-ui
         # OPENAI_API_KEY is a dummy — e2e tests mock /api/chat at network level
         env:
           OPENAI_API_KEY: e2e-mock-key-not-used
@@ -127,7 +113,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: apps/chat-ui/playwright-report/
+          path: web/chat-ui/playwright-report/
           retention-days: 7
 
   # ── Nightly smoke tests ──────────────────────────────────────────────────

@@ -15,7 +15,7 @@ NEO4J_DATABASE="${NEO4J_DATABASE:-neo4j}"
 
 if [[ ! -x "$BIN" ]]; then
   echo "Building $BIN..."
-  (cd "$REPO_ROOT" && go build -o "$BIN" ./apps/mcp-server-go/)
+  (cd "$REPO_ROOT" && go build -o "$BIN" ./cmd/codegraph-mcp/)
 fi
 
 if claude mcp list 2>/dev/null | grep -q '^codegraph:'; then

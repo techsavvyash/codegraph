@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	models "github.com/context-maximiser/code-graph/libs/core-models-go"
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
-	neo4j "github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/query-go"
+	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/ingest/scip"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/query"
 )
 
 // TestQueryTinyGo indexes the tiny-go fixture and exercises the LSP-style query

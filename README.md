@@ -44,7 +44,7 @@ This starts Neo4j + Qdrant + OpenSearch and builds the CLI.
 ### 2. Run unit tests (no infra needed)
 
 ```bash
-go test ./pkg/... ./libs/... ./test/...
+make test
 ```
 
 ### 3. Run with Nx task orchestration

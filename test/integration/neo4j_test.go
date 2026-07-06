@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/schema-go"
+	"github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/graph/schema"
 )
 
 // Test configuration

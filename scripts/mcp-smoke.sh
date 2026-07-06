@@ -58,10 +58,8 @@ fi
 # --- 1. build ------------------------------------------------------------
 echo "Building MCP server..."
 cd "$REPO_ROOT"
-if go build -o "$MCP_BIN" ./apps/mcp-server-go >"$BUILD_LOG" 2>&1; then
-  echo "  build OK (go.work workspace mode)"
-elif (cd apps/mcp-server-go && GOWORK=off go build -o "$MCP_BIN" .) >>"$BUILD_LOG" 2>&1; then
-  echo "  build OK (GOWORK=off, module-local)"
+if go build -o "$MCP_BIN" ./cmd/codegraph-mcp >"$BUILD_LOG" 2>&1; then
+  echo "  build OK"
 else
   echo "BUILD FAILED:"
   cat "$BUILD_LOG"

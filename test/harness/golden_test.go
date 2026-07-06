@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"testing"
 
-	models "github.com/context-maximiser/code-graph/libs/core-models-go"
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
-	neo4j "github.com/context-maximiser/code-graph/libs/neo4j-go"
-	schema "github.com/context-maximiser/code-graph/libs/schema-go"
+	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/ingest/scip"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	schema "github.com/context-maximiser/code-graph/internal/graph/schema"
 	"github.com/context-maximiser/code-graph/test/harness"
 )
 
@@ -210,7 +210,7 @@ func findRepoRoot(t *testing.T) string {
 	_, file, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(file)
 	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
