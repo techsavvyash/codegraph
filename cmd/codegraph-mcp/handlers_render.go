@@ -12,6 +12,11 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
+// handleRenderTool runs a read-only Cypher query and writes a standalone
+// cytoscape.js HTML page containing every node and relationship in the result.
+// Same read-only enforcement as handleCypherTool (regex pre-check + read-only
+// transaction + caps), but row_limit and timeout caps are higher because
+// visualization typically wants more of the graph than a JSON answer.
 func (s *CodeGraphMCPServer) handleRenderTool(parentCtx context.Context, args map[string]interface{}) ToolCallResponse {
 	query, _ := args["query"].(string)
 	query = strings.TrimSpace(query)

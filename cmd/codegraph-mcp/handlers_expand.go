@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// handleExpandTool traverses edges from a known starting node along the
+// requested relationship types and direction, up to a depth bound. Returns
+// reachable nodes (with shortest-path distance) and the connecting edges.
+// Supports json/text/mermaid output formats.
 func (s *CodeGraphMCPServer) handleExpandTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	nodeID, ok := args["node_id"].(string)
 	if !ok || nodeID == "" {
@@ -468,8 +472,3 @@ func renderPathText(paths []pathResult) string {
 	}
 	return b.String()
 }
-
-// readSourceFile resolves the on-disk location of a source file given the
-// graph's filePath (which is relative to its service's package root) and the
-// owning service. Tries: absolute path → workspaceRoot/filePath →
-// workspaceRoot/<service-without-org-prefix>/filePath.

@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// readSourceFile resolves the on-disk location of a source file given the
+// graph's filePath (which is relative to its service's package root) and the
+// owning service. Tries: absolute path → workspaceRoot/filePath →
+// workspaceRoot/<service-without-org-prefix>/filePath.
 func readSourceFile(filePath, service, workspaceRoot string) ([]byte, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("empty filePath")
@@ -146,9 +150,3 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 
 	return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}
 }
-
-// handleRenderTool runs a read-only Cypher query and writes a standalone
-// cytoscape.js HTML page containing every node and relationship in the result.
-// Same read-only enforcement as handleCypherTool (regex pre-check + read-only
-// transaction + caps), but row_limit and timeout caps are higher because
-// visualization typically wants more of the graph than a JSON answer.

@@ -211,8 +211,3 @@ func schemaExamples() []map[string]interface{} {
 		},
 	}
 }
-
-// handleFindTool is the L1 node-listing primitive. It supports filtering by
-// label, name substring, and serviceName, with simple offset-based pagination
-// via an opaque cursor. Each result carries an opaque node_id usable as input
-// to expand/path.

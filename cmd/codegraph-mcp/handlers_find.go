@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// handleFindTool is the L1 node-listing primitive. It supports filtering by
+// label, name substring, and serviceName, with simple offset-based pagination
+// via an opaque cursor. Each result carries an opaque node_id usable as input
+// to expand/path.
 func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	label, _ := args["label"].(string)
 	namePattern, _ := args["name_pattern"].(string)
@@ -145,8 +149,3 @@ type expandEdge struct {
 	To   string `json:"to"`
 	Type string `json:"type"`
 }
-
-// handleExpandTool traverses edges from a known starting node along the
-// requested relationship types and direction, up to a depth bound. Returns
-// reachable nodes (with shortest-path distance) and the connecting edges.
-// Supports json/text/mermaid output formats.
