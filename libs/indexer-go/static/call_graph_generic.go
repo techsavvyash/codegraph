@@ -147,25 +147,14 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 	}
 
 	// Step 5: Map references to enclosing callers and create CALLS edges.
+	edges := resolveGenericCallEdges(refs, funcs)
+
 	created := 0
-	seen := map[string]bool{}
-
-	for _, ref := range refs {
-		caller := findEnclosingGenericFunc(funcs, ref.line)
-		if caller == nil {
-			continue
-		}
-
-		pairKey := caller.ID + "->" + ref.targetID
-		if caller.ID == ref.targetID || seen[pairKey] {
-			continue
-		}
-		seen[pairKey] = true
-
-		_, err := cg.client.MergeRelationship(ctx, caller.ID, ref.targetID,
+	for _, e := range edges {
+		_, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID,
 			string(models.CallsRel), nil,
 			map[string]any{
-				"line":     ref.line,
+				"line":     e.Line,
 				"filePath": filePath,
 				"scope":    cg.scopeCtx.Scope,
 				"scopeId":  cg.scopeCtx.ScopeID,
@@ -177,6 +166,61 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 	}
 
 	return created, nil
+}
+
+// genericCallEdge is a single resolved CALLS edge, one per distinct
+// (caller, target) pair in a file.
+type genericCallEdge struct {
+	CallerID string
+	TargetID string
+	Line     int
+}
+
+// resolveGenericCallEdges maps raw reference rows to their enclosing caller
+// and collapses multiple call sites between the same (caller, target) pair
+// into a single edge, deterministically keeping the smallest call-site line.
+//
+// This must not depend on the order refs arrive in: Neo4j does not guarantee
+// row order for a query without ORDER BY (see getReferencesInFile), so if a
+// caller invokes the same target from two lines, "first row wins" makes the
+// resulting CALLS.line property flip nondeterministically between indexing
+// runs — the same bug found and fixed for the Go/SCIP builder in
+// call_graph_scip.go's resolveCallEdges. Picking the minimum line is
+// deterministic regardless of input order and matches "the first call site
+// in the file".
+//
+// Pure function, no I/O — testable without Neo4j.
+func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo) []genericCallEdge {
+	edges := make(map[string]*genericCallEdge, len(refs))
+	order := make([]string, 0, len(refs))
+
+	for _, ref := range refs {
+		caller := findEnclosingGenericFunc(funcs, ref.line)
+		if caller == nil || caller.ID == ref.targetID {
+			continue
+		}
+
+		key := caller.ID + "->" + ref.targetID
+		existing, ok := edges[key]
+		if !ok {
+			edges[key] = &genericCallEdge{
+				CallerID: caller.ID,
+				TargetID: ref.targetID,
+				Line:     ref.line,
+			}
+			order = append(order, key)
+			continue
+		}
+		if ref.line < existing.Line {
+			existing.Line = ref.line
+		}
+	}
+
+	out := make([]genericCallEdge, 0, len(order))
+	for _, key := range order {
+		out = append(out, *edges[key])
+	}
+	return out
 }
 
 // getFunctionsInFile returns all Function/Method nodes in a file with their IDs and declaration lines.
