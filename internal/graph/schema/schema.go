@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // SchemaManager handles Neo4j schema creation and management
@@ -764,7 +764,7 @@ func (sm *SchemaManager) Migrate(ctx context.Context) ([]MigrationResult, error)
 // createConstraints creates all constraint definitions
 func (sm *SchemaManager) createConstraints(ctx context.Context) error {
 	constraints := GetConstraints()
-	
+
 	for _, constraint := range constraints {
 		if err := sm.createConstraint(ctx, constraint); err != nil {
 			return fmt.Errorf("failed to create constraint %s: %w", constraint.Name, err)
@@ -814,7 +814,7 @@ func (sm *SchemaManager) createConstraint(ctx context.Context, constraint Constr
 // createIndexes creates all index definitions
 func (sm *SchemaManager) createIndexes(ctx context.Context) error {
 	indexes := GetIndexes()
-	
+
 	for _, index := range indexes {
 		if err := sm.createIndex(ctx, index); err != nil {
 			return fmt.Errorf("failed to create index %s: %w", index.Name, err)
@@ -827,9 +827,9 @@ func (sm *SchemaManager) createIndexes(ctx context.Context) error {
 // createIndex creates a single index
 func (sm *SchemaManager) createIndex(ctx context.Context, index Index) error {
 	var cypher string
-	
+
 	propertiesStr := strings.Join(index.Properties, ", ")
-	
+
 	switch index.Type {
 	case "BTREE":
 		if index.NodeLabel == "" {

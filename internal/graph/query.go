@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -146,14 +146,14 @@ func (qb *QueryBuilder) FindAllReferences(ctx context.Context, symbol string) ([
 	var references []*models.SymbolReference
 	for _, record := range result {
 		recordMap := record.AsMap()
-		
+
 		ref := &models.SymbolReference{
-			Symbol:      scipSymbol,
-			FilePath:    getString(recordMap, "filePath"),
-			StartLine:   getInt(recordMap, "startLine"),
-			EndLine:     getInt(recordMap, "endLine"),
-			StartColumn: getInt(recordMap, "startColumn"),
-			EndColumn:   getInt(recordMap, "endColumn"),
+			Symbol:       scipSymbol,
+			FilePath:     getString(recordMap, "filePath"),
+			StartLine:    getInt(recordMap, "startLine"),
+			EndLine:      getInt(recordMap, "endLine"),
+			StartColumn:  getInt(recordMap, "startColumn"),
+			EndColumn:    getInt(recordMap, "endColumn"),
 			IsDefinition: false, // These are usage references
 		}
 		references = append(references, ref)
@@ -185,7 +185,7 @@ func (qb *QueryBuilder) FindImplementations(ctx context.Context, interfaceSymbol
 	var classes []*models.Class
 	for _, record := range result {
 		recordMap := record.AsMap()
-		
+
 		class := &models.Class{
 			Name:      getString(recordMap, "className"),
 			FQN:       getString(recordMap, "fullyQualifiedName"),
@@ -228,7 +228,7 @@ func (qb *QueryBuilder) FindAPIEndpointsAffectedByFunction(ctx context.Context, 
 	var routes []*models.APIRoute
 	for _, record := range result {
 		recordMap := record.AsMap()
-		
+
 		route := &models.APIRoute{
 			Protocol:    getString(recordMap, "protocol"),
 			Method:      getString(recordMap, "httpMethod"),
@@ -273,7 +273,7 @@ func (qb *QueryBuilder) TraceDataFlow(ctx context.Context, paramSymbol string) (
 	var references []*models.SymbolReference
 	for _, record := range result {
 		recordMap := record.AsMap()
-		
+
 		ref := &models.SymbolReference{
 			Symbol:  scipSymbol,
 			Context: getString(recordMap, "receivingMethod"),
@@ -431,7 +431,7 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 	for _, nodeType := range nodeTypes {
 		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", Ident(nodeType)))
 	}
-	
+
 	var cypher string
 	if len(labelFilters) > 0 {
 		labelFilter := strings.Join(labelFilters, " OR ")
@@ -484,7 +484,7 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 				n.name
 		`
 	}
-	
+
 	// Only apply limit if it's greater than 0
 	if limit > 0 {
 		cypher += fmt.Sprintf(" LIMIT %d", limit)
@@ -604,28 +604,28 @@ func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName 
 			   f.name AS name, f.signature AS signature
 		LIMIT 1
 	`
-	
+
 	params := map[string]any{"functionName": functionName}
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to find function: %w", err)
 	}
-	
+
 	if len(result) == 0 {
 		return "", fmt.Errorf("function not found: %s", functionName)
 	}
-	
+
 	record := result[0].AsMap()
 	filePath := getString(record, "filePath")
 	startByte := getInt(record, "startByte")
 	endByte := getInt(record, "endByte")
 	startLine := getInt(record, "startLine")
 	endLine := getInt(record, "endLine")
-	
+
 	if filePath == "" {
 		return "", fmt.Errorf("no file path found for function: %s", functionName)
 	}
-	
+
 	// Read the file content - handle both absolute and relative paths
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -652,23 +652,23 @@ func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName 
 			return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
 		}
 	}
-	
+
 	// If we have byte offsets, use them for precise extraction
 	if startByte >= 0 && endByte >= 0 && startByte < len(content) && endByte <= len(content) {
 		sourceCode := string(content[startByte:endByte])
 		return sourceCode, nil
 	}
-	
+
 	// Fallback to line-based extraction
 	if startLine > 0 && endLine > 0 {
 		lines := strings.Split(string(content), "\n")
 		if startLine <= len(lines) && endLine <= len(lines) {
-			functionLines := lines[startLine-1:endLine]
+			functionLines := lines[startLine-1 : endLine]
 			sourceCode := strings.Join(functionLines, "\n")
 			return sourceCode, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("unable to extract source code for function: %s", functionName)
 }
 
@@ -683,28 +683,28 @@ func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, si
 			   f.name AS name, f.signature AS signature
 		LIMIT 1
 	`
-	
+
 	params := map[string]any{"signature": signature}
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to find function: %w", err)
 	}
-	
+
 	if len(result) == 0 {
 		return "", fmt.Errorf("function not found with signature: %s", signature)
 	}
-	
+
 	record := result[0].AsMap()
 	filePath := getString(record, "filePath")
 	startByte := getInt(record, "startByte")
 	endByte := getInt(record, "endByte")
 	startLine := getInt(record, "startLine")
 	endLine := getInt(record, "endLine")
-	
+
 	if filePath == "" {
 		return "", fmt.Errorf("no file path found for function with signature: %s", signature)
 	}
-	
+
 	// Read the file content - handle both absolute and relative paths
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -731,22 +731,22 @@ func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, si
 			return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
 		}
 	}
-	
+
 	// If we have byte offsets, use them for precise extraction
 	if startByte >= 0 && endByte >= 0 && startByte < len(content) && endByte <= len(content) {
 		sourceCode := string(content[startByte:endByte])
 		return sourceCode, nil
 	}
-	
+
 	// Fallback to line-based extraction
 	if startLine > 0 && endLine > 0 {
 		lines := strings.Split(string(content), "\n")
 		if startLine <= len(lines) && endLine <= len(lines) {
-			functionLines := lines[startLine-1:endLine]
+			functionLines := lines[startLine-1 : endLine]
 			sourceCode := strings.Join(functionLines, "\n")
 			return sourceCode, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("unable to extract source code for function with signature: %s", signature)
 }

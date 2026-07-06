@@ -60,14 +60,14 @@ func LoadBaseline(dir string) (*SelfBenchmarkResult, error) {
 
 // PhaseDelta captures the change between baseline and current for a single phase.
 type PhaseDelta struct {
-	Name           string        `json:"name"`
-	BaselineDur    time.Duration `json:"baselineDuration"`
-	CurrentDur     time.Duration `json:"currentDuration"`
-	DeltaDur       time.Duration `json:"deltaDuration"`
-	DeltaPercent   float64       `json:"deltaPercent"`
-	IsRegression   bool          `json:"isRegression"`
-	BaselineItems  int           `json:"baselineItems"`
-	CurrentItems   int           `json:"currentItems"`
+	Name          string        `json:"name"`
+	BaselineDur   time.Duration `json:"baselineDuration"`
+	CurrentDur    time.Duration `json:"currentDuration"`
+	DeltaDur      time.Duration `json:"deltaDuration"`
+	DeltaPercent  float64       `json:"deltaPercent"`
+	IsRegression  bool          `json:"isRegression"`
+	BaselineItems int           `json:"baselineItems"`
+	CurrentItems  int           `json:"currentItems"`
 }
 
 // ComparisonResult holds the full comparison between current and baseline.
@@ -115,9 +115,9 @@ func CompareToBaseline(current, baseline *SelfBenchmarkResult, regressionThresho
 		}
 		bp, exists := baseMap[p.Name]
 		delta := PhaseDelta{
-			Name:          p.Name,
-			CurrentDur:    p.Duration,
-			CurrentItems:  p.Items,
+			Name:         p.Name,
+			CurrentDur:   p.Duration,
+			CurrentItems: p.Items,
 		}
 		if exists {
 			delta.BaselineDur = bp.Duration

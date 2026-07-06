@@ -52,7 +52,7 @@ func NewClient(config Config) (*Client, error) {
 		config.URI,
 		neo4j.BasicAuth(config.Username, config.Password, ""),
 		func(c *neo4j.Config) {
-			c.MaxConnectionPoolSize = 10  // Reduced for stability
+			c.MaxConnectionPoolSize = 10 // Reduced for stability
 			c.MaxConnectionLifetime = 5 * time.Minute
 			c.ConnectionAcquisitionTimeout = 30 * time.Second
 		},

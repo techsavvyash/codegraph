@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/ingest/pipeline"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // RepoStats captures the shape of the repository being benchmarked.
@@ -40,11 +40,11 @@ type SelfBenchmarkConfig struct {
 
 // SelfBenchmarkResult holds the output of a self-benchmark run.
 type SelfBenchmarkResult struct {
-	Timestamp      time.Time      `json:"timestamp"`
-	GitCommit      string         `json:"gitCommit"`
-	RepoStats      RepoStats      `json:"repoStats"`
-	FullRun        *RunResult     `json:"fullRun"`
-	IncrementalRun *RunResult     `json:"incrementalRun,omitempty"`
+	Timestamp      time.Time  `json:"timestamp"`
+	GitCommit      string     `json:"gitCommit"`
+	RepoStats      RepoStats  `json:"repoStats"`
+	FullRun        *RunResult `json:"fullRun"`
+	IncrementalRun *RunResult `json:"incrementalRun,omitempty"`
 }
 
 // RunResult captures timing and stage results for a single pipeline execution.

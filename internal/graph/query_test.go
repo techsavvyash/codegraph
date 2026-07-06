@@ -11,9 +11,9 @@ import (
 
 func TestIdent(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{
 			name:  "plain identifier passes through",
@@ -83,11 +83,11 @@ func TestIdent(t *testing.T) {
 
 func TestTombstoneFilter(t *testing.T) {
 	tests := []struct {
-		name     string
-		nodeVar  string
-		scopeID  string
-		wantEmpty bool
-		wantContains string
+		name            string
+		nodeVar         string
+		scopeID         string
+		wantEmpty       bool
+		wantContains    string
 		wantNotContains string
 	}{
 		{
@@ -242,9 +242,9 @@ func TestScopedKey(t *testing.T) {
 
 func TestApplyScopedKey(t *testing.T) {
 	tests := []struct {
-		name      string
-		props     map[string]any
-		wantKey   string
+		name       string
+		props      map[string]any
+		wantKey    string
 		wantExists bool
 	}{
 		{

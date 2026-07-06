@@ -7,10 +7,10 @@ import (
 
 // PageRankOpts configures PageRank execution.
 type PageRankOpts struct {
-	MaxIterations    int
-	DampingFactor    float64
-	WriteProperty    string
-	Tolerance        float64
+	MaxIterations int
+	DampingFactor float64
+	WriteProperty string
+	Tolerance     float64
 }
 
 // DefaultPageRankOpts returns sensible defaults.

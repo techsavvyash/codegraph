@@ -187,11 +187,11 @@ func (pt *PhaseTimer) PrintJSON(w io.Writer) error {
 	wallMs := float64(pt.WallDuration().Milliseconds())
 
 	output := struct {
-		Phases     []jsonResult `json:"phases"`
-		TotalMs    float64      `json:"total_ms"`
-		TotalStr   string       `json:"total"`
-		WallMs     float64      `json:"wall_ms,omitempty"`
-		WallStr    string       `json:"wall,omitempty"`
+		Phases   []jsonResult `json:"phases"`
+		TotalMs  float64      `json:"total_ms"`
+		TotalStr string       `json:"total"`
+		WallMs   float64      `json:"wall_ms,omitempty"`
+		WallStr  string       `json:"wall,omitempty"`
 	}{
 		Phases:   results,
 		TotalMs:  float64(total.Milliseconds()),
