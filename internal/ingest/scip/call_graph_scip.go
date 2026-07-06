@@ -121,6 +121,7 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 	cypher := `
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
+		  AND fn.serviceName = $serviceName
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
@@ -132,12 +133,12 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 		SET fn.inDegree = inD, fn.outDegree = outD
 	`
 	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
+		"scopeId":     cg.scopeCtx.ScopeID,
 	})
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}
-	fmt.Println("Computed inDegree/outDegree for all Function/Method nodes")
 	return nil
 }
 

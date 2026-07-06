@@ -2,6 +2,8 @@ package static
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,6 +41,7 @@ type SCIPIndexer struct {
 	scopeCtx         models.ScopeContext
 	timer            PipelineTimer
 	fileContentCache map[string][]byte // cache for calculateByteOffsets
+	projectPath      string             // project root path for resolving relative file paths
 
 	// skipDependencyResolution defers the DEPENDS_ON-creation pass so the
 	// polyglot orchestrator can run it once at the end, after every sibling
@@ -80,6 +83,13 @@ func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repo
 // IndexProject indexes a project using SCIP
 func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) error {
 	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
+
+	// Store projectPath as absolute path for consistent relative path resolution
+	absPath, err := filepath.Abs(projectPath)
+	if err != nil {
+		absPath = projectPath // Fall back to original if conversion fails
+	}
+	si.projectPath = absPath
 
 	// Step 1: Generate SCIP index file
 	if si.timer != nil {
@@ -709,12 +719,47 @@ func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
 // createFileNode creates a file node in Neo4j
 func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, serviceID string) (string, error) {
 	nodeKey := models.FileNodeKey(si.serviceName, file.Path)
+
+	// Compute file hash from content
+	hash := ""
+	var content []byte
+
+	// Resolve the file path once (consistent key for all uses)
+	resolvedPath := si.resolvePath(file.Path)
+
+	// Try to get content from cache first
+	if si.fileContentCache != nil {
+		if cached, ok := si.fileContentCache[resolvedPath]; ok {
+			content = cached
+		}
+	}
+
+	// If not in cache, try to read from disk
+	if content == nil {
+		var err error
+		content, err = os.ReadFile(resolvedPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file for hash computation %s: %w", file.Path, err)
+		}
+		// Cache the content for later use by calculateByteOffsets
+		if si.fileContentCache == nil {
+			si.fileContentCache = make(map[string][]byte)
+		}
+		si.fileContentCache[resolvedPath] = content
+	}
+
+	// Compute SHA-256 hash if content was successfully read
+	if len(content) > 0 {
+		h := sha256.Sum256(content)
+		hash = hex.EncodeToString(h[:])
+	}
+
 	fileProps := map[string]any{
 		"path":         file.Path,
 		"nodeKey":      nodeKey,
 		"absolutePath": file.Path,
 		"language":     file.Language,
-		"hash":         "",
+		"hash":         hash,
 		"lineCount":    0,
 		"scope":        si.scopeCtx.Scope,
 		"scopeId":      si.scopeCtx.ScopeID,
@@ -1435,20 +1480,33 @@ func isTestFunction(name, filePath string) bool {
 	return false
 }
 
+// resolvePath resolves a relative file path against projectPath to create an absolute path.
+// If the path is already absolute, it is returned unchanged.
+func (si *SCIPIndexer) resolvePath(filePath string) string {
+	if filepath.IsAbs(filePath) || si.projectPath == "" {
+		return filePath
+	}
+	return filepath.Join(si.projectPath, filePath)
+}
+
 // calculateByteOffsets calculates the start and end byte positions for a code location
 func (si *SCIPIndexer) calculateByteOffsets(filePath string, startLine, startColumn, endLine, endColumn int) (int, int) {
+	// Resolve relative paths using projectPath
+	resolvedPath := si.resolvePath(filePath)
+
 	// Use cache to avoid re-reading the same file for every symbol
-	content, ok := si.fileContentCache[filePath]
+	// Keep cache keys consistent: use the resolved absolute path
+	content, ok := si.fileContentCache[resolvedPath]
 	if !ok {
 		var err error
-		content, err = os.ReadFile(filePath)
+		content, err = os.ReadFile(resolvedPath)
 		if err != nil {
 			return -1, -1
 		}
 		if si.fileContentCache == nil {
 			si.fileContentCache = make(map[string][]byte)
 		}
-		si.fileContentCache[filePath] = content
+		si.fileContentCache[resolvedPath] = content
 	}
 
 	lines := strings.Split(string(content), "\n")

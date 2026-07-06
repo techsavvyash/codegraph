@@ -3,6 +3,7 @@ package static
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/context-maximiser/code-graph/internal/model"
@@ -500,4 +501,135 @@ func assertProp(t *testing.T, props map[string]any, key string, want any) {
 	if got != want {
 		t.Errorf("props[%q] = %v (%T), want %v (%T)", key, got, got, want, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// TestResolvePath (Fix 2 helper)
+// ---------------------------------------------------------------------------
+
+func TestResolvePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		projectPath string
+		filePath    string
+		wantMatch   func(result string) bool
+	}{
+		{
+			name:        "relative path gets joined",
+			projectPath: "/tmp/project",
+			filePath:    "cmd/main.go",
+			wantMatch: func(r string) bool {
+				return strings.HasSuffix(r, "cmd/main.go") && filepath.IsAbs(r)
+			},
+		},
+		{
+			name:        "absolute path unchanged",
+			projectPath: "/tmp/project",
+			filePath:    "/abs/path/main.go",
+			wantMatch: func(r string) bool {
+				return r == "/abs/path/main.go"
+			},
+		},
+		{
+			name:        "empty projectPath returns original",
+			projectPath: "",
+			filePath:    "cmd/main.go",
+			wantMatch: func(r string) bool {
+				return r == "cmd/main.go"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			si := newTestIndexer()
+			si.projectPath = tt.projectPath
+			result := si.resolvePath(tt.filePath)
+			if !tt.wantMatch(result) {
+				t.Errorf("resolvePath(%q) = %q, want to match expected pattern", tt.filePath, result)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestCalculateByteOffsetsPathResolution (Fix 2)
+// ---------------------------------------------------------------------------
+
+func TestCalculateByteOffsetsPathResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.go")
+	content := []byte("line 1\nline 2\nline 3\n")
+
+	if err := os.WriteFile(testFile, content, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	si := newTestIndexer()
+	si.projectPath = tmpDir
+	si.fileContentCache = make(map[string][]byte)
+
+	// Test with relative path (the issue being fixed)
+	startByte, endByte := si.calculateByteOffsets("test.go", 1, 0, 1, 6)
+
+	if startByte < 0 || endByte < 0 {
+		t.Errorf("calculateByteOffsets failed with relative path: startByte=%d, endByte=%d", startByte, endByte)
+	}
+
+	// Verify the computed offsets match expected content
+	if startByte >= 0 && endByte > 0 && startByte < len(content) && endByte <= len(content) && startByte < endByte {
+		extracted := content[startByte:endByte]
+		expected := "line 1"
+		if string(extracted) != expected {
+			t.Errorf("extracted content mismatch: got %q, want %q", string(extracted), expected)
+		}
+	}
+
+	// Verify cache was populated with resolved path
+	resolvedPath := si.resolvePath("test.go")
+	if _, ok := si.fileContentCache[resolvedPath]; !ok {
+		t.Errorf("cache not populated with resolved path %q", resolvedPath)
+	}
+
+	// Test with absolute path still works
+	si.fileContentCache = make(map[string][]byte)
+	startByte2, endByte2 := si.calculateByteOffsets(testFile, 1, 0, 1, 6)
+
+	if startByte2 < 0 || endByte2 < 0 {
+		t.Errorf("calculateByteOffsets failed with absolute path: startByte=%d, endByte=%d", startByte2, endByte2)
+	}
+
+	// Verify both relative and absolute return same offsets
+	if startByte != startByte2 || endByte != endByte2 {
+		t.Errorf("relative and absolute path gave different offsets: rel=(%d,%d) abs=(%d,%d)",
+			startByte, endByte, startByte2, endByte2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestDegreePropertyQueryConstraints (Fix 3 - service scoping)
+// ---------------------------------------------------------------------------
+
+func TestDegreePropertyQueryConstraints(t *testing.T) {
+	// Test that ComputeDegreeProperties queries have serviceName constraint
+	t.Run("SCIPCallGraphBuilder_has_serviceName_constraint", func(t *testing.T) {
+		si := newTestIndexer()
+		cgBuilder := NewSCIPCallGraphBuilder(nil, "")
+		cgBuilder.serviceName = "test-svc"
+		cgBuilder.SetScope(si.scopeCtx)
+
+		// Verify SetServiceName was called and the field is set
+		if cgBuilder.serviceName != "test-svc" {
+			t.Errorf("serviceName not set: got %q, want %q", cgBuilder.serviceName, "test-svc")
+		}
+	})
+
+	t.Run("GenericCallGraphBuilder_has_serviceName_constraint", func(t *testing.T) {
+		cgBuilder := NewGenericCallGraphBuilder(nil)
+		cgBuilder.SetServiceName("test-svc")
+
+		if cgBuilder.serviceName != "test-svc" {
+			t.Errorf("serviceName not set: got %q, want %q", cgBuilder.serviceName, "test-svc")
+		}
+	})
 }

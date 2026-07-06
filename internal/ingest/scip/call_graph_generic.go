@@ -327,7 +327,6 @@ func (cg *GenericCallGraphBuilder) computeDegreeProperties(ctx context.Context) 
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}
-	fmt.Println("Computed inDegree/outDegree for all Function/Method nodes")
 	return nil
 }
 
