@@ -245,6 +245,56 @@ var schemaInfoCmd = &cobra.Command{
 	},
 }
 
+var schemaMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Migrate schema to scopedKey identity constraints",
+	Long:  "Backfill scopedKey for existing nodes and create per-label UNIQUE constraints. Fails if duplicates are detected.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		schemaManager := schema.NewSchemaManager(client)
+
+		fmt.Println("Migrating schema to scopedKey constraints...")
+		ctx := context.Background()
+		results, err := schemaManager.Migrate(ctx)
+
+		// Print summary table
+		fmt.Println("\nMigration Summary:")
+		fmt.Println("==================")
+		fmt.Printf("%-20s %-15s %-15s %-15s\n", "Label", "Backfilled", "Duplicates", "Constraint")
+		fmt.Println(strings.Repeat("-", 65))
+		for _, r := range results {
+			status := "✓"
+			if r.Error != "" {
+				status = "✗"
+			} else if !r.ConstraintOK {
+				status = "⚠"
+			}
+			fmt.Printf("%-20s %-15d %-15d %s %s\n", r.Label, r.BackfilledCount, r.DuplicatesFound, status, r.Error)
+
+			// Print duplicate keys if found
+			for _, key := range r.DuplicateKeys {
+				fmt.Printf("  • %s\n", key)
+			}
+			if r.DuplicatesFound > len(r.DuplicateKeys) {
+				fmt.Printf("  + %d more\n", r.DuplicatesFound-len(r.DuplicateKeys))
+			}
+		}
+
+		if err != nil {
+			fmt.Printf("\n✗ Migration failed: %v\n", err)
+			return err
+		}
+
+		fmt.Println("\n✓ Schema migration completed successfully")
+		return nil
+	},
+}
+
 // indexCmd manages code indexing
 var indexCmd = &cobra.Command{
 	Use:   "index",
@@ -1444,6 +1494,7 @@ func init() {
 	schemaCmd.AddCommand(schemaCreateCmd)
 	schemaCmd.AddCommand(schemaDropCmd)
 	schemaCmd.AddCommand(schemaInfoCmd)
+	schemaCmd.AddCommand(schemaMigrateCmd)
 
 	// Index subcommands
 	indexCmd.AddCommand(indexSCIPCmd)

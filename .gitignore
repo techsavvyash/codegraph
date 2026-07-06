@@ -15,10 +15,7 @@ __pycache__/
 
 # Local build artifacts
 bin/
-codegraph
-cli-go
-mcp-server/mcp-server
-/mcp-server-go
+/codegraph
 cmd/codegraph/codegraph
 cmd/codegraph-mcp/codegraph-mcp
 

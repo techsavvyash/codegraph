@@ -3,6 +3,7 @@ package schema
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/context-maximiser/code-graph/internal/graph"
@@ -38,9 +39,38 @@ type Index struct {
 // Note: Old UNIQUE constraints (symbol_unique, service_name_unique, file_path_unique,
 // class_fqn_unique, interface_fqn_unique, module_fqn_unique) have been removed
 // because the same entity can now exist in multiple scopes (main + PR overlays).
-// Uniqueness is enforced via composite (nodeKey, scopeId) indexes instead.
+// Uniqueness is now enforced via per-label UNIQUE constraints on scopedKey
+// (nodeKey|scopeId), which supports multi-scope identity.
 func GetConstraints() []Constraint {
-	return []Constraint{}
+	// Extract the set of labels that have nodeKey indexes (the authoritative label list).
+	// These labels support scoped identity via scopedKey.
+	labelSet := make(map[string]bool)
+	for _, idx := range GetIndexes() {
+		// Only single-property nodeKey indexes (not composite)
+		if len(idx.Properties) == 1 && idx.Properties[0] == "nodeKey" {
+			labelSet[idx.NodeLabel] = true
+		}
+	}
+
+	// Sort labels for deterministic order
+	labels := make([]string, 0, len(labelSet))
+	for label := range labelSet {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+
+	// Build UNIQUE constraints for scopedKey on each such label
+	constraints := []Constraint{}
+	for _, label := range labels {
+		constraints = append(constraints, Constraint{
+			Name:      label + "_scoped_key_unique",
+			NodeLabel: label,
+			Property:  "scopedKey",
+			Type:      "UNIQUE",
+		})
+	}
+
+	return constraints
 }
 
 // GetDroppedConstraints returns the names of old constraints that should be dropped
@@ -612,6 +642,125 @@ func (sm *SchemaManager) CreateSchema(ctx context.Context) error {
 	return nil
 }
 
+// MigrationResult holds the result of a schema migration for reporting
+type MigrationResult struct {
+	Label           string
+	BackfilledCount int
+	DuplicatesFound int
+	DuplicateKeys   []string // Keys with duplicates (first 20, then "+N more" if more than 20)
+	ConstraintOK    bool
+	Error           string
+}
+
+// Migrate performs a safe migration to scopedKey identity constraints.
+// It backfills scopedKey for existing nodes, detects duplicates, and creates constraints.
+// Returns non-zero exit if duplicates are found (user must manually resolve).
+func (sm *SchemaManager) Migrate(ctx context.Context) ([]MigrationResult, error) {
+	// Get the set of labels that need scopedKey constraints
+	labelSet := make(map[string]bool)
+	for _, idx := range GetIndexes() {
+		if len(idx.Properties) == 1 && idx.Properties[0] == "nodeKey" {
+			labelSet[idx.NodeLabel] = true
+		}
+	}
+
+	// Sort labels for deterministic output
+	labels := make([]string, 0, len(labelSet))
+	for label := range labelSet {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+
+	results := []MigrationResult{}
+	hasDuplicates := false
+
+	// For each label with nodeKey index: backfill, check for duplicates, then create constraint
+	for _, label := range labels {
+		result := MigrationResult{Label: label}
+
+		// Step 1: BACKFILL scopedKey for nodes that have nodeKey but no scopedKey
+		// Drive CALL from a MATCH stream for proper batching
+		backfillCypher := fmt.Sprintf(`
+			MATCH (n:%s)
+			WHERE n.scopedKey IS NULL AND n.nodeKey IS NOT NULL
+			CALL { WITH n SET n.scopedKey = n.nodeKey + '|' + coalesce(n.scopeId, 'main') } IN TRANSACTIONS OF 1000 ROWS
+			RETURN count(n) AS total
+		`, neo4j.Ident(label))
+
+		backfillRecs, err := sm.client.ExecuteQuery(ctx, backfillCypher, nil)
+		if err != nil {
+			result.Error = fmt.Sprintf("backfill failed: %v", err)
+			results = append(results, result)
+			continue
+		}
+		if len(backfillRecs) > 0 {
+			if total, ok := backfillRecs[0].AsMap()["total"].(int64); ok {
+				result.BackfilledCount = int(total)
+			}
+		}
+
+		// Step 2: DUPLICATE DETECTION
+		dupCypher := fmt.Sprintf(`
+			MATCH (n:%s)
+			WHERE n.scopedKey IS NOT NULL
+			WITH n.scopedKey AS k, count(*) AS c
+			WHERE c > 1
+			RETURN k, c
+			ORDER BY c DESC
+		`, neo4j.Ident(label))
+
+		dupRecs, err := sm.client.ExecuteQuery(ctx, dupCypher, nil)
+		if err != nil {
+			result.Error = fmt.Sprintf("duplicate detection failed: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		if len(dupRecs) > 0 {
+			// Duplicates found — collect keys and do NOT create constraint
+			result.DuplicatesFound = len(dupRecs)
+			hasDuplicates = true
+
+			// Collect duplicate keys (cap at 20, then "+N more" if needed)
+			dupKeys := []string{}
+			for i, rec := range dupRecs {
+				if i >= 20 {
+					break
+				}
+				if k, ok := rec.AsMap()["k"].(string); ok {
+					dupKeys = append(dupKeys, k)
+				}
+			}
+			result.DuplicateKeys = dupKeys
+
+			results = append(results, result)
+			continue
+		}
+
+		// Step 3: CREATE constraint (no duplicates)
+		constraintName := label + "_scoped_key_unique"
+		constraintCypher := fmt.Sprintf(
+			"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE n.scopedKey IS UNIQUE",
+			neo4j.Ident(constraintName), neo4j.Ident(label),
+		)
+		if _, err := sm.client.ExecuteQuery(ctx, constraintCypher, nil); err != nil {
+			result.Error = fmt.Sprintf("constraint creation failed: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		result.ConstraintOK = true
+		results = append(results, result)
+	}
+
+	// If duplicates were found, return non-zero signal but include results
+	if hasDuplicates {
+		return results, fmt.Errorf("duplicate scopedKeys found in one or more labels — graph is derived state, delete the affected scope and re-index")
+	}
+
+	return results, nil
+}
+
 // createConstraints creates all constraint definitions
 func (sm *SchemaManager) createConstraints(ctx context.Context) error {
 	constraints := GetConstraints()
@@ -628,22 +777,27 @@ func (sm *SchemaManager) createConstraints(ctx context.Context) error {
 // createConstraint creates a single constraint
 func (sm *SchemaManager) createConstraint(ctx context.Context, constraint Constraint) error {
 	var cypher string
-	
+
+	// Use Ident() to safely interpolate label, property, and constraint names
+	label := neo4j.Ident(constraint.NodeLabel)
+	property := neo4j.Ident(constraint.Property)
+	name := neo4j.Ident(constraint.Name)
+
 	switch constraint.Type {
 	case "UNIQUE":
 		cypher = fmt.Sprintf(
 			"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE n.%s IS UNIQUE",
-			constraint.Name, constraint.NodeLabel, constraint.Property,
+			name, label, property,
 		)
 	case "EXISTENCE":
 		cypher = fmt.Sprintf(
 			"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE n.%s IS NOT NULL",
-			constraint.Name, constraint.NodeLabel, constraint.Property,
+			name, label, property,
 		)
 	case "NODE_KEY":
 		cypher = fmt.Sprintf(
 			"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE (n.%s) IS NODE KEY",
-			constraint.Name, constraint.NodeLabel, constraint.Property,
+			name, label, property,
 		)
 	default:
 		return fmt.Errorf("unsupported constraint type: %s", constraint.Type)

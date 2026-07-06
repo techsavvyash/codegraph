@@ -9,6 +9,29 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// ScopedKey derives a composite identity key from nodeKey and scopeId.
+// If scopeId is empty, defaults to "main". Returns "nodeKey|scopeId".
+// This is used for UNIQUE constraints on per-label scopedKey properties.
+func ScopedKey(nodeKey, scopeId string) string {
+	if scopeId == "" {
+		scopeId = "main"
+	}
+	return nodeKey + "|" + scopeId
+}
+
+// applyScopedKey adds scopedKey to properties if nodeKey exists.
+// scopeId is read from properties["scopeId"] with default "main".
+// This ensures all written nodes have the composite identity key.
+func applyScopedKey(props map[string]any) {
+	if nodeKey, ok := props["nodeKey"].(string); ok && nodeKey != "" {
+		scopeId := "main"
+		if s, ok := props["scopeId"].(string); ok && s != "" {
+			scopeId = s
+		}
+		props["scopedKey"] = ScopedKey(nodeKey, scopeId)
+	}
+}
+
 // Config holds the configuration for Neo4j connection
 type Config struct {
 	URI      string
@@ -111,8 +134,11 @@ func (c *Client) CreateNode(ctx context.Context, labels []string, properties map
 		labelStr += Ident(label)
 	}
 
+	// Derive scopedKey automatically for identity
+	applyScopedKey(properties)
+
 	cypher := fmt.Sprintf("CREATE (n:%s) SET n = $props RETURN elementId(n) as id", labelStr)
-	
+
 	result, err := c.ExecuteQuery(ctx, cypher, map[string]any{
 		"props": properties,
 	})
@@ -139,28 +165,42 @@ func (c *Client) MergeNode(ctx context.Context, labels []string, mergeProps, set
 		if i > 0 {
 			labelStr += ":"
 		}
-		labelStr += label
+		labelStr += Ident(label)
 	}
 
-	// Build the merge properties clause
+	// Build the merge properties clause with Ident() for property names
 	mergeClause := ""
 	for key := range mergeProps {
 		if mergeClause != "" {
 			mergeClause += ", "
 		}
-		mergeClause += fmt.Sprintf("%s: $merge.%s", key, key)
+		mergeClause += fmt.Sprintf("%s: $merge.%s", Ident(key), Ident(key))
 	}
 
-	cypher := fmt.Sprintf(`
-		MERGE (n:%s {%s})
-		SET n += $set
-		RETURN elementId(n) as id
-	`, labelStr, mergeClause)
-
+	// Derive scopedKey from mergeProps nodeKey and setProps/mergeProps scopeId.
+	// Nodes without a nodeKey must not get a scopedKey — a shared sentinel like
+	// "|main" would collide under the per-label UNIQUE constraints.
+	setClause := "SET n += $set"
 	params := map[string]any{
 		"merge": mergeProps,
 		"set":   setProps,
 	}
+	if nodeKey, ok := mergeProps["nodeKey"].(string); ok && nodeKey != "" {
+		scopeId := "main"
+		if si, ok := mergeProps["scopeId"].(string); ok && si != "" {
+			scopeId = si
+		} else if si, ok := setProps["scopeId"].(string); ok && si != "" {
+			scopeId = si
+		}
+		setClause += ", n.scopedKey = $scopedKey"
+		params["scopedKey"] = ScopedKey(nodeKey, scopeId)
+	}
+
+	cypher := fmt.Sprintf(`
+		MERGE (n:%s {%s})
+		%s
+		RETURN elementId(n) as id
+	`, labelStr, mergeClause, setClause)
 
 	result, err := c.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
@@ -271,7 +311,7 @@ func (c *Client) MergeNodesBatch(ctx context.Context, label string, items []map[
 	cypher := fmt.Sprintf(`
 		UNWIND $batch AS item
 		MERGE (n:%s {nodeKey: item.nodeKey, scopeId: item.scopeId})
-		SET n += item.props
+		SET n += item.props, n.scopedKey = item.nodeKey + '|' + coalesce(item.scopeId, 'main')
 		RETURN item.nodeKey AS nodeKey, elementId(n) AS id
 	`, Ident(label))
 
@@ -386,6 +426,8 @@ func (c *Client) BatchCreateNodes(ctx context.Context, nodes []BatchNode) error 
 	// cannot serialize custom struct types directly as parameters.
 	nodeParams := make([]map[string]any, len(nodes))
 	for i, n := range nodes {
+		// Derive scopedKey automatically for identity
+		applyScopedKey(n.Properties)
 		nodeParams[i] = map[string]any{
 			"labels":     n.Labels,
 			"properties": n.Properties,
@@ -414,10 +456,28 @@ func (c *Client) BatchMergeNodes(ctx context.Context, nodes []BatchMergeNode) er
 
 	nodeParams := make([]map[string]any, len(nodes))
 	for i, n := range nodes {
+		// Derive scopedKey from mergeProps nodeKey + scopeId. Skip nodes
+		// without a nodeKey — a shared sentinel like "|main" would collide
+		// under the per-label UNIQUE constraints.
+		mergeProps := n.MergeProps
+		setProps := n.SetProps
+		if nodeKey, ok := mergeProps["nodeKey"].(string); ok && nodeKey != "" {
+			scopeId := "main"
+			if si, ok := mergeProps["scopeId"].(string); ok && si != "" {
+				scopeId = si
+			} else if si, ok := setProps["scopeId"].(string); ok && si != "" {
+				scopeId = si
+			}
+			if setProps == nil {
+				setProps = make(map[string]any)
+			}
+			setProps["scopedKey"] = ScopedKey(nodeKey, scopeId)
+		}
+
 		nodeParams[i] = map[string]any{
 			"labels":     n.Labels,
-			"mergeProps": n.MergeProps,
-			"setProps":   n.SetProps,
+			"mergeProps": mergeProps,
+			"setProps":   setProps,
 		}
 	}
 

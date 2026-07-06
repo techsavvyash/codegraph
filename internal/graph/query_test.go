@@ -192,3 +192,108 @@ func TestGetInt(t *testing.T) {
 		t.Error("expected 0 for missing key")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestScopedKey / TestApplyScopedKey
+// ---------------------------------------------------------------------------
+
+func TestScopedKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		nodeKey string
+		scopeId string
+		want    string
+	}{
+		{
+			name:    "nodeKey and scopeId",
+			nodeKey: "my-node",
+			scopeId: "pr-42",
+			want:    "my-node|pr-42",
+		},
+		{
+			name:    "nodeKey with empty scopeId defaults to main",
+			nodeKey: "my-node",
+			scopeId: "",
+			want:    "my-node|main",
+		},
+		{
+			name:    "nodeKey with main scopeId",
+			nodeKey: "my-node",
+			scopeId: "main",
+			want:    "my-node|main",
+		},
+		{
+			name:    "complex nodeKey with special chars",
+			nodeKey: "module/package/Class",
+			scopeId: "feature/branch",
+			want:    "module/package/Class|feature/branch",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ScopedKey(tt.nodeKey, tt.scopeId)
+			if got != tt.want {
+				t.Errorf("ScopedKey(%q, %q) = %q, want %q", tt.nodeKey, tt.scopeId, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyScopedKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		props     map[string]any
+		wantKey   string
+		wantExists bool
+	}{
+		{
+			name: "adds scopedKey when nodeKey exists",
+			props: map[string]any{
+				"nodeKey": "my-node",
+				"scopeId": "pr-42",
+			},
+			wantKey:    "my-node|pr-42",
+			wantExists: true,
+		},
+		{
+			name: "defaults scopeId to main when absent",
+			props: map[string]any{
+				"nodeKey": "my-node",
+				"name":    "test",
+			},
+			wantKey:    "my-node|main",
+			wantExists: true,
+		},
+		{
+			name: "does not add scopedKey when nodeKey is missing",
+			props: map[string]any{
+				"scopeId": "pr-42",
+				"name":    "test",
+			},
+			wantExists: false,
+		},
+		{
+			name: "does not add scopedKey when nodeKey is empty string",
+			props: map[string]any{
+				"nodeKey": "",
+				"scopeId": "pr-42",
+			},
+			wantExists: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applyScopedKey(tt.props)
+			key, exists := tt.props["scopedKey"]
+
+			if exists != tt.wantExists {
+				t.Errorf("scopedKey exists = %v, want %v", exists, tt.wantExists)
+			}
+			if exists && key != tt.wantKey {
+				t.Errorf("scopedKey = %q, want %q", key, tt.wantKey)
+			}
+		})
+	}
+}
