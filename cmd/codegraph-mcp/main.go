@@ -241,11 +241,35 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"properties": map[string]interface{}{
 					"from_id": map[string]interface{}{
 						"type":        "string",
-						"description": "Opaque node_id of the starting node (from find/expand)",
+						"description": "Opaque node_id of the starting node (from find/expand). Alternative: from_name.",
 					},
 					"to_id": map[string]interface{}{
 						"type":        "string",
-						"description": "Opaque node_id of the destination node",
+						"description": "Opaque node_id of the destination node. Alternative: to_name.",
+					},
+					"from_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Exact name of the starting node as an alternative to from_id (disambiguate with from_label/from_service)",
+					},
+					"from_label": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional label filter for from_name resolution",
+					},
+					"from_service": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service filter for from_name resolution",
+					},
+					"to_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Exact name of the destination node as an alternative to to_id (disambiguate with to_label/to_service)",
+					},
+					"to_label": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional label filter for to_name resolution",
+					},
+					"to_service": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service filter for to_name resolution",
 					},
 					"rel_types": map[string]interface{}{
 						"type":        "array",
@@ -274,7 +298,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"default": "json",
 					},
 				},
-				"required": []string{"from_id", "to_id", "rel_types"},
+				"required": []string{"rel_types"},
 			},
 		},
 		{
@@ -302,7 +326,19 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"properties": map[string]interface{}{
 					"node_id": map[string]interface{}{
 						"type":        "string",
-						"description": "Opaque node_id from a previous find/expand call",
+						"description": "Opaque node_id from a previous find/expand call. Alternative: address by name.",
+					},
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Exact node name as an alternative to node_id. Ambiguous matches return a candidates list to pick from.",
+					},
+					"label": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional label filter when addressing by name (e.g. Function, Method)",
+					},
+					"service_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional service filter when addressing by name",
 					},
 					"rel_types": map[string]interface{}{
 						"type":        "array",
@@ -317,13 +353,13 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 					},
 					"depth": map[string]interface{}{
 						"type":        "number",
-						"description": "Max hops (default 1, hard cap 10)",
-						"default":     1,
+						"description": "Max hops (default 3, hard cap 10)",
+						"default":     3,
 					},
-					"limit": map[string]interface{}{
+					"max_nodes": map[string]interface{}{
 						"type":        "number",
-						"description": "Max nodes returned (default 50, hard cap 500)",
-						"default":     50,
+						"description": "Max nodes returned including the start node (default 500, hard cap 2000); sets truncated when cut",
+						"default":     500,
 					},
 					"format": map[string]interface{}{
 						"type":        "string",
@@ -332,7 +368,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"default":     "json",
 					},
 				},
-				"required": []string{"node_id", "rel_types"},
+				"required": []string{"rel_types"},
 			},
 		},
 		{
