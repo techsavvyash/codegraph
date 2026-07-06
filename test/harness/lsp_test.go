@@ -66,21 +66,24 @@ func TestQueryTinyGo(t *testing.T) {
 		}
 	})
 
-	t.Run("FindImplementations of Greeter returns both impls", func(t *testing.T) {
+	t.Run("FindImplementations of Greeter returns all three impls", func(t *testing.T) {
 		resp, err := lsp.FindImplementations(ctx, query.FindImplementationsRequest{
 			InterfaceSymbol: greeterSym,
 		})
 		if err != nil {
 			t.Fatalf("FindImplementations: %v", err)
 		}
-		if resp.Count != 2 {
-			t.Errorf("expected 2 implementations of Greeter, got %d", resp.Count)
+		// EnglishGreeter and FormalGreeter implement Greeter directly;
+		// LoudGreeter implements it by embedding EnglishGreeter and
+		// inheriting Greet via method promotion.
+		if resp.Count != 3 {
+			t.Errorf("expected 3 implementations of Greeter, got %d", resp.Count)
 		}
 		got := map[string]bool{}
 		for _, impl := range resp.Implementations {
 			got[impl.Name] = true
 		}
-		for _, want := range []string{"EnglishGreeter", "FormalGreeter"} {
+		for _, want := range []string{"EnglishGreeter", "FormalGreeter", "LoudGreeter"} {
 			if !got[want] {
 				t.Errorf("missing implementation %q in %+v", want, got)
 			}
