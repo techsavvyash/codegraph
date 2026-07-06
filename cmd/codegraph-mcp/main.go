@@ -207,7 +207,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_cypher",
-			Description: "Advanced/escape-hatch tool: run a read-only Cypher query directly against Neo4j. Prefer find/expand/path/source for common questions. Write operations (CREATE, MERGE, DELETE, SET, REMOVE, DROP, FOREACH, LOAD CSV) are rejected. Hard caps: timeout 5000ms, 1000 rows.",
+			Description: "Advanced/escape-hatch tool: run a read-only Cypher query directly against Neo4j. Prefer find/expand/path/source for common questions. Write operations (CREATE, MERGE, DELETE, SET, REMOVE, DROP, FOREACH, LOAD CSV) are rejected. Queries are EXPLAIN-validated first; plans containing AllNodesScan get a warning. Hard caps: timeout 120000ms, 1000 rows.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -221,7 +221,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 					},
 					"timeout_ms": map[string]interface{}{
 						"type":        "number",
-						"description": "Query timeout in milliseconds (default 3000, hard cap 5000)",
+						"description": "Query timeout in milliseconds (default 10000, clamped to [100, 120000]; accepted by every codegraph tool)",
 						"default":     3000,
 					},
 					"row_limit": map[string]interface{}{
@@ -762,9 +762,3 @@ func (s *CodeGraphMCPServer) filterFlowsToWorkspace(ctx context.Context, scopeID
 
 	return filtered
 }
-
-// handleSchemaTool returns the graph contract: node labels with their
-// properties, relationship types with valid (from-label, to-label) endpoint
-// pairs, and counts per category. This is the discoverability primitive — it
-// lets agents compose `find`, `expand`, and `path` correctly without guessing
-// relationship type names.

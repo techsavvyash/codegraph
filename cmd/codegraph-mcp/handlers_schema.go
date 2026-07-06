@@ -6,14 +6,77 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
+// handleSchemaTool returns the graph contract: node labels with their
+// properties, relationship types with valid (from-label, to-label) endpoint
+// pairs, and counts per category. This is the discoverability primitive — it
+// lets agents compose `find`, `expand`, and `path` correctly without guessing
+// relationship type names.
 func (s *CodeGraphMCPServer) handleSchemaTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	includeExamples := true
 	if v, ok := args["include_examples"].(bool); ok {
 		includeExamples = v
 	}
 
+	refresh := false
+	if v, ok := args["refresh"].(bool); ok {
+		refresh = v
+	}
+
+	// Check cache. The cache holds the BASE payload only — examples are
+	// per-request (include_examples varies by caller) and are appended after
+	// retrieval, so a cached payload never leaks one caller's preference
+	// into another's response.
+	var schema map[string]interface{}
+	s.schemaCacheMu.Lock()
+	if !refresh && len(s.schemaCache) > 0 && s.now().Sub(s.schemaCacheTime) < s.schemaCacheTTL {
+		schema = s.schemaCache
+	}
+	s.schemaCacheMu.Unlock()
+
+	if schema == nil {
+		// Cache miss or refresh requested — compute and cache.
+		computed, err := s.computeSchema(ctx)
+		if err != nil {
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("schema: failed to compute: %v", err)}},
+				IsError: true,
+			}
+		}
+		s.schemaCacheMu.Lock()
+		s.schemaCache = computed
+		s.schemaCacheTime = s.now()
+		s.schemaCacheMu.Unlock()
+		schema = computed
+	}
+
+	// Shallow-copy before per-request decoration so the cached map is never
+	// mutated concurrently.
+	out := make(map[string]interface{}, len(schema)+2)
+	for k, v := range schema {
+		out[k] = v
+	}
+	if includeExamples {
+		out["examples"] = schemaExamples()
+		out["notes"] = "Examples in `examples` reference the RFC-004 primitives (find, expand, path, source, cypher, entry_points, flows). Each example shows the recommended composition for a common code-intelligence question."
+	}
+
+	body, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("schema: failed to encode: %v", err)}},
+			IsError: true,
+		}
+	}
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: string(body)}},
+	}
+}
+
+// computeSchema builds the full schema payload, using apoc.meta.stats if available.
+func (s *CodeGraphMCPServer) computeSchema(ctx context.Context) (map[string]interface{}, error) {
 	type propInfo struct {
 		Name string `json:"name"`
 		Type string `json:"type,omitempty"`
@@ -34,36 +97,81 @@ func (s *CodeGraphMCPServer) handleSchemaTool(ctx context.Context, args map[stri
 		Endpoints []endpoint `json:"endpoints"`
 	}
 
-	// Labels with counts. UNWIND handles multi-label nodes correctly.
-	labelRecords, err := s.client.ExecuteQuery(ctx,
-		`MATCH (n) WITH labels(n) AS lbls
-		 UNWIND lbls AS label
-		 RETURN label, count(*) AS count
-		 ORDER BY label`, nil)
-	if err != nil {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("schema: failed to enumerate labels: %v", err)}},
-			IsError: true,
+	var labels []labelInfo
+	var totalNodeCount int64
+	var totalRelCount int64
+	apocAvailable := true
+
+	// Try to get label counts from apoc.meta.stats
+	statsRecords, statsErr := s.client.ExecuteQuery(ctx,
+		`CALL apoc.meta.stats() YIELD labels, nodeCount, relCount
+		 RETURN labels, nodeCount, relCount`, nil)
+
+	if statsErr == nil && len(statsRecords) > 0 {
+		// apoc.meta.stats is available
+		m := statsRecords[0].AsMap()
+
+		// Extract nodeCount
+		if nc, ok := m["nodeCount"].(int64); ok {
+			totalNodeCount = nc
+		}
+
+		// Extract relCount
+		if rc, ok := m["relCount"].(int64); ok {
+			totalRelCount = rc
+		}
+
+		// Parse labels map: {"Label": count}
+		if labelsMap, ok := m["labels"].(map[string]interface{}); ok {
+			labelByName := make(map[string]int)
+			for labelName, countVal := range labelsMap {
+				count := 0
+				if c, ok := countVal.(int64); ok {
+					count = int(c)
+				} else if c, ok := countVal.(float64); ok {
+					count = int(c)
+				}
+				labelByName[labelName] = len(labels)
+				labels = append(labels, labelInfo{Label: labelName, Count: count})
+			}
+			sort.Slice(labels, func(i, j int) bool { return labels[i].Label < labels[j].Label })
+		}
+	} else {
+		// Fallback: apoc.meta.stats not available, use label scan
+		apocAvailable = false
+
+		labelRecords, err := s.client.ExecuteQuery(ctx,
+			`MATCH (n) WITH labels(n) AS lbls
+			 UNWIND lbls AS label
+			 RETURN label, count(*) AS count
+			 ORDER BY label`, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to enumerate labels: %w", err)
+		}
+
+		labelByName := map[string]int{}
+		for _, rec := range labelRecords {
+			m := rec.AsMap()
+			name := getStringFromRecord(m, "label")
+			if name == "" {
+				continue
+			}
+			count := getIntFromRecord(m, "count")
+			labelByName[name] = len(labels)
+			labels = append(labels, labelInfo{Label: name, Count: count})
 		}
 	}
 
-	labels := []labelInfo{}
-	labelByName := map[string]int{}
-	for _, rec := range labelRecords {
-		m := rec.AsMap()
-		name := getStringFromRecord(m, "label")
-		if name == "" {
-			continue
-		}
-		count := getIntFromRecord(m, "count")
-		labelByName[name] = len(labels)
-		labels = append(labels, labelInfo{Label: name, Count: count})
-	}
-
-	// Properties per label via Neo4j's built-in introspection (no APOC).
+	// Properties per label via db.schema.nodeTypeProperties
 	propRecords, _ := s.client.ExecuteQuery(ctx,
 		`CALL db.schema.nodeTypeProperties() YIELD nodeType, propertyName, propertyTypes
 		 RETURN nodeType, propertyName, propertyTypes`, nil)
+
+	labelByName := make(map[string]int)
+	for i, lbl := range labels {
+		labelByName[lbl.Label] = i
+	}
+
 	for _, rec := range propRecords {
 		m := rec.AsMap()
 		nt := getStringFromRecord(m, "nodeType")
@@ -97,10 +205,7 @@ func (s *CodeGraphMCPServer) handleSchemaTool(ctx context.Context, args map[stri
 		`MATCH (a)-[r]->(b)
 		 RETURN labels(a)[0] AS fromLabel, type(r) AS relType, labels(b)[0] AS toLabel, count(*) AS c`, nil)
 	if err != nil {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("schema: failed to enumerate relationships: %v", err)}},
-			IsError: true,
-		}
+		return nil, fmt.Errorf("failed to enumerate relationships: %w", err)
 	}
 	for _, rec := range edgeRecords {
 		m := rec.AsMap()
@@ -131,25 +236,18 @@ func (s *CodeGraphMCPServer) handleSchemaTool(ctx context.Context, args map[stri
 	}
 	sort.Slice(relTypes, func(a, b int) bool { return relTypes[a].Type < relTypes[b].Type })
 
+	// Build output
 	out := map[string]interface{}{
-		"nodes":         labels,
-		"relationships": relTypes,
-	}
-	if includeExamples {
-		out["examples"] = schemaExamples()
-		out["notes"] = "Examples in `examples` reference the RFC-004 primitives (find, expand, path, source, cypher, entry_points, flows). Each example shows the recommended composition for a common code-intelligence question."
+		"nodes":             labels,
+		"relationships":     relTypes,
+		"computed_at":       s.now().Format(time.RFC3339),
+		"cache_ttl_seconds": int(s.schemaCacheTTL.Seconds()),
+		"apoc":              apocAvailable,
+		"nodeCount":         totalNodeCount,
+		"relCount":          totalRelCount,
 	}
 
-	body, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("schema: failed to encode: %v", err)}},
-			IsError: true,
-		}
-	}
-	return ToolCallResponse{
-		Content: []ToolContent{{Type: "text", Text: string(body)}},
-	}
+	return out, nil
 }
 
 // parseSchemaNodeType splits Neo4j's nodeType strings (e.g. ":`Function`" or
