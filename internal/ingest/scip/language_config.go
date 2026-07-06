@@ -257,6 +257,10 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 		".venv": true, "__pycache__": true, "dist": true,
 		"build": true, ".svelte-kit": true, ".nx": true,
 		"bin": true, "tmp": true, "coverage": true,
+		// Test fixture trees are excluded from file extraction by
+		// shouldExcludePath; keep root detection consistent so a fixture's
+		// go.mod/package.json can't spawn a phantom Service.
+		"testdata": true, "fixtures": true,
 	}
 
 	var roots []LanguageRoot
@@ -459,7 +463,8 @@ func DetectLanguage(projectPath string) (Language, error) {
 		if info.IsDir() {
 			// Skip common directories
 			dirName := info.Name()
-			if dirName == "node_modules" || dirName == ".git" || dirName == "vendor" {
+			if dirName == "node_modules" || dirName == ".git" || dirName == "vendor" ||
+				dirName == "testdata" || dirName == "fixtures" {
 				return filepath.SkipDir
 			}
 			return nil
