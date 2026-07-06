@@ -1,0 +1,316 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/context-maximiser/code-graph/internal/query"
+)
+
+// handleFlowsToolV2 is the RFC-004 flows primitive. Wraps the existing
+// FlowSpineGenerator logic with format=json|text|mermaid output.
+func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	maxDepth := 5
+	if d, ok := args["max_depth"].(float64); ok && d > 0 {
+		maxDepth = int(d)
+	}
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+	format := "json"
+	if f, ok := args["format"].(string); ok && f != "" {
+		format = f
+	}
+
+	scopeCtx := parseScopeContextArg(args)
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+
+	gen := query.NewFlowSpineGenerator(s.client)
+	gen.SetScope(scopeCtx)
+	gen.SetServiceFilter(serviceNames)
+	flows, err := gen.GenerateFlows(ctx, maxDepth)
+	if err != nil {
+		return errorResponse(fmt.Sprintf("flows: generation failed: %v", err))
+	}
+	flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
+	if len(flows) > limit {
+		flows = flows[:limit]
+	}
+	if len(flows) == 0 {
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: "No flows generated for this scope. Re-index with `index pipeline` if call graph data is missing."}}}
+	}
+
+	switch format {
+	case "mermaid":
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: renderFlowsMermaid(flows)}}}
+	case "text":
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: renderFlowsText(flows)}}}
+	default:
+		body, err := json.MarshalIndent(map[string]interface{}{
+			"flow_count": len(flows),
+			"flows":      flows,
+		}, "", "  ")
+		if err != nil {
+			return errorResponse(fmt.Sprintf("flows: encode failed: %v", err))
+		}
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
+	}
+}
+
+func renderFlowsMermaid(flows []query.FlowSpineResult) string {
+	var b strings.Builder
+	b.WriteString("```mermaid\ngraph LR\n")
+	for fi, f := range flows {
+		// Subgraph per flow keeps multi-flow output readable.
+		fmt.Fprintf(&b, "  subgraph F%d[\"%s\"]\n", fi, escapeMermaidLabel(f.FlowName))
+		for si, step := range f.Steps {
+			fmt.Fprintf(&b, "    F%dS%d[\"%s: %s\"]\n", fi, si, step.Label, escapeMermaidLabel(step.Name))
+		}
+		for si := 1; si < len(f.Steps); si++ {
+			fmt.Fprintf(&b, "    F%dS%d --> F%dS%d\n", fi, si-1, fi, si)
+		}
+		b.WriteString("  end\n")
+	}
+	b.WriteString("```\n")
+	return b.String()
+}
+
+func renderFlowsText(flows []query.FlowSpineResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d flow(s):\n\n", len(flows))
+	for i, f := range flows {
+		fmt.Fprintf(&b, "%d. %s [%s]\n", i+1, f.FlowName, f.FlowType)
+		for _, step := range f.Steps {
+			fmt.Fprintf(&b, "%s  %d. %s (%s)\n", strings.Repeat("  ", step.Order), step.Order+1, step.Name, step.Label)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func escapeMermaidLabel(s string) string {
+	s = strings.ReplaceAll(s, "\"", "'")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "[", "(")
+	s = strings.ReplaceAll(s, "]", ")")
+	return s
+}
+
+// handleEntryPointsToolV2 implements the same 4-tier classification as
+// handleGetEntryPointsTool but accepts a format parameter (json|text|mermaid).
+// Code is intentionally similar to the legacy handler — Phase 4 retires the
+// old one and the duplication goes away.
+func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	limit := 50
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+	format := "json"
+	if f, ok := args["format"].(string); ok && f != "" {
+		format = f
+	}
+	scopeCtx := parseScopeContextArg(args)
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+	tierFilter := 0
+	if t, ok := args["tier"].(float64); ok && t >= 1 && t <= 4 {
+		tierFilter = int(t)
+	}
+
+	type entryOut struct {
+		NodeKey     string `json:"node_key"`
+		Name        string `json:"name"`
+		FilePath    string `json:"file_path,omitempty"`
+		Tier        int    `json:"tier"`
+		TierLabel   string `json:"tier_label"`
+		Source      string `json:"detection_source,omitempty"`
+		ServiceName string `json:"service,omitempty"`
+	}
+
+	params := map[string]any{"scopeId": scopeCtx.ScopeID, "serviceNames": serviceNames}
+	seen := make(map[string]bool)
+	entries := []entryOut{}
+
+	addEntry := func(e entryOut) {
+		if e.NodeKey == "" || seen[e.NodeKey] {
+			return
+		}
+		if e.FilePath != "" && !s.fileInWorkspace(e.FilePath) {
+			return
+		}
+		seen[e.NodeKey] = true
+		entries = append(entries, e)
+	}
+
+	runTier := func(tier int, label, cypher string, fillSource func(map[string]interface{}) string) {
+		if tierFilter != 0 && tierFilter != tier {
+			return
+		}
+		records, err := s.client.ExecuteQuery(ctx, cypher, params)
+		if err != nil {
+			return
+		}
+		for _, r := range records {
+			m := r.AsMap()
+			addEntry(entryOut{
+				NodeKey:     getStringFromRecord(m, "nodeKey"),
+				Name:        getStringFromRecord(m, "name"),
+				FilePath:    getStringFromRecord(m, "filePath"),
+				Tier:        tier,
+				TierLabel:   label,
+				Source:      fillSource(m),
+				ServiceName: getStringFromRecord(m, "serviceName"),
+			})
+		}
+	}
+
+	// Tier 1: API-exposed.
+	runTier(1, "API-exposed", fmt.Sprintf(`
+		MATCH (fn)-[:EXPOSES_API]->(r:APIRoute)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND (r.scopeId = $scopeId OR r.scopeId = 'main')
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+		  %s
+		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
+		       coalesce(fn.filePath, '') AS filePath,
+		       fn.serviceName AS serviceName,
+		       coalesce(r.detectionSource, r.protocol) AS source
+		ORDER BY fn.name`, serviceFilterClause("fn")),
+		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") })
+
+	// Tier 2: Interface implementations with no callers.
+	runTier(2, "Interface impl", fmt.Sprintf(`
+		MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+		  %s
+		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+		WHERE caller:Function OR caller:Method
+		WITH fn, iface, count(caller) AS callerCount
+		WHERE callerCount = 0
+		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
+		       coalesce(fn.filePath, '') AS filePath,
+		       fn.serviceName AS serviceName,
+		       iface.name AS source
+		ORDER BY fn.name`, serviceFilterClause("fn")),
+		func(m map[string]interface{}) string { return "implements " + getStringFromRecord(m, "source") })
+
+	// Tier 3: Exported topological roots (no callers, has callees).
+	runTier(3, "Topological root", fmt.Sprintf(`
+		MATCH (fn) WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isExported, true) = true
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+		  %s
+		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+		WITH fn, count(caller) AS callerCount
+		WHERE callerCount = 0
+		MATCH (fn)-[:CALLS]->(callee)
+		WITH fn, count(DISTINCT callee) AS calleeCount
+		WHERE calleeCount > 0
+		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
+		       coalesce(fn.filePath, '') AS filePath,
+		       fn.serviceName AS serviceName,
+		       toString(calleeCount) AS source
+		ORDER BY calleeCount DESC, fn.name
+		LIMIT 50`, serviceFilterClause("fn")),
+		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })
+
+	// Tier 4: High centrality (top callees count).
+	runTier(4, "High centrality", fmt.Sprintf(`
+		MATCH (fn) WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
+		  %s
+		MATCH (fn)-[:CALLS]->(callee)
+		WITH fn, count(DISTINCT callee) AS calleeCount
+		WHERE calleeCount >= 5
+		RETURN fn.nodeKey AS nodeKey, fn.name AS name,
+		       coalesce(fn.filePath, '') AS filePath,
+		       fn.serviceName AS serviceName,
+		       toString(calleeCount) AS source
+		ORDER BY calleeCount DESC LIMIT 30`, serviceFilterClause("fn")),
+		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })
+
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	switch format {
+	case "text":
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d entry point(s):\n\n", len(entries))
+		byTier := map[int][]entryOut{}
+		for _, e := range entries {
+			byTier[e.Tier] = append(byTier[e.Tier], e)
+		}
+		for t := 1; t <= 4; t++ {
+			es := byTier[t]
+			if len(es) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "Tier %d — %s (%d):\n", t, es[0].TierLabel, len(es))
+			for _, e := range es {
+				fmt.Fprintf(&b, "  - %s", e.Name)
+				if e.FilePath != "" {
+					fmt.Fprintf(&b, " (%s)", e.FilePath)
+				}
+				if e.Source != "" {
+					fmt.Fprintf(&b, " [%s]", e.Source)
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}
+	case "mermaid":
+		// Entry points are a list, not a graph. Render as a tier-grouped
+		// flowchart with each entry as a leaf under its tier subgraph.
+		var b strings.Builder
+		b.WriteString("```mermaid\ngraph TD\n")
+		byTier := map[int][]entryOut{}
+		for _, e := range entries {
+			byTier[e.Tier] = append(byTier[e.Tier], e)
+		}
+		for t := 1; t <= 4; t++ {
+			es := byTier[t]
+			if len(es) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "  subgraph T%d[\"Tier %d: %s\"]\n", t, t, es[0].TierLabel)
+			for i, e := range es {
+				fmt.Fprintf(&b, "    T%dE%d[\"%s\"]\n", t, i, escapeMermaidLabel(e.Name))
+			}
+			b.WriteString("  end\n")
+		}
+		b.WriteString("```\n")
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}
+	default:
+		body, err := json.MarshalIndent(map[string]interface{}{
+			"count":   len(entries),
+			"entries": entries,
+		}, "", "  ")
+		if err != nil {
+			return errorResponse(fmt.Sprintf("entry_points: encode failed: %v", err))
+		}
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
+	}
+}
+
+// writeKeywordRegex matches Cypher write/DDL keywords as whole words. Defense
+// in depth — ExecuteRead also rejects writes at the driver level. Keyword
+// matches inside string literals will produce false positives; users hitting
+// those should rephrase. Comments are stripped before matching.
+var writeKeywordRegex = regexp.MustCompile(`(?i)\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s+\{[^}]*\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP)\b)`)
+
+// stripCypherComments removes // line and /* block */ comments from a query
+// to reduce false negatives in keyword detection.
