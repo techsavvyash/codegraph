@@ -4,13 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
-	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
+// writeKeywordRegex matches Cypher write/DDL keywords as whole words. Defense
+// in depth — ExecuteRead also rejects writes at the driver level. Keyword
+// matches inside string literals will produce false positives; users hitting
+// those should rephrase. Comments are stripped before matching.
+var writeKeywordRegex = regexp.MustCompile(`(?i)\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s+\{[^}]*\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP)\b)`)
+
+// stripCypherComments removes // line and /* block */ comments from a query
+// to reduce false negatives in keyword detection.
 func stripCypherComments(q string) string {
 	// Remove block comments first.
 	for {
@@ -38,9 +46,10 @@ func stripCypherComments(q string) string {
 }
 
 // handleCypherTool runs a read-only Cypher query directly. Defense in depth:
-// (1) regex keyword pre-check after stripping comments, (2) read-only Neo4j
-// transaction (driver-level enforcement), (3) bounded timeout via context,
-// (4) row cap enforced during result iteration.
+// (1) regex keyword pre-check after stripping comments, (2) EXPLAIN validation
+// to catch syntax/semantic errors cheaply, (3) read-only Neo4j transaction
+// (driver-level enforcement), (4) bounded timeout via context (in handleToolCall),
+// (5) row cap enforced during result iteration.
 func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args map[string]interface{}) ToolCallResponse {
 	query, _ := args["query"].(string)
 	query = strings.TrimSpace(query)
@@ -52,17 +61,6 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 	stripped := stripCypherComments(query)
 	if writeKeywordRegex.MatchString(stripped) {
 		return errorResponse("cypher: write keywords (CREATE/MERGE/DELETE/SET/REMOVE/DROP/FOREACH/LOAD CSV) are not allowed in this tool. Use the indexer for graph mutations.")
-	}
-
-	timeoutMs := 3000
-	if t, ok := args["timeout_ms"].(float64); ok {
-		timeoutMs = int(t)
-	}
-	if timeoutMs < 100 {
-		timeoutMs = 100
-	}
-	if timeoutMs > 5000 {
-		timeoutMs = 5000
 	}
 
 	rowLimit := 100
@@ -83,29 +81,41 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(parentCtx, time.Duration(timeoutMs)*time.Millisecond)
-	defer cancel()
+	// Layer 2: EXPLAIN validation — compiles the plan without side effects.
+	// If EXPLAIN fails, abort without executing the user's query.
+	explainQuery := "EXPLAIN " + query
+	_, explainSummary, err := s.client.ExecuteQueryWithSummary(parentCtx, explainQuery, params)
+	if err != nil {
+		return errorResponse(fmt.Sprintf("cypher: query validation failed: %v", err))
+	}
+
+	// Check the plan for AllNodesScan and collect warnings
+	var warnings []string
+	if explainSummary != nil && planHasOperator(explainSummary.Plan(), "AllNodesScan") {
+		warnings = append(warnings, "warning: query plan contains AllNodesScan — add a label qualifier to avoid scanning the whole graph")
+	}
 
 	type cypherResult struct {
 		rows      []map[string]interface{}
 		keys      []string
 		truncated bool
+		warnings  []string
 	}
 
-	result, err := s.client.ExecuteRead(ctx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
-		// Layer 2: driver-level read-only enforcement (any write here would
+	result, err := s.client.ExecuteRead(parentCtx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
+		// Layer 3: driver-level read-only enforcement (any write here would
 		// fail with a transaction-mode error).
-		res, err := tx.Run(ctx, query, params)
+		res, err := tx.Run(parentCtx, query, params)
 		if err != nil {
 			return nil, err
 		}
-		out := &cypherResult{}
+		out := &cypherResult{warnings: warnings}
 		keys, kerr := res.Keys()
 		if kerr == nil {
 			out.keys = keys
 		}
-		// Layer 4: row cap during iteration.
-		for res.Next(ctx) {
+		// Layer 5: row cap during iteration.
+		for res.Next(parentCtx) {
 			if len(out.rows) >= rowLimit {
 				out.truncated = true
 				break
@@ -121,7 +131,7 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 		// If we broke out of iteration due to cap, drain res.Next so the
 		// driver doesn't complain. Else surface streaming errors.
 		if out.truncated {
-			for res.Next(ctx) {
+			for res.Next(parentCtx) {
 			}
 		}
 		if rerr := res.Err(); rerr != nil {
@@ -131,8 +141,10 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 	})
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return errorResponse(fmt.Sprintf("cypher: query timed out after %dms", timeoutMs))
+		if parentCtx.Err() == context.DeadlineExceeded {
+			// handleToolCall owns the deadline; it rewrites this into a
+			// message that includes the effective timeout_ms.
+			return errorResponse("cypher: query timed out")
 		}
 		return errorResponse(fmt.Sprintf("cypher: %v", err))
 	}
@@ -140,6 +152,12 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 	cr, _ := result.(*cypherResult)
 	if cr == nil {
 		return errorResponse("cypher: internal error (nil result)")
+	}
+
+	// Build response with warnings prepended
+	var responseText string
+	if len(cr.warnings) > 0 {
+		responseText = strings.Join(cr.warnings, "\n") + "\n\n"
 	}
 
 	out := map[string]interface{}{
@@ -152,7 +170,9 @@ func (s *CodeGraphMCPServer) handleCypherTool(parentCtx context.Context, args ma
 	if err != nil {
 		return errorResponse(fmt.Sprintf("cypher: encode failed: %v", err))
 	}
-	return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
+	responseText += string(body)
+
+	return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: responseText}}}
 }
 
 // sanitizeCypherValue converts Neo4j driver types into JSON-friendly values
@@ -210,6 +230,19 @@ type pathResult struct {
 	Edges []pathEdge `json:"edges"`
 }
 
-// handlePathTool finds paths between two nodes filtered by relationship types
-// and direction. Defaults to all shortest paths; pass shortest=false to get up
-// to 25 paths up to max_hops.
+// planHasOperator recursively walks a driver query plan checking whether any
+// operator's name contains the given substring (e.g. "AllNodesScan").
+func planHasOperator(plan neo4jdriver.Plan, op string) bool {
+	if plan == nil {
+		return false
+	}
+	if strings.Contains(plan.Operator(), op) {
+		return true
+	}
+	for _, child := range plan.Children() {
+		if planHasOperator(child, op) {
+			return true
+		}
+	}
+	return false
+}

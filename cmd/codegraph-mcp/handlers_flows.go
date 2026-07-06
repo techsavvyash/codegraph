@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/context-maximiser/code-graph/internal/query"
@@ -305,12 +304,3 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
 	}
 }
-
-// writeKeywordRegex matches Cypher write/DDL keywords as whole words. Defense
-// in depth — ExecuteRead also rejects writes at the driver level. Keyword
-// matches inside string literals will produce false positives; users hitting
-// those should rephrase. Comments are stripped before matching.
-var writeKeywordRegex = regexp.MustCompile(`(?i)\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s+\{[^}]*\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP)\b)`)
-
-// stripCypherComments removes // line and /* block */ comments from a query
-// to reduce false negatives in keyword detection.

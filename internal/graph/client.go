@@ -102,6 +102,35 @@ func (c *Client) ExecuteQuery(ctx context.Context, cypher string, params map[str
 	return records, nil
 }
 
+// ExecuteQueryWithSummary executes a query and returns its records along
+// with the driver's ResultSummary. For EXPLAIN queries the plan is carried
+// by the summary (summary.Plan()); EXPLAIN produces no records, so the plan
+// is NOT available via the records themselves.
+func (c *Client) ExecuteQueryWithSummary(ctx context.Context, cypher string, params map[string]any) ([]*neo4j.Record, neo4j.ResultSummary, error) {
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: c.database,
+		AccessMode:   neo4j.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	result, err := session.Run(ctx, cypher, params)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	records, err := result.Collect(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	summary, err := result.Consume(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return records, summary, nil
+}
+
 // ExecuteWrite executes a write transaction
 func (c *Client) ExecuteWrite(ctx context.Context, work func(tx neo4j.ManagedTransaction) (any, error)) (any, error) {
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
@@ -61,9 +63,14 @@ type ToolContent struct {
 
 // CodeGraph MCP Server
 type CodeGraphMCPServer struct {
-	client        *neo4j.Client
-	queryBuilder  *neo4j.QueryBuilder
-	workspaceRoot string
+	client          *neo4j.Client
+	queryBuilder    *neo4j.QueryBuilder
+	workspaceRoot   string
+	schemaCacheMu   sync.Mutex
+	schemaCache     map[string]any
+	schemaCacheTime time.Time
+	schemaCacheTTL  time.Duration
+	now             func() time.Time
 }
 
 func main() {
@@ -93,9 +100,12 @@ func main() {
 	}
 
 	server := &CodeGraphMCPServer{
-		client:        client,
-		queryBuilder:  neo4j.NewQueryBuilder(client),
-		workspaceRoot: workspaceRoot,
+		client:         client,
+		queryBuilder:   neo4j.NewQueryBuilder(client),
+		workspaceRoot:  workspaceRoot,
+		schemaCache:    make(map[string]any),
+		schemaCacheTTL: 300 * time.Second,
+		now:            time.Now,
 	}
 
 	// Start MCP server
@@ -424,7 +434,13 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		return
 	}
 
-	ctx := context.Background()
+	// Parse and clamp timeout_ms from tool arguments
+	timeoutMs := parseTimeoutMs(toolCall.Arguments)
+
+	// Wrap context with timeout bound to the handler
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
 	var response ToolCallResponse
 
 	switch toolCall.Name {
@@ -449,6 +465,14 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
+	}
+
+	// If the per-tool deadline fired, replace whatever the handler surfaced
+	// (usually a raw driver context error) with a clean, actionable message.
+	if ctx.Err() == context.DeadlineExceeded && response.IsError {
+		response = errorResponse(fmt.Sprintf(
+			"%s: timed out after %dms — pass a larger timeout_ms (max 120000) or narrow the query",
+			toolCall.Name, timeoutMs))
 	}
 
 	s.sendResponse(request.ID, response)
@@ -531,6 +555,29 @@ func getOptionalStringArg(args map[string]interface{}, key string) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+// parseTimeoutMs extracts and clamps the timeout_ms argument (default 10000, range [100, 120000])
+func parseTimeoutMs(args map[string]interface{}) int {
+	const defaultTimeoutMs = 10000
+	const minTimeoutMs = 100
+	const maxTimeoutMs = 120000
+
+	if args == nil {
+		return defaultTimeoutMs
+	}
+
+	if t, ok := args["timeout_ms"].(float64); ok {
+		timeoutMs := int(t)
+		if timeoutMs < minTimeoutMs {
+			return minTimeoutMs
+		}
+		if timeoutMs > maxTimeoutMs {
+			return maxTimeoutMs
+		}
+		return timeoutMs
+	}
+	return defaultTimeoutMs
 }
 
 func serviceFilterClause(nodeVar string) string {

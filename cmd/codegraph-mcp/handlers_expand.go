@@ -280,6 +280,9 @@ func renderExpandText(nodes []expandNode, edges []expandEdge, truncated bool) st
 	return b.String()
 }
 
+// handlePathTool finds paths between two nodes filtered by relationship types
+// and direction. Defaults to all shortest paths; pass shortest=false to get up
+// to 25 paths up to max_hops.
 func (s *CodeGraphMCPServer) handlePathTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	fromID, _ := args["from_id"].(string)
 	toID, _ := args["to_id"].(string)
