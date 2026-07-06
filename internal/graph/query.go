@@ -23,7 +23,7 @@ func NewQueryBuilder(client *Client) *QueryBuilder {
 
 // FindNodesByLabel finds all nodes with a specific label
 func (qb *QueryBuilder) FindNodesByLabel(ctx context.Context, label string, limit int) ([]*neo4j.Record, error) {
-	cypher := fmt.Sprintf("MATCH (n:%s) RETURN n", label)
+	cypher := fmt.Sprintf("MATCH (n:%s) RETURN n", Ident(label))
 	if limit > 0 {
 		cypher += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -38,7 +38,7 @@ func (qb *QueryBuilder) FindNodesByLabel(ctx context.Context, label string, limi
 
 // FindNodeByProperty finds nodes by a specific property value
 func (qb *QueryBuilder) FindNodeByProperty(ctx context.Context, label, property string, value any) ([]*neo4j.Record, error) {
-	cypher := fmt.Sprintf("MATCH (n:%s {%s: $value}) RETURN n", label, property)
+	cypher := fmt.Sprintf("MATCH (n:%s {%s: $value}) RETURN n", Ident(label), Ident(property))
 	params := map[string]any{"value": value}
 
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
@@ -324,15 +324,17 @@ func (qb *QueryBuilder) DiscoverServiceDependencies(ctx context.Context, service
 
 // TombstoneFilter returns a Cypher WHERE clause fragment that excludes nodes
 // which have been tombstoned in the given scopeID. If scopeID is empty or "main",
-// no filtering is applied.
+// no filtering is applied. The returned fragment uses the bound parameter $scopeId
+// instead of interpolating the value directly, so callers must bind scopeID to
+// the "scopeId" parameter in their query.
 func TombstoneFilter(nodeVar, scopeID string) string {
 	if scopeID == "" || scopeID == "main" {
 		return ""
 	}
 	return fmt.Sprintf(` AND NOT EXISTS {
-		MATCH (t:Tombstone {scopeId: "%s"})
+		MATCH (t:Tombstone {scopeId: $scopeId})
 		WHERE t.targetNodeKey = %s.nodeKey
-	}`, scopeID, nodeVar)
+	}`, nodeVar)
 }
 
 // SearchNodesScoped performs a search with tombstone filtering for PR overlays.
@@ -347,7 +349,7 @@ func (qb *QueryBuilder) SearchNodesScoped(ctx context.Context, searchTerm string
 
 	var labelFilters []string
 	for _, nodeType := range nodeTypes {
-		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", nodeType))
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", Ident(nodeType)))
 	}
 	labelFilter := ""
 	if len(labelFilters) > 0 {
@@ -427,7 +429,7 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 	// Build the label filter
 	var labelFilters []string
 	for _, nodeType := range nodeTypes {
-		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", nodeType))
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", Ident(nodeType)))
 	}
 	
 	var cypher string
@@ -505,7 +507,7 @@ func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, n
 	// Build the label filter
 	var labelFilters []string
 	for _, nodeType := range nodeTypes {
-		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", nodeType))
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", Ident(nodeType)))
 	}
 
 	// Build word-based search conditions

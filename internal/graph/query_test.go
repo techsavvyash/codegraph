@@ -6,6 +6,78 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// TestIdent
+// ---------------------------------------------------------------------------
+
+func TestIdent(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want string
+	}{
+		{
+			name:  "plain identifier passes through",
+			input: "Function",
+			want:  "Function",
+		},
+		{
+			name:  "identifier with underscore and digits",
+			input: "MyFunction_v2",
+			want:  "MyFunction_v2",
+		},
+		{
+			name:  "identifier starting with underscore",
+			input: "_privateName",
+			want:  "_privateName",
+		},
+		{
+			name:  "hyphenated name gets backticks",
+			input: "my-label",
+			want:  "`my-label`",
+		},
+		{
+			name:  "name with space gets backticks",
+			input: "my label",
+			want:  "`my label`",
+		},
+		{
+			name:  "name with embedded backtick gets doubled",
+			input: "my`label",
+			want:  "`my``label`",
+		},
+		{
+			name:  "multiple embedded backticks",
+			input: "a`b`c",
+			want:  "`a``b``c`",
+		},
+		{
+			name:  "empty string gets backticks",
+			input: "",
+			want:  "``",
+		},
+		{
+			name:  "name starting with digit gets backticks",
+			input: "1Function",
+			want:  "`1Function`",
+		},
+		{
+			name:  "special characters",
+			input: "my-special.label",
+			want:  "`my-special.label`",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Ident(tt.input)
+			if got != tt.want {
+				t.Errorf("Ident(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestTombstoneFilter
 // ---------------------------------------------------------------------------
 
@@ -16,6 +88,7 @@ func TestTombstoneFilter(t *testing.T) {
 		scopeID  string
 		wantEmpty bool
 		wantContains string
+		wantNotContains string
 	}{
 		{
 			name:      "empty scopeID returns empty",
@@ -43,6 +116,20 @@ func TestTombstoneFilter(t *testing.T) {
 			wantEmpty:    false,
 			wantContains: "node.nodeKey",
 		},
+		{
+			name:         "uses bound parameter $scopeId",
+			nodeVar:      "n",
+			scopeID:      "pr-42",
+			wantEmpty:    false,
+			wantContains: "$scopeId",
+		},
+		{
+			name:            "does not contain raw scope value",
+			nodeVar:         "n",
+			scopeID:         "pr-42",
+			wantEmpty:       false,
+			wantNotContains: `"pr-42"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -56,6 +143,9 @@ func TestTombstoneFilter(t *testing.T) {
 			}
 			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
 				t.Errorf("expected filter to contain %q, got %q", tt.wantContains, got)
+			}
+			if tt.wantNotContains != "" && strings.Contains(got, tt.wantNotContains) {
+				t.Errorf("expected filter to NOT contain %q, got %q", tt.wantNotContains, got)
 			}
 		})
 	}

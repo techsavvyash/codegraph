@@ -108,7 +108,7 @@ func (c *Client) CreateNode(ctx context.Context, labels []string, properties map
 		if i > 0 {
 			labelStr += ":"
 		}
-		labelStr += label
+		labelStr += Ident(label)
 	}
 
 	cypher := fmt.Sprintf("CREATE (n:%s) SET n = $props RETURN elementId(n) as id", labelStr)
@@ -187,7 +187,7 @@ func (c *Client) CreateRelationship(ctx context.Context, fromID, toID, relType s
 		CREATE (from)-[r:%s]->(to)
 		SET r = $props
 		RETURN elementId(r) as id
-	`, relType)
+	`, Ident(relType))
 
 	params := map[string]any{
 		"fromId": fromID,
@@ -219,7 +219,7 @@ func (c *Client) MergeRelationship(ctx context.Context, fromID, toID, relType st
 	if len(mergeProps) > 0 {
 		parts := make([]string, 0, len(mergeProps))
 		for key := range mergeProps {
-			parts = append(parts, fmt.Sprintf("%s: $merge.%s", key, key))
+			parts = append(parts, fmt.Sprintf("%s: $merge.%s", Ident(key), Ident(key)))
 		}
 		mergeClause = " {" + strings.Join(parts, ", ") + "}"
 	}
@@ -230,7 +230,7 @@ func (c *Client) MergeRelationship(ctx context.Context, fromID, toID, relType st
 		MERGE (from)-[r:%s%s]->(to)
 		SET r += $set
 		RETURN elementId(r) as id
-	`, relType, mergeClause)
+	`, Ident(relType), mergeClause)
 
 	params := map[string]any{
 		"fromId": fromID,
@@ -273,7 +273,7 @@ func (c *Client) MergeNodesBatch(ctx context.Context, label string, items []map[
 		MERGE (n:%s {nodeKey: item.nodeKey, scopeId: item.scopeId})
 		SET n += item.props
 		RETURN item.nodeKey AS nodeKey, elementId(n) AS id
-	`, label)
+	`, Ident(label))
 
 	result := make(map[string]string, len(items))
 
@@ -319,7 +319,7 @@ func (c *Client) CreateRelsBatch(ctx context.Context, relType string, items []ma
 		WHERE elementId(a) = item.fromId AND elementId(b) = item.toId
 		CREATE (a)-[r:%s]->(b)
 		SET r = item.props
-	`, relType)
+	`, Ident(relType))
 
 	for start := 0; start < len(items); start += batchSize {
 		end := start + batchSize
@@ -331,6 +331,43 @@ func (c *Client) CreateRelsBatch(ctx context.Context, relType string, items []ma
 		_, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
 		if err != nil {
 			return fmt.Errorf("CreateRelsBatch(%s) chunk %d-%d failed: %w", relType, start, end, err)
+		}
+	}
+
+	return nil
+}
+
+// MergeRelsBatch is the idempotent counterpart of CreateRelsBatch: it MERGEs
+// relationships in UNWIND batches so re-indexing the same scope cannot
+// duplicate edges. Each item must have "fromId" and "toId" (elementId strings)
+// and "props" (map). The merge key is (fromId, toId, relType); props are
+// updated with SET r += item.props on both create and match.
+func (c *Client) MergeRelsBatch(ctx context.Context, relType string, items []map[string]any, batchSize int) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+
+	cypher := fmt.Sprintf(`
+		UNWIND $batch AS item
+		MATCH (a), (b)
+		WHERE elementId(a) = item.fromId AND elementId(b) = item.toId
+		MERGE (a)-[r:%s]->(b)
+		SET r += item.props
+	`, Ident(relType))
+
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+
+		_, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+		if err != nil {
+			return fmt.Errorf("MergeRelsBatch(%s) chunk %d-%d failed: %w", relType, start, end, err)
 		}
 	}
 
