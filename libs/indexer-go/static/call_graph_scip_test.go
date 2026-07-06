@@ -226,3 +226,100 @@ func TestParseFuncRangesInvalidGo(t *testing.T) {
 		t.Error("expected error for invalid Go file")
 	}
 }
+
+// TestResolveCallEdgesDeterministicMinLine locks the fix for the
+// nondeterministic CALLS.line bug found via test/fixtures/tiny-go: when a
+// caller invokes the same target from two call sites, Neo4j's unordered
+// query results previously meant "line" was set to whichever row happened
+// to arrive first, flipping between indexing runs. resolveCallEdges must
+// collapse the two rows into one edge and always pick the smallest line,
+// regardless of the order rows are supplied in.
+func TestResolveCallEdgesDeterministicMinLine(t *testing.T) {
+	callers := []callerInfo{
+		{ID: "main", StartLine: 1, EndLine: 30},
+	}
+
+	// Two call sites from "main" to "greet": lines 15 and 10. The row order
+	// below is deliberately "line 15 first" to reproduce the exact ordering
+	// that used to win incorrectly.
+	rowsLine15First := []callRefRow{
+		{Line: 15, TargetID: "greet"},
+		{Line: 10, TargetID: "greet"},
+	}
+	rowsLine10First := []callRefRow{
+		{Line: 10, TargetID: "greet"},
+		{Line: 15, TargetID: "greet"},
+	}
+
+	edgesA := resolveCallEdges(rowsLine15First, callers, nil)
+	edgesB := resolveCallEdges(rowsLine10First, callers, nil)
+
+	for name, edges := range map[string][]callEdge{"line15First": edgesA, "line10First": edgesB} {
+		if len(edges) != 1 {
+			t.Fatalf("%s: expected exactly 1 collapsed edge for the (main, greet) pair, got %d: %+v", name, len(edges), edges)
+		}
+		if edges[0].CallerID != "main" || edges[0].TargetID != "greet" {
+			t.Fatalf("%s: unexpected edge endpoints: %+v", name, edges[0])
+		}
+		if edges[0].Line != 10 {
+			t.Errorf("%s: expected edge.Line == 10 (the smallest call-site line), got %d", name, edges[0].Line)
+		}
+	}
+
+	// The two orderings must agree exactly — this is the determinism
+	// property, not just "both happen to equal 10".
+	if edgesA[0] != edgesB[0] {
+		t.Errorf("resolveCallEdges is order-dependent: line15First=%+v line10First=%+v", edgesA[0], edgesB[0])
+	}
+}
+
+// TestResolveCallEdgesBranchMetadataFollowsWinningLine ensures branchDepth
+// and isConditional are computed for the winning (minimum-line) call site,
+// not left over from whichever row happened to be processed last.
+func TestResolveCallEdgesBranchMetadataFollowsWinningLine(t *testing.T) {
+	callers := []callerInfo{
+		{ID: "main", StartLine: 1, EndLine: 30},
+	}
+	branches := []branchRange{
+		// Line 15's call site is inside a conditional; line 10's is not.
+		{StartLine: 14, EndLine: 16, Depth: 1},
+	}
+
+	rows := []callRefRow{
+		{Line: 15, TargetID: "greet"}, // inside the if-block
+		{Line: 10, TargetID: "greet"}, // not inside any conditional, and smaller
+	}
+
+	edges := resolveCallEdges(rows, callers, branches)
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d: %+v", len(edges), edges)
+	}
+	if edges[0].Line != 10 {
+		t.Fatalf("expected winning line 10, got %d", edges[0].Line)
+	}
+	if edges[0].IsConditional {
+		t.Errorf("expected IsConditional=false for line 10 (outside the branch), got true: %+v", edges[0])
+	}
+	if edges[0].BranchDepth != 0 {
+		t.Errorf("expected BranchDepth=0 for line 10, got %d", edges[0].BranchDepth)
+	}
+}
+
+// TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers verifies the two
+// skip conditions carried over from the original inline loop: a reference
+// with no enclosing caller is dropped, and a caller calling itself
+// (recursion) does not produce a self-loop edge.
+func TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
+	callers := []callerInfo{
+		{ID: "main", StartLine: 1, EndLine: 10},
+	}
+	rows := []callRefRow{
+		{Line: 5, TargetID: "main"},   // self-call: main calls itself
+		{Line: 100, TargetID: "helper"}, // line 100 has no enclosing caller
+	}
+
+	edges := resolveCallEdges(rows, callers, nil)
+	if len(edges) != 0 {
+		t.Fatalf("expected 0 edges (self-call and unresolved-caller rows both dropped), got %d: %+v", len(edges), edges)
+	}
+}

@@ -335,35 +335,26 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		return 0, err
 	}
 
-	created := 0
-	seen := map[string]bool{}
-
+	rows := make([]callRefRow, 0, len(results))
 	for _, rec := range results {
 		rm := rec.AsMap()
-		refLine := int(getInt64FromMap(rm, "refLine"))
-		targetID := getStringFromMap(rm, "targetId")
+		rows = append(rows, callRefRow{
+			Line:     int(getInt64FromMap(rm, "refLine")),
+			TargetID: getStringFromMap(rm, "targetId"),
+		})
+	}
 
-		caller := findEnclosingCaller(callers, refLine)
-		if caller == nil {
-			continue
-		}
+	edges := resolveCallEdges(rows, callers, branches)
 
-		pairKey := caller.ID + "->" + targetID
-		if caller.ID == targetID || seen[pairKey] {
-			continue
-		}
-		seen[pairKey] = true
-
-		// Compute branch metadata for this call site.
-		depth, isCond := branchDepthAtLine(branches, refLine)
-
-		_, err := cg.client.MergeRelationship(ctx, caller.ID, targetID, string(models.CallsRel),
+	created := 0
+	for _, e := range edges {
+		_, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID, string(models.CallsRel),
 			nil,
 			map[string]any{
-				"line":          refLine,
+				"line":          e.Line,
 				"filePath":      filePath,
-				"branchDepth":   depth,
-				"isConditional": isCond,
+				"branchDepth":   e.BranchDepth,
+				"isConditional": e.IsConditional,
 				"scope":         cg.scopeCtx.Scope,
 				"scopeId":       cg.scopeCtx.ScopeID,
 			})
@@ -375,6 +366,75 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	}
 
 	return created, nil
+}
+
+// callRefRow is a raw (call-site line, resolved target node ID) pair
+// returned by the call-reference query, before caller resolution and dedup.
+type callRefRow struct {
+	Line     int
+	TargetID string
+}
+
+// callEdge is a single resolved CALLS edge, one per distinct (caller, target)
+// pair in a file.
+type callEdge struct {
+	CallerID      string
+	TargetID      string
+	Line          int
+	BranchDepth   int
+	IsConditional bool
+}
+
+// resolveCallEdges maps raw reference rows to their enclosing caller and
+// collapses multiple call sites between the same (caller, target) pair into a
+// single edge, deterministically keeping the smallest call-site line.
+//
+// This must not depend on the order rows arrive in: Neo4j does not guarantee
+// row order for a query without ORDER BY, so if a caller invokes the same
+// target from two lines, "first row wins" makes the resulting CALLS.line
+// property flip nondeterministically between indexing runs (observed via
+// test/fixtures/tiny-go, where main() calls greet() from two call sites).
+// Picking the minimum line is deterministic regardless of input order and
+// matches "the first call site in the file".
+//
+// Pure function, no I/O — testable without Neo4j.
+func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branchRange) []callEdge {
+	edges := make(map[string]*callEdge, len(rows))
+	order := make([]string, 0, len(rows))
+
+	for _, row := range rows {
+		caller := findEnclosingCaller(callers, row.Line)
+		if caller == nil || caller.ID == row.TargetID {
+			continue
+		}
+
+		key := caller.ID + "->" + row.TargetID
+		depth, isCond := branchDepthAtLine(branches, row.Line)
+
+		existing, ok := edges[key]
+		if !ok {
+			edges[key] = &callEdge{
+				CallerID:      caller.ID,
+				TargetID:      row.TargetID,
+				Line:          row.Line,
+				BranchDepth:   depth,
+				IsConditional: isCond,
+			}
+			order = append(order, key)
+			continue
+		}
+		if row.Line < existing.Line {
+			existing.Line = row.Line
+			existing.BranchDepth = depth
+			existing.IsConditional = isCond
+		}
+	}
+
+	out := make([]callEdge, 0, len(order))
+	for _, key := range order {
+		out = append(out, *edges[key])
+	}
+	return out
 }
 
 // upgradeClosureVarsToFunction adds the :Function label to Variable nodes
