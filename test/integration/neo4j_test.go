@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
 )
 
@@ -28,7 +28,7 @@ func getEnv(key, defaultValue string) string {
 // createTestClient creates a Neo4j client for testing
 func createTestClient(t *testing.T) *neo4j.Client {
 	t.Helper()
-	
+
 	config := neo4j.Config{
 		URI:      testNeo4jURI,
 		Username: testNeo4jUser,
@@ -91,7 +91,7 @@ func TestSchemaCreation(t *testing.T) {
 	}()
 
 	schemaManager := schema.NewSchemaManager(client)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -181,7 +181,7 @@ func TestBasicNodeOperations(t *testing.T) {
 		RETURN s.name as serviceName, f.path as filePath
 	`
 	params := map[string]any{"serviceName": "itest-neo4j"}
-	
+
 	result, err := client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		t.Fatalf("Failed to query relationship: %v", err)

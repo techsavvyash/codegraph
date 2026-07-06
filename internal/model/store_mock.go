@@ -12,10 +12,10 @@ import (
 // return the given error on the next call.
 type MockGraphStore struct {
 	mu            sync.RWMutex
-	nodes         map[string]*Node       // nodeKey → Node (all scopes)
+	nodes         map[string]*Node // nodeKey → Node (all scopes)
 	relationships []*Relationship
-	tombstones    map[string]*Tombstone  // tombstone nodeKey → Tombstone
-	Errors        map[string]error       // method name → error to return
+	tombstones    map[string]*Tombstone // tombstone nodeKey → Tombstone
+	Errors        map[string]error      // method name → error to return
 }
 
 // NewMockGraphStore returns an initialised MockGraphStore.

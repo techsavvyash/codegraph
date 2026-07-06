@@ -6,7 +6,7 @@ import (
 	"log"
 
 	gds "github.com/context-maximiser/code-graph/internal/graph/gds"
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
 	"github.com/context-maximiser/code-graph/internal/query"
 )
 

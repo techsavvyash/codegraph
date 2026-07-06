@@ -26,8 +26,8 @@ type OpenSearchConfig struct {
 // NewOpenSearchStore creates a new OpenSearchStore.
 func NewOpenSearchStore(cfg OpenSearchConfig) *OpenSearchStore {
 	return &OpenSearchStore{
-		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
-		indexName: cfg.IndexName,
+		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
+		indexName:  cfg.IndexName,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }

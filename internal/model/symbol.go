@@ -118,19 +118,19 @@ const (
 
 // SymbolInfo represents metadata about a code symbol
 type SymbolInfo struct {
-	Symbol         *SCIPSymbol `json:"symbol"`
-	Kind           SymbolKind  `json:"kind"`
-	Scope          SymbolScope `json:"scope"`
-	DisplayName    string      `json:"displayName"`
-	Documentation  string      `json:"documentation"`
-	Signature      string      `json:"signature"`
-	ReturnType     string      `json:"returnType,omitempty"`
-	Parameters     []Parameter `json:"parameters,omitempty"`
-	FilePath       string      `json:"filePath"`
-	StartLine      int         `json:"startLine"`
-	EndLine        int         `json:"endLine"`
-	StartColumn    int         `json:"startColumn"`
-	EndColumn      int         `json:"endColumn"`
+	Symbol        *SCIPSymbol `json:"symbol"`
+	Kind          SymbolKind  `json:"kind"`
+	Scope         SymbolScope `json:"scope"`
+	DisplayName   string      `json:"displayName"`
+	Documentation string      `json:"documentation"`
+	Signature     string      `json:"signature"`
+	ReturnType    string      `json:"returnType,omitempty"`
+	Parameters    []Parameter `json:"parameters,omitempty"`
+	FilePath      string      `json:"filePath"`
+	StartLine     int         `json:"startLine"`
+	EndLine       int         `json:"endLine"`
+	StartColumn   int         `json:"startColumn"`
+	EndColumn     int         `json:"endColumn"`
 }
 
 // IsExported returns true if the symbol is exported (public)
@@ -149,20 +149,20 @@ func (si *SymbolInfo) GenerateSymbolID() string {
 
 // SymbolReference represents a reference to a symbol in code
 type SymbolReference struct {
-	Symbol      *SCIPSymbol `json:"symbol"`
-	FilePath    string      `json:"filePath"`
-	StartLine   int         `json:"startLine"`
-	EndLine     int         `json:"endLine"`
-	StartColumn int         `json:"startColumn"`
-	EndColumn   int         `json:"endColumn"`
-	IsDefinition bool       `json:"isDefinition"`
-	Context     string      `json:"context"` // surrounding code context
+	Symbol       *SCIPSymbol `json:"symbol"`
+	FilePath     string      `json:"filePath"`
+	StartLine    int         `json:"startLine"`
+	EndLine      int         `json:"endLine"`
+	StartColumn  int         `json:"startColumn"`
+	EndColumn    int         `json:"endColumn"`
+	IsDefinition bool        `json:"isDefinition"`
+	Context      string      `json:"context"` // surrounding code context
 }
 
 // SymbolDefinition represents a symbol definition
 type SymbolDefinition struct {
-	Symbol *SCIPSymbol  `json:"symbol"`
-	Info   *SymbolInfo  `json:"info"`
+	Symbol *SCIPSymbol        `json:"symbol"`
+	Info   *SymbolInfo        `json:"info"`
 	Refs   []*SymbolReference `json:"references"`
 }
 

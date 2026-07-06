@@ -3,7 +3,7 @@ package query
 import (
 	"testing"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 func TestFlowStep_Fields(t *testing.T) {

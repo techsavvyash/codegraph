@@ -10,9 +10,9 @@ const (
 	ReferencesRel RelationshipType = "REFERENCES"
 
 	// Behavioral Relationships
-	CallsRel      RelationshipType = "CALLS"
-	FlowsToRel    RelationshipType = "FLOWS_TO"
-	NextExecRel   RelationshipType = "NEXT_EXECUTION"
+	CallsRel    RelationshipType = "CALLS"
+	FlowsToRel  RelationshipType = "FLOWS_TO"
+	NextExecRel RelationshipType = "NEXT_EXECUTION"
 
 	// Object-Oriented Relationships
 	InheritsFromRel RelationshipType = "INHERITS_FROM"
@@ -23,8 +23,8 @@ const (
 	CallsAPIRel   RelationshipType = "CALLS_API"
 
 	// Service Relationships
-	DependsOnRel     RelationshipType = "DEPENDS_ON"
-	CallsServiceRel  RelationshipType = "CALLS_SERVICE"
+	DependsOnRel    RelationshipType = "DEPENDS_ON"
+	CallsServiceRel RelationshipType = "CALLS_SERVICE"
 
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"
@@ -37,13 +37,13 @@ const (
 
 // BaseRelationship represents common properties for all relationships
 type BaseRelationship struct {
-	ID         string            `json:"id,omitempty" neo4j:"id,omitempty"`
-	Type       RelationshipType  `json:"type" neo4j:"type"`
-	Properties map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
-	StartID    string            `json:"startId" neo4j:"startId"`
-	EndID      string            `json:"endId" neo4j:"endId"`
-	TenantID   string            `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
-	Repo       string            `json:"repo,omitempty" neo4j:"repo,omitempty"`
+	ID         string           `json:"id,omitempty" neo4j:"id,omitempty"`
+	Type       RelationshipType `json:"type" neo4j:"type"`
+	Properties map[string]any   `json:"properties,omitempty" neo4j:"properties,omitempty"`
+	StartID    string           `json:"startId" neo4j:"startId"`
+	EndID      string           `json:"endId" neo4j:"endId"`
+	TenantID   string           `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
+	Repo       string           `json:"repo,omitempty" neo4j:"repo,omitempty"`
 }
 
 // ContainsRelationship represents hierarchical containment

@@ -74,11 +74,11 @@ func (fe *FeatureExtractor) ExtractWithLexical(query string, candidate contracts
 // StructuralEvidence holds graph-structural signals about a candidate.
 type StructuralEvidence struct {
 	// Direct graph relationships
-	HasCallsEdge          bool `json:"hasCallsEdge"`
-	HasHasStepEdge        bool `json:"hasHasStepEdge"`
-	HasContainsEdge       bool `json:"hasContainsEdge"`
-	HasOwnershipEdge      bool `json:"hasOwnershipEdge"`
-	HasExplicitReference  bool `json:"hasExplicitReference"`
+	HasCallsEdge         bool `json:"hasCallsEdge"`
+	HasHasStepEdge       bool `json:"hasHasStepEdge"`
+	HasContainsEdge      bool `json:"hasContainsEdge"`
+	HasOwnershipEdge     bool `json:"hasOwnershipEdge"`
+	HasExplicitReference bool `json:"hasExplicitReference"`
 
 	// Counts
 	IncomingCallCount int `json:"incomingCallCount"`

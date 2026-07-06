@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // slowFakeStage simulates a stage that takes a configurable duration.

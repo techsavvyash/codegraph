@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	textindex "github.com/context-maximiser/code-graph/internal/search/textindex"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -53,7 +53,7 @@ type HybridSearchResult struct {
 	FullTextScore float64                `json:"fullTextScore"`
 	SemanticScore float64                `json:"semanticScore"`
 	CombinedScore float64                `json:"combinedScore"`
-	Source        string                 `json:"source"` // "fulltext", "semantic", "hybrid"
+	Source        string                 `json:"source"`    // "fulltext", "semantic", "hybrid"
 	Relevance     string                 `json:"relevance"` // "high", "medium", "low"
 }
 

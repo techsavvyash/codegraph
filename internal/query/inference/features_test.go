@@ -29,8 +29,8 @@ func TestFeatureExtractor_Extract_WithEvidence(t *testing.T) {
 		NodeKey: "func:a", Score: 0.8, Source: "vector",
 	}
 	evidence := &StructuralEvidence{
-		HasCallsEdge:    true,
-		IsExported:      true,
+		HasCallsEdge:      true,
+		IsExported:        true,
 		IncomingCallCount: 3,
 	}
 

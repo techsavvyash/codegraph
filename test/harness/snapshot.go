@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // Snapshot is a canonical, comparable view of a Neo4j subgraph scoped by scopeId.

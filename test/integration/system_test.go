@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,8 +22,8 @@ const systemTestSuiteScopeID = "itest-system"
 // SystemTestSuite tests the complete system functionality
 type SystemTestSuite struct {
 	suite.Suite
-	client    *neo4j.Client
-	ctx       context.Context
+	client *neo4j.Client
+	ctx    context.Context
 }
 
 func TestSystemTestSuite(t *testing.T) {
@@ -97,31 +97,31 @@ func (s *SystemTestSuite) TearDownSuite() {
 
 func (s *SystemTestSuite) TestDatabaseConnection() {
 	s.T().Log("Testing database connection")
-	
+
 	// Test basic connectivity
 	result, err := s.client.ExecuteQuery(s.ctx, "RETURN 'connected' as status", nil)
 	require.NoError(s.T(), err)
 	require.Len(s.T(), result, 1)
-	
+
 	record := result[0].AsMap()
 	status, ok := record["status"].(string)
 	require.True(s.T(), ok)
 	assert.Equal(s.T(), "connected", status)
-	
+
 	s.T().Log("✓ Database connection successful")
 }
 
 func (s *SystemTestSuite) TestExistingDataVerification() {
 	s.T().Log("Testing existing data verification")
-	
+
 	// Check if we have indexed data
 	nodeCountQuery := "MATCH (n) RETURN labels(n) AS nodeType, count(n) AS count ORDER BY count DESC"
 	result, err := s.client.ExecuteQuery(s.ctx, nodeCountQuery, nil)
 	require.NoError(s.T(), err)
-	
+
 	nodeTypes := make(map[string]int64)
 	totalNodes := int64(0)
-	
+
 	for _, record := range result {
 		recordMap := record.AsMap()
 		nodeType := recordMap["nodeType"].([]interface{})[0].(string)
@@ -129,21 +129,21 @@ func (s *SystemTestSuite) TestExistingDataVerification() {
 		nodeTypes[nodeType] = count
 		totalNodes += count
 	}
-	
+
 	s.T().Logf("Found %d total nodes across %d types", totalNodes, len(nodeTypes))
 	for nodeType, count := range nodeTypes {
 		s.T().Logf("  %s: %d", nodeType, count)
 	}
-	
+
 	// We should have some data
 	assert.Greater(s.T(), totalNodes, int64(0), "Should have indexed data in database")
 }
 
 func (s *SystemTestSuite) TestSearchFunctionality() {
 	s.T().Log("Testing search functionality")
-	
+
 	queryBuilder := neo4j.NewQueryBuilder(s.client)
-	
+
 	// Test searches for common terms that should exist
 	searchTests := []struct {
 		term        string
@@ -154,20 +154,20 @@ func (s *SystemTestSuite) TestSearchFunctionality() {
 		{"service", "Service-related items"},
 		{"query", "Query-related items"},
 	}
-	
+
 	for _, tt := range searchTests {
 		s.T().Run(tt.term, func(t *testing.T) {
 			start := time.Now()
-			results, err := queryBuilder.SearchNodes(s.ctx, tt.term, 
+			results, err := queryBuilder.SearchNodes(s.ctx, tt.term,
 				[]string{"Symbol", "Function", "Method", "File", "Service", "Feature", "Document"}, 10)
 			duration := time.Since(start)
-			
+
 			require.NoError(t, err)
 			t.Logf("Search for '%s' returned %d results in %v", tt.term, len(results), duration)
-			
+
 			// Performance check
 			assert.Less(t, duration, 2*time.Second, "Search should complete quickly")
-			
+
 			// Log sample results for debugging
 			for i, result := range results[:min(len(results), 3)] {
 				recordMap := result.AsMap()
@@ -181,22 +181,22 @@ func (s *SystemTestSuite) TestSearchFunctionality() {
 
 func (s *SystemTestSuite) TestSCIPIndexingCapability() {
 	s.T().Log("Testing SCIP indexing capability")
-	
+
 	scipIndexer := static.NewSCIPIndexer(s.client, "test-service", "v1.0.0", "https://github.com/test/repo")
-	
+
 	// Test environment validation
 	err := scipIndexer.ValidateEnvironment()
 	if err != nil {
 		s.T().Skipf("SCIP environment not available: %v", err)
 		return
 	}
-	
+
 	s.T().Log("✓ SCIP environment validation passed")
 }
 
 func (s *SystemTestSuite) TestSchemaIntegrity() {
 	s.T().Log("Testing schema integrity")
-	
+
 	// Test basic schema elements exist
 	schemaTests := []struct {
 		query       string
@@ -205,12 +205,12 @@ func (s *SystemTestSuite) TestSchemaIntegrity() {
 		{"SHOW CONSTRAINTS", "Constraints should exist"},
 		{"SHOW INDEXES", "Indexes should exist"},
 	}
-	
+
 	for _, tt := range schemaTests {
 		s.T().Run(tt.description, func(t *testing.T) {
 			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
 			require.NoError(t, err)
-			
+
 			t.Logf("✓ %s: Found %d items", tt.description, len(result))
 		})
 	}
@@ -218,7 +218,7 @@ func (s *SystemTestSuite) TestSchemaIntegrity() {
 
 func (s *SystemTestSuite) TestCypherQueryPatterns() {
 	s.T().Log("Testing common Cypher query patterns")
-	
+
 	queryTests := []struct {
 		name  string
 		query string
@@ -240,18 +240,18 @@ func (s *SystemTestSuite) TestCypherQueryPatterns() {
 			desc:  "Should show service structure",
 		},
 	}
-	
+
 	for _, tt := range queryTests {
 		s.T().Run(tt.name, func(t *testing.T) {
 			start := time.Now()
 			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
 			duration := time.Since(start)
-			
+
 			require.NoError(t, err, "Query should execute successfully")
 			assert.Less(t, duration, 2*time.Second, "Query should be performant")
-			
+
 			t.Logf("✓ %s: %d results in %v", tt.desc, len(result), duration)
-			
+
 			// Show sample results
 			for i, record := range result[:min(len(result), 2)] {
 				t.Logf("  Sample %d: %+v", i+1, record.AsMap())
@@ -262,38 +262,38 @@ func (s *SystemTestSuite) TestCypherQueryPatterns() {
 
 func (s *SystemTestSuite) TestSystemEnd2End() {
 	s.T().Log("Testing end-to-end system functionality")
-	
+
 	// This test verifies the complete system works as expected
 	// by performing a series of operations that simulate real usage
-	
+
 	// 1. Verify we can search for technical terms
 	queryBuilder := neo4j.NewQueryBuilder(s.client)
-	
+
 	searchTerms := []string{"client", "service", "graph"}
 	for _, term := range searchTerms {
 		results, err := queryBuilder.SearchNodes(s.ctx, term, nil, 5)
 		require.NoError(s.T(), err)
 		s.T().Logf("Search '%s': %d results", term, len(results))
 	}
-	
+
 	// 2. Verify database health
 	healthQuery := `
 		MATCH (n) 
 		RETURN count(n) as totalNodes,
 		       count(DISTINCT labels(n)[0]) as nodeTypes
 	`
-	
+
 	result, err := s.client.ExecuteQuery(s.ctx, healthQuery, nil)
 	require.NoError(s.T(), err)
 	require.Len(s.T(), result, 1)
-	
+
 	health := result[0].AsMap()
 	totalNodes := health["totalNodes"].(int64)
 	nodeTypes := health["nodeTypes"].(int64)
-	
+
 	assert.Greater(s.T(), totalNodes, int64(0), "Should have nodes in database")
 	assert.GreaterOrEqual(s.T(), nodeTypes, int64(3), "Should have multiple node types")
-	
+
 	s.T().Logf("✓ System health: %d nodes across %d types", totalNodes, nodeTypes)
 }
 
@@ -368,12 +368,12 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 		// Get a known function from our codebase
 		sourceCode, err := queryBuilder.GetFunctionSourceCode(s.ctx, "SetSCIPBinary")
 		require.NoError(t, err)
-		
+
 		// Verify the source code contains expected content
 		assert.Contains(t, sourceCode, "func", "Source should contain func keyword")
 		assert.Contains(t, sourceCode, "SetSCIPBinary", "Source should contain function name")
 		assert.Contains(t, sourceCode, "SCIPBinary", "Source should contain expected variable")
-		
+
 		// Verify it's not empty and looks like Go code
 		assert.Greater(t, len(sourceCode), 10, "Source code should have reasonable length")
 		assert.Contains(t, sourceCode, "{", "Source should contain opening brace")
@@ -396,19 +396,19 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 			RETURN f.name AS name, f.signature AS signature
 			LIMIT 1
 		`
-		
+
 		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
 		require.NoError(t, err)
 		require.Greater(t, len(result), 0, "Should find at least one function with signature")
-		
+
 		record := result[0].AsMap()
 		functionName := record["name"].(string)
 		signature := record["signature"].(string)
-		
+
 		// Retrieve source code by signature
 		sourceCode, err := queryBuilder.GetFunctionSourceCodeBySignature(s.ctx, signature)
 		require.NoError(t, err)
-		
+
 		// Verify the retrieved code contains the function name
 		assert.Contains(t, sourceCode, functionName, "Source should contain the function name")
 		assert.Greater(t, len(sourceCode), 10, "Source code should have reasonable length")
@@ -429,17 +429,17 @@ func (s *SystemTestSuite) TestByteOffsetAccuracy() {
 				   f.startByte AS startByte, f.endByte AS endByte
 			LIMIT 1
 		`
-		
+
 		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
 		require.NoError(t, err)
 		require.Greater(t, len(result), 0, "Should find function with location metadata")
-		
+
 		record := result[0].AsMap()
 		functionName := record["name"].(string)
 		filePath := record["filePath"].(string)
 		startByte := int(record["startByte"].(int64))
 		endByte := int(record["endByte"].(int64))
-		
+
 		// Read the file directly - handle path resolution like our API does
 		content, err := os.ReadFile(filePath)
 		if err != nil {
@@ -456,19 +456,19 @@ func (s *SystemTestSuite) TestByteOffsetAccuracy() {
 			}
 		}
 		require.NoError(t, err)
-		
+
 		// Extract using byte offsets
 		if startByte < len(content) && endByte <= len(content) && startByte < endByte {
 			directExtraction := string(content[startByte:endByte])
-			
+
 			// Get source code via our API
 			apiExtraction, err := queryBuilder.GetFunctionSourceCode(s.ctx, functionName)
 			require.NoError(t, err)
-			
+
 			// They should match
-			assert.Equal(t, directExtraction, apiExtraction, 
+			assert.Equal(t, directExtraction, apiExtraction,
 				"Direct byte extraction should match API extraction")
-			
+
 			// Verify it contains function-like content
 			assert.Contains(t, directExtraction, "func", "Extracted code should contain func")
 			assert.Contains(t, directExtraction, functionName, "Extracted code should contain function name")
@@ -501,4 +501,3 @@ func (s *SystemTestSuite) TestSourceCodeRetrievalEdgeCases() {
 		}
 	})
 }
-

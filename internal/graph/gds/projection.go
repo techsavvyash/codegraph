@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // GDSClient wraps a Neo4j Client and provides GDS algorithm operations.

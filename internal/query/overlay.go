@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // OverlayResolver handles overlay-aware queries that merge main + PR scope results

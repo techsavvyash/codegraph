@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
-	queryPkg "github.com/context-maximiser/code-graph/internal/query"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	models "github.com/context-maximiser/code-graph/internal/model"
+	queryPkg "github.com/context-maximiser/code-graph/internal/query"
 )
 
 // ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ func TestP2_SearchNodesScoped_DeduplicatesByNodeKey(t *testing.T) {
 		map[string]any{
 			"name": "HandleUser", "nodeKey": sharedNodeKey,
 			"signature": "HandleUser(ctx context.Context)",
-			"filePath": "pkg/handler.go", "startLine": 10, "endLine": 20,
+			"filePath":  "pkg/handler.go", "startLine": 10, "endLine": 20,
 			"scope": "main", "scopeId": "main",
 		})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestP2_SearchNodesScoped_DeduplicatesByNodeKey(t *testing.T) {
 		map[string]any{
 			"name": "HandleUser", "nodeKey": sharedNodeKey,
 			"signature": "HandleUser(ctx context.Context, id string)",
-			"filePath": "pkg/handler.go", "startLine": 10, "endLine": 25,
+			"filePath":  "pkg/handler.go", "startLine": 10, "endLine": 25,
 			"scope": "pr", "scopeId": "pr-42",
 		})
 	if err != nil {
@@ -1075,7 +1075,6 @@ func TestP4_InferServiceDependencies_NoSelfDeps(t *testing.T) {
 	}
 }
 
-
 // ===========================================================================
 // Phase 0: Overlay-Aware Hybrid Retrieval — Guardrail Tests
 // ===========================================================================
@@ -1100,9 +1099,9 @@ func TestOverlayAware_HybridRetrieval_ScopeFiltering(t *testing.T) {
 		map[string]any{"nodeKey": sharedNodeKey, "scopeId": "main"},
 		map[string]any{
 			"name": "ProcessPayment", "nodeKey": sharedNodeKey,
-			"signature": "ProcessPayment(amount float64) error",
+			"signature":  "ProcessPayment(amount float64) error",
 			"sourceCode": "func ProcessPayment(amount float64) error { return nil }",
-			"scope": "main", "scopeId": "main",
+			"scope":      "main", "scopeId": "main",
 		})
 	require.NoError(t, err)
 
@@ -1110,9 +1109,9 @@ func TestOverlayAware_HybridRetrieval_ScopeFiltering(t *testing.T) {
 		map[string]any{"nodeKey": sharedNodeKey, "scopeId": "pr-42"},
 		map[string]any{
 			"name": "ProcessPayment", "nodeKey": sharedNodeKey,
-			"signature": "ProcessPayment(amount float64, currency string) error",
+			"signature":  "ProcessPayment(amount float64, currency string) error",
 			"sourceCode": "func ProcessPayment(amount float64, currency string) error { return nil }",
-			"scope": "pr", "scopeId": "pr-42",
+			"scope":      "pr", "scopeId": "pr-42",
 		})
 	require.NoError(t, err)
 

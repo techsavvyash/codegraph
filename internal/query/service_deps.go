@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // InterServiceEdge represents a dependency between two services.

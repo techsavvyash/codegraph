@@ -81,7 +81,7 @@ func TestDefaultScopeIsMain(t *testing.T) {
 // The format is embedded in Cypher queries and must not change silently.
 func TestNewPRScopeIDFormat(t *testing.T) {
 	cases := []struct {
-		prID       string
+		prID        string
 		wantScopeID string
 	}{
 		{"1", "pr-1"},
@@ -216,9 +216,9 @@ func TestScopeContextFieldsPreserved(t *testing.T) {
 // TestNormalizePRID tests the NormalizePRID function with various input patterns.
 func TestNormalizePRID(t *testing.T) {
 	cases := []struct {
-		name    string
-		rawID   string
-		wantID  string
+		name   string
+		rawID  string
+		wantID string
 	}{
 		{"plain number", "42", "42"},
 		{"with pr- prefix", "pr-42", "42"},

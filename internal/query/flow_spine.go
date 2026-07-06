@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query/inference"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // FlowStep represents a single step in a flow spine.

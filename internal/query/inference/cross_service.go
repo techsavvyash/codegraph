@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	models "github.com/context-maximiser/code-graph/internal/model"
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // CrossServiceBoundary represents a detected boundary between two services.

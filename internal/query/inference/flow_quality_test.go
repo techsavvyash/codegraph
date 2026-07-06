@@ -88,7 +88,7 @@ func TestFlowDeduplicator_DisallowedNodeTypes(t *testing.T) {
 
 	steps := []FlowStepInfo{
 		{NodeKey: "func:a", Name: "Start", NodeType: "Function", Order: 0},
-		{NodeKey: "var:x", Name: "X", NodeType: "Variable", Order: 1},     // not allowed
+		{NodeKey: "var:x", Name: "X", NodeType: "Variable", Order: 1}, // not allowed
 		{NodeKey: "func:b", Name: "End", NodeType: "Function", Order: 2},
 	}
 
@@ -101,7 +101,7 @@ func TestFlowDeduplicator_DisallowedNodeTypes(t *testing.T) {
 func TestFlowDeduplicator_MaxSteps(t *testing.T) {
 	dedup := NewFlowDeduplicator()
 	budget := TraversalBudget{
-		MaxSteps: 2,
+		MaxSteps:         2,
 		AllowedNodeTypes: []string{"Function"},
 	}
 
@@ -124,7 +124,7 @@ func TestComputeFlowQuality(t *testing.T) {
 		{NodeKey: "func:a", Name: "Start", NodeType: "Function"}, // duplicate
 		{NodeKey: "func:b", Name: "log", NodeType: "Function"},   // blocked
 		{NodeKey: "func:c", Name: "End", NodeType: "Function"},
-		{NodeKey: "var:x", Name: "X", NodeType: "Variable"},      // not allowed
+		{NodeKey: "var:x", Name: "X", NodeType: "Variable"}, // not allowed
 	}
 
 	deduped := []FlowStepInfo{

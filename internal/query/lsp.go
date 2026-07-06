@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
@@ -36,17 +36,17 @@ type GoToDefinitionResponse struct {
 	Found      bool               `json:"found"`
 }
 
-// FindReferencesRequest represents a find-references request  
+// FindReferencesRequest represents a find-references request
 type FindReferencesRequest struct {
-	Symbol          string `json:"symbol"`
-	IncludeDeclaration bool `json:"includeDeclaration"`
+	Symbol             string `json:"symbol"`
+	IncludeDeclaration bool   `json:"includeDeclaration"`
 }
 
 // FindReferencesResponse represents the response
 type FindReferencesResponse struct {
-	Symbol     *models.SCIPSymbol      `json:"symbol"`
+	Symbol     *models.SCIPSymbol        `json:"symbol"`
 	References []*models.SymbolReference `json:"references"`
-	Count      int                     `json:"count"`
+	Count      int                       `json:"count"`
 }
 
 // FindImplementationsRequest represents a find-implementations request
@@ -128,13 +128,13 @@ type SearchRequest struct {
 
 // SearchResult represents a search result item
 type SearchResult struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	FilePath    string            `json:"filePath,omitempty"`
-	Signature   string            `json:"signature,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Properties  map[string]any    `json:"properties,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	FilePath    string         `json:"filePath,omitempty"`
+	Signature   string         `json:"signature,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Properties  map[string]any `json:"properties,omitempty"`
 }
 
 // SearchResponse represents the search response
@@ -275,4 +275,3 @@ func (lsp *LSPService) GetCompletion(ctx context.Context, req CompletionRequest)
 		Count: len(items),
 	}, nil
 }
-

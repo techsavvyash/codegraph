@@ -21,20 +21,20 @@ func TestMergeRelsBatch(t *testing.T) {
 
 	// Create two nodes for the merge test
 	fromID, err := client.CreateNode(ctx, []string{"Function"}, map[string]any{
-		"nodeKey":  "test-merge-rels/from-func",
-		"name":     "fromFunc",
-		"scopeId":  "test-merge-rels",
-		"filePath": "test.go",
+		"nodeKey":   "test-merge-rels/from-func",
+		"name":      "fromFunc",
+		"scopeId":   "test-merge-rels",
+		"filePath":  "test.go",
 		"startLine": 1,
 		"endLine":   5,
 	})
 	require.NoError(t, err, "failed to create source node")
 
 	toID, err := client.CreateNode(ctx, []string{"Function"}, map[string]any{
-		"nodeKey":  "test-merge-rels/to-func",
-		"name":     "toFunc",
-		"scopeId":  "test-merge-rels",
-		"filePath": "test.go",
+		"nodeKey":   "test-merge-rels/to-func",
+		"name":      "toFunc",
+		"scopeId":   "test-merge-rels",
+		"filePath":  "test.go",
 		"startLine": 10,
 		"endLine":   15,
 	})
@@ -120,20 +120,20 @@ func TestCreateRelsBatchNonIdempotent(t *testing.T) {
 
 	// Create two nodes for the create test
 	fromID, err := client.CreateNode(ctx, []string{"Function"}, map[string]any{
-		"nodeKey":  "test-create-rels/from-func",
-		"name":     "fromFunc",
-		"scopeId":  "test-create-rels",
-		"filePath": "test.go",
+		"nodeKey":   "test-create-rels/from-func",
+		"name":      "fromFunc",
+		"scopeId":   "test-create-rels",
+		"filePath":  "test.go",
 		"startLine": 1,
 		"endLine":   5,
 	})
 	require.NoError(t, err, "failed to create source node")
 
 	toID, err := client.CreateNode(ctx, []string{"Function"}, map[string]any{
-		"nodeKey":  "test-create-rels/to-func",
-		"name":     "toFunc",
-		"scopeId":  "test-create-rels",
-		"filePath": "test.go",
+		"nodeKey":   "test-create-rels/to-func",
+		"name":      "toFunc",
+		"scopeId":   "test-create-rels",
+		"filePath":  "test.go",
 		"startLine": 10,
 		"endLine":   15,
 	})

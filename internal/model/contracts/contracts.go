@@ -33,7 +33,7 @@ type InferenceResult struct {
 
 // EvidenceRef points to a specific piece of evidence backing an inference.
 type EvidenceRef struct {
-	Kind    string  `json:"kind"`              // "graph_edge", "vector_match", "text_match", "structural"
+	Kind    string  `json:"kind"` // "graph_edge", "vector_match", "text_match", "structural"
 	NodeKey string  `json:"nodeKey,omitempty"`
 	Detail  string  `json:"detail,omitempty"`
 	Score   float64 `json:"score,omitempty"`

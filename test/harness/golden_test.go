@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"testing"
 
-	models "github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	schema "github.com/context-maximiser/code-graph/internal/graph/schema"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/test/harness"
 )
 

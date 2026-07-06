@@ -14,8 +14,8 @@ import (
 type GraphSeedType string
 
 const (
-	GraphSeedAPIExposed    GraphSeedType = "api_exposed"     // Tier 1: EXPOSES_API edge
-	GraphSeedInterfaceImpl GraphSeedType = "interface_impl"  // Tier 2: IMPLEMENTS with inDegree=0
+	GraphSeedAPIExposed    GraphSeedType = "api_exposed"      // Tier 1: EXPOSES_API edge
+	GraphSeedInterfaceImpl GraphSeedType = "interface_impl"   // Tier 2: IMPLEMENTS with inDegree=0
 	GraphSeedTopoRoot      GraphSeedType = "topological_root" // Tier 3: inDegree=0, outDegree>0, exported
 	GraphSeedCentrality    GraphSeedType = "centrality_entry" // Tier 4: high betweenness, no higher-centrality caller
 )

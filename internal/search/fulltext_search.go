@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -24,11 +24,11 @@ func NewFullTextSearchManager(client *neo4j.Client) *FullTextSearchManager {
 
 // FullTextIndexConfig represents configuration for full-text indexes
 type FullTextIndexConfig struct {
-	Name          string   `json:"name"`
-	NodeLabels    []string `json:"nodeLabels"`
-	Properties    []string `json:"properties"`
-	Analyzer      string   `json:"analyzer"`      // Optional: "standard", "english", etc.
-	EventuallyConsistent bool `json:"eventuallyConsistent"` // Optional: for performance
+	Name                 string   `json:"name"`
+	NodeLabels           []string `json:"nodeLabels"`
+	Properties           []string `json:"properties"`
+	Analyzer             string   `json:"analyzer"`             // Optional: "standard", "english", etc.
+	EventuallyConsistent bool     `json:"eventuallyConsistent"` // Optional: for performance
 }
 
 // FullTextSearchResult represents a full-text search result with BM25 score
@@ -108,8 +108,8 @@ func (ftsm *FullTextSearchManager) createFullTextIndex(ctx context.Context, conf
 			ON EACH %s
 			OPTIONS {
 				indexConfig: {
-					` + "`fulltext.analyzer`" + `: '%s',
-					` + "`fulltext.eventually_consistent`" + `: %t
+					`+"`fulltext.analyzer`"+`: '%s',
+					`+"`fulltext.eventually_consistent`"+`: %t
 				}
 			}
 		`, config.Name, nodeLabels, propertiesPart, config.Analyzer, config.EventuallyConsistent)

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // fakeStage is a test stage with configurable behavior.

@@ -8,40 +8,40 @@ import (
 type NodeType string
 
 const (
-	ServiceNode   NodeType = "Service"
-	FileNode      NodeType = "File"
-	ModuleNode    NodeType = "Module"
-	ClassNode     NodeType = "Class"
-	InterfaceNode NodeType = "Interface"
-	FunctionNode  NodeType = "Function"
-	MethodNode    NodeType = "Method"
-	VariableNode  NodeType = "Variable"
-	ParameterNode NodeType = "Parameter"
-	SymbolNode    NodeType = "Symbol"
-	APIRouteNode  NodeType = "APIRoute"
-	CommentNode   NodeType = "Comment"
-	DocumentNode      NodeType = "Document"
-	DocumentChunkNode NodeType = "DocumentChunk"
-	FlowNode          NodeType = "Flow"
-	FeatureNode       NodeType = "Feature"
-	PullRequestNode   NodeType = "PullRequest"
-	GeneratedDocNode            NodeType = "GeneratedDoc"
-	GenerationDiagnosticNode    NodeType = "GenerationDiagnostic"
+	ServiceNode              NodeType = "Service"
+	FileNode                 NodeType = "File"
+	ModuleNode               NodeType = "Module"
+	ClassNode                NodeType = "Class"
+	InterfaceNode            NodeType = "Interface"
+	FunctionNode             NodeType = "Function"
+	MethodNode               NodeType = "Method"
+	VariableNode             NodeType = "Variable"
+	ParameterNode            NodeType = "Parameter"
+	SymbolNode               NodeType = "Symbol"
+	APIRouteNode             NodeType = "APIRoute"
+	CommentNode              NodeType = "Comment"
+	DocumentNode             NodeType = "Document"
+	DocumentChunkNode        NodeType = "DocumentChunk"
+	FlowNode                 NodeType = "Flow"
+	FeatureNode              NodeType = "Feature"
+	PullRequestNode          NodeType = "PullRequest"
+	GeneratedDocNode         NodeType = "GeneratedDoc"
+	GenerationDiagnosticNode NodeType = "GenerationDiagnostic"
 )
 
 // BaseNode represents common properties for all nodes
 type BaseNode struct {
-	ID        string            `json:"id,omitempty" neo4j:"id,omitempty"`
-	NodeKey   string            `json:"nodeKey,omitempty" neo4j:"nodeKey,omitempty"`
-	Labels    []string          `json:"labels,omitempty" neo4j:"labels,omitempty"`
-	Props     map[string]any    `json:"properties,omitempty" neo4j:"properties,omitempty"`
-	Scope     string            `json:"scope,omitempty" neo4j:"scope,omitempty"`
-	ScopeID   string            `json:"scopeId,omitempty" neo4j:"scopeId,omitempty"`
-	TenantID  string            `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
-	Repo      string            `json:"repo,omitempty" neo4j:"repo,omitempty"`
-	RepoID    string            `json:"repoId,omitempty" neo4j:"repoId,omitempty"`
-	CreatedAt time.Time         `json:"createdAt" neo4j:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt" neo4j:"updatedAt"`
+	ID        string         `json:"id,omitempty" neo4j:"id,omitempty"`
+	NodeKey   string         `json:"nodeKey,omitempty" neo4j:"nodeKey,omitempty"`
+	Labels    []string       `json:"labels,omitempty" neo4j:"labels,omitempty"`
+	Props     map[string]any `json:"properties,omitempty" neo4j:"properties,omitempty"`
+	Scope     string         `json:"scope,omitempty" neo4j:"scope,omitempty"`
+	ScopeID   string         `json:"scopeId,omitempty" neo4j:"scopeId,omitempty"`
+	TenantID  string         `json:"tenantId,omitempty" neo4j:"tenantId,omitempty"`
+	Repo      string         `json:"repo,omitempty" neo4j:"repo,omitempty"`
+	RepoID    string         `json:"repoId,omitempty" neo4j:"repoId,omitempty"`
+	CreatedAt time.Time      `json:"createdAt" neo4j:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt" neo4j:"updatedAt"`
 }
 
 // Service represents a microservice or application component
@@ -101,15 +101,15 @@ type Interface struct {
 // Function represents a standalone function or static method
 type Function struct {
 	BaseNode
-	Name        string `json:"name" neo4j:"name"`
-	Signature   string `json:"signature" neo4j:"signature"`
-	ReturnType  string `json:"returnType" neo4j:"returnType"`
-	FilePath    string `json:"filePath" neo4j:"filePath"`
-	StartLine   int    `json:"startLine" neo4j:"startLine"`
-	EndLine     int    `json:"endLine" neo4j:"endLine"`
-	IsExported  bool   `json:"isExported" neo4j:"isExported"`
-	IsAsync     bool   `json:"isAsync" neo4j:"isAsync"`
-	Docstring   string `json:"docstring" neo4j:"docstring"`
+	Name       string `json:"name" neo4j:"name"`
+	Signature  string `json:"signature" neo4j:"signature"`
+	ReturnType string `json:"returnType" neo4j:"returnType"`
+	FilePath   string `json:"filePath" neo4j:"filePath"`
+	StartLine  int    `json:"startLine" neo4j:"startLine"`
+	EndLine    int    `json:"endLine" neo4j:"endLine"`
+	IsExported bool   `json:"isExported" neo4j:"isExported"`
+	IsAsync    bool   `json:"isAsync" neo4j:"isAsync"`
+	Docstring  string `json:"docstring" neo4j:"docstring"`
 }
 
 // Method represents an instance method belonging to a class
@@ -206,10 +206,10 @@ type DocumentChunk struct {
 // Flow represents a first-class execution flow (e.g., an API request path, consumer pipeline).
 type Flow struct {
 	BaseNode
-	Name           string `json:"name" neo4j:"name"`
-	EntrypointKey  string `json:"entrypointKey" neo4j:"entrypointKey"`
-	FlowType       string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
-	MaxDepth       int    `json:"maxDepth" neo4j:"maxDepth"`
+	Name          string `json:"name" neo4j:"name"`
+	EntrypointKey string `json:"entrypointKey" neo4j:"entrypointKey"`
+	FlowType      string `json:"flowType" neo4j:"flowType"` // "api", "consumer", "cron"
+	MaxDepth      int    `json:"maxDepth" neo4j:"maxDepth"`
 }
 
 // Feature represents a specific feature or capability
@@ -237,7 +237,7 @@ type PullRequest struct {
 // GeneratedDoc represents auto-generated documentation stored as a knowledge unit.
 type GeneratedDoc struct {
 	BaseNode
-	Type       string `json:"type" neo4j:"type"`       // pr_summary, flow_summary, docstring_suggestion
+	Type       string `json:"type" neo4j:"type"` // pr_summary, flow_summary, docstring_suggestion
 	Title      string `json:"title" neo4j:"title"`
 	Content    string `json:"content" neo4j:"content"`
 	Model      string `json:"model" neo4j:"model"`           // LLM model used
@@ -250,19 +250,19 @@ type GeneratedDoc struct {
 // GenerationDiagnostic captures a rejected generation attempt for audit and debugging.
 type GenerationDiagnostic struct {
 	BaseNode
-	Type              string   `json:"type" neo4j:"type"`                           // pr_summary, flow_summary, docstring_suggestion
+	Type              string   `json:"type" neo4j:"type"` // pr_summary, flow_summary, docstring_suggestion
 	SourceType        string   `json:"sourceType" neo4j:"sourceType"`
 	SourceKey         string   `json:"sourceKey" neo4j:"sourceKey"`
 	Model             string   `json:"model" neo4j:"model"`
 	RejectionReasons  []string `json:"rejectionReasons" neo4j:"rejectionReasons"`
 	UnsupportedClaims []int    `json:"unsupportedClaims" neo4j:"unsupportedClaims"`
-	Content           string   `json:"content" neo4j:"content"`                     // Draft content that failed verification
+	Content           string   `json:"content" neo4j:"content"` // Draft content that failed verification
 }
 
 // NodeFactory creates nodes from maps (useful for Neo4j result parsing)
 func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 	now := time.Now()
-	
+
 	switch nodeType {
 	case ServiceNode:
 		return &Service{

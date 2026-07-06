@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // StageName identifies a pipeline stage.
@@ -25,9 +25,9 @@ const (
 type StageResult struct {
 	Name     StageName
 	Duration time.Duration
-	Items    int    // Number of items processed.
-	Err      error  // Non-nil if the stage failed.
-	Skipped  bool   // True if the stage was skipped (e.g. missing deps).
+	Items    int   // Number of items processed.
+	Err      error // Non-nil if the stage failed.
+	Skipped  bool  // True if the stage was skipped (e.g. missing deps).
 }
 
 // Stage is the contract every pipeline stage must satisfy.
@@ -56,9 +56,9 @@ type PipelineConfig struct {
 	ServiceName string
 	Version     string
 	RepoURL     string
-	Language    string // Auto-detected or explicit.
-	TenantID    string // Multi-tenant namespace (optional).
-	Repo        string // Repository identifier (optional).
+	Language    string        // Auto-detected or explicit.
+	TenantID    string        // Multi-tenant namespace (optional).
+	Repo        string        // Repository identifier (optional).
 	Timer       PipelineTimer // Optional phase timer for benchmarking.
 }
 

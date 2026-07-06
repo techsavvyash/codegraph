@@ -10,29 +10,29 @@ import (
 	"syscall"
 	"time"
 
-	textindex "github.com/context-maximiser/code-graph/internal/search/textindex"
 	"github.com/context-maximiser/code-graph/internal/benchmarks"
-	models "github.com/context-maximiser/code-graph/internal/model"
-	inference "github.com/context-maximiser/code-graph/internal/query/inference"
-	"github.com/context-maximiser/code-graph/internal/ingest/pipeline"
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
-	"github.com/context-maximiser/code-graph/internal/graph"
-	"github.com/context-maximiser/code-graph/internal/query"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	"github.com/context-maximiser/code-graph/internal/ingest/pipeline"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/query"
+	inference "github.com/context-maximiser/code-graph/internal/query/inference"
 	"github.com/context-maximiser/code-graph/internal/search"
+	textindex "github.com/context-maximiser/code-graph/internal/search/textindex"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile          string
-	verbose          bool
-	neo4jURI         string
-	neo4jUser        string
-	neo4jPass        string
-	neo4jDB          string
-	opensearchURL    string
-	opensearchIndex  string
+	cfgFile         string
+	verbose         bool
+	neo4jURI        string
+	neo4jUser       string
+	neo4jPass       string
+	neo4jDB         string
+	opensearchURL   string
+	opensearchIndex string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -1627,4 +1627,3 @@ func createOpenSearchStore() (*textindex.OpenSearchStore, bool) {
 	}
 	return store, true
 }
-

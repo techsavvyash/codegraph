@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/internal/ingest/scip"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +37,7 @@ func (s *IndexingTestSuite) SetupSuite() {
 
 	client, err := neo4j.NewClient(*config)
 	require.NoError(s.T(), err)
-	
+
 	s.client = client
 	s.ctx = context.Background()
 
@@ -80,16 +80,16 @@ func (s *IndexingTestSuite) TestCodeIndexingIntegration() {
 	// Create SCIP indexer with test-scoped service name
 	scipIndexer := static.NewSCIPIndexer(s.client, "itest-indexing", "v1.0.0", "https://github.com/test/repo")
 	scipIndexer.SetScope(models.ScopeContext{Scope: "main", ScopeID: "itest-indexing"})
-	
+
 	// Validate environment first
 	err := scipIndexer.ValidateEnvironment()
 	require.NoError(s.T(), err)
-	
+
 	// Index the current project
-	projectPath := "../../"  // Go up to project root
+	projectPath := "../../" // Go up to project root
 	err = scipIndexer.IndexProject(s.ctx, projectPath)
 	require.NoError(s.T(), err)
-	
+
 	// Verify indexing results
 	s.verifyCodeIndexing()
 }
@@ -144,20 +144,20 @@ func (s *IndexingTestSuite) verifyCodeIndexing() {
 			description:   "Should have symbol references",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		s.T().Run(tt.name, func(t *testing.T) {
 			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
 			require.NoError(t, err)
 			require.Len(t, result, 1)
-			
+
 			record := result[0].AsMap()
 			count, ok := record["count"].(int64)
 			require.True(t, ok, "Count should be an integer")
-			
-			assert.GreaterOrEqual(t, int(count), tt.expectedCount, 
+
+			assert.GreaterOrEqual(t, int(count), tt.expectedCount,
 				"%s: %s. Expected >= %d, got %d", tt.name, tt.description, tt.expectedCount, count)
-			
+
 			t.Logf("✓ %s: %d (expected >= %d)", tt.description, count, tt.expectedCount)
 		})
 	}
@@ -165,12 +165,12 @@ func (s *IndexingTestSuite) verifyCodeIndexing() {
 
 func (s *IndexingTestSuite) TestQueryPerformance() {
 	s.T().Log("Testing query performance")
-	
+
 	performanceTests := []struct {
-		name         string
-		query        string
-		maxDuration  time.Duration
-		description  string
+		name        string
+		query       string
+		maxDuration time.Duration
+		description string
 	}{
 		{
 			name:        "Symbol lookup performance",
@@ -179,7 +179,7 @@ func (s *IndexingTestSuite) TestQueryPerformance() {
 			description: "Symbol queries should be fast",
 		},
 		{
-			name:        "Feature search performance", 
+			name:        "Feature search performance",
 			query:       "MATCH (f:Feature) WHERE f.status = 'completed' RETURN count(f)",
 			maxDuration: 1 * time.Second,
 			description: "Feature queries should be fast",
@@ -191,19 +191,19 @@ func (s *IndexingTestSuite) TestQueryPerformance() {
 			description: "Cross-context searches should be reasonably fast",
 		},
 	}
-	
+
 	for _, tt := range performanceTests {
 		s.T().Run(tt.name, func(t *testing.T) {
 			start := time.Now()
-			
+
 			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
 			require.NoError(t, err)
-			
+
 			duration := time.Since(start)
-			
+
 			assert.LessOrEqual(t, duration, tt.maxDuration,
 				"%s: %s. Expected <= %v, got %v", tt.name, tt.description, tt.maxDuration, duration)
-			
+
 			t.Logf("✓ %s: %v (limit: %v), %d results", tt.description, duration, tt.maxDuration, len(result))
 		})
 	}
@@ -211,7 +211,7 @@ func (s *IndexingTestSuite) TestQueryPerformance() {
 
 func (s *IndexingTestSuite) TestDataIntegrity() {
 	s.T().Log("Testing data integrity")
-	
+
 	integrityTests := []struct {
 		name        string
 		query       string
@@ -225,28 +225,28 @@ func (s *IndexingTestSuite) TestDataIntegrity() {
 			description: "All references should point to valid symbols",
 		},
 		{
-			name:        "No orphaned features", 
+			name:        "No orphaned features",
 			query:       "MATCH (f:Feature) WHERE NOT (:Document)-[:DESCRIBES]->(f) RETURN count(f) as orphaned",
 			expectEmpty: false, // Some features might not have document links
 			description: "Check for features without document links",
 		},
 		{
 			name:        "Service has files",
-			query:       "MATCH (s:Service) WHERE NOT (s)-[:CONTAINS]->(:File) RETURN count(s) as servicesWithoutFiles", 
+			query:       "MATCH (s:Service) WHERE NOT (s)-[:CONTAINS]->(:File) RETURN count(s) as servicesWithoutFiles",
 			expectEmpty: true,
 			description: "All services should have files",
 		},
 	}
-	
+
 	for _, tt := range integrityTests {
 		s.T().Run(tt.name, func(t *testing.T) {
 			result, err := s.client.ExecuteQuery(s.ctx, tt.query, nil)
 			require.NoError(t, err)
 			require.Len(t, result, 1)
-			
+
 			record := result[0].AsMap()
 			count := int64(0)
-			
+
 			// Handle different count field names
 			for _, field := range []string{"orphaned", "servicesWithoutFiles", "count"} {
 				if val, ok := record[field]; ok {
@@ -254,7 +254,7 @@ func (s *IndexingTestSuite) TestDataIntegrity() {
 					break
 				}
 			}
-			
+
 			if tt.expectEmpty {
 				assert.Equal(t, int64(0), count, "%s: %s", tt.name, tt.description)
 				t.Logf("✓ %s: No integrity issues found", tt.description)
@@ -267,14 +267,14 @@ func (s *IndexingTestSuite) TestDataIntegrity() {
 
 func (s *IndexingTestSuite) TestSearchFunctionality() {
 	s.T().Log("Testing search functionality")
-	
+
 	queryBuilder := neo4j.NewQueryBuilder(s.client)
-	
+
 	searchTests := []struct {
-		searchTerm    string
-		nodeTypes     []string
-		expectedMin   int
-		description   string
+		searchTerm  string
+		nodeTypes   []string
+		expectedMin int
+		description string
 	}{
 		{
 			searchTerm:  "index",
@@ -283,7 +283,7 @@ func (s *IndexingTestSuite) TestSearchFunctionality() {
 			description: "Should find indexing-related items",
 		},
 		{
-			searchTerm:  "SCIP", 
+			searchTerm:  "SCIP",
 			nodeTypes:   []string{"Symbol", "Feature", "Method"},
 			expectedMin: 1,
 			description: "Should find SCIP-related items",
@@ -295,17 +295,17 @@ func (s *IndexingTestSuite) TestSearchFunctionality() {
 			description: "Should find Neo4j-related items",
 		},
 	}
-	
+
 	for _, tt := range searchTests {
 		s.T().Run(fmt.Sprintf("Search_%s", tt.searchTerm), func(t *testing.T) {
 			results, err := queryBuilder.SearchNodes(s.ctx, tt.searchTerm, tt.nodeTypes, 20)
 			require.NoError(t, err)
-			
+
 			assert.GreaterOrEqual(t, len(results), tt.expectedMin,
 				"%s: Expected >= %d results, got %d", tt.description, tt.expectedMin, len(results))
-			
+
 			t.Logf("✓ %s: Found %d results", tt.description, len(results))
-			
+
 			// Verify result types
 			nodeTypesFound := make(map[string]int)
 			for _, result := range results[:min(len(results), 3)] { // Check first 3 results
@@ -315,7 +315,7 @@ func (s *IndexingTestSuite) TestSearchFunctionality() {
 					nodeTypesFound[label]++
 				}
 			}
-			
+
 			t.Logf("  Node types found: %+v", nodeTypesFound)
 		})
 	}

@@ -22,11 +22,11 @@ func TestOverlayPrecedenceLogic(t *testing.T) {
 
 	// Simulate the three cases with mock data.
 	type testCase struct {
-		name           string
-		overlayExists  bool
+		name            string
+		overlayExists   bool
 		tombstoneExists bool
-		mainExists     bool
-		expectVisible  bool
+		mainExists      bool
+		expectVisible   bool
 	}
 
 	cases := []testCase{
