@@ -121,8 +121,7 @@ require (
 	github.com/context-maximiser/code-graph/libs/query-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/schema-go v0.0.0-00010101000000-000000000000
 	github.com/context-maximiser/code-graph/libs/search-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000
-	github.com/context-maximiser/code-graph/libs/vector-client-go v0.0.0-00010101000000-000000000000
+	github.com/context-maximiser/code-graph/libs/text-index-client-go v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace (
@@ -133,5 +132,4 @@ replace (
 	github.com/context-maximiser/code-graph/libs/schema-go => ./libs/schema-go
 	github.com/context-maximiser/code-graph/libs/search-go => ./libs/search-go
 	github.com/context-maximiser/code-graph/libs/text-index-client-go => ./libs/text-index-client-go
-	github.com/context-maximiser/code-graph/libs/vector-client-go => ./libs/vector-client-go
 )

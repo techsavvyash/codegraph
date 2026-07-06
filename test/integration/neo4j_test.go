@@ -8,7 +8,6 @@ import (
 
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/schema-go"
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
 )
 
 // Test configuration
@@ -194,80 +193,6 @@ func TestBasicNodeOperations(t *testing.T) {
 	}
 
 	t.Log("Successfully created and queried nodes and relationships")
-}
-
-func TestStaticIndexer(t *testing.T) {
-	client := createTestClient(t)
-	defer func() {
-		cleanupDatabase(t, client)
-		client.Close(context.Background())
-	}()
-
-	// Set up schema first
-	schemaManager := schema.NewSchemaManager(client)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	err := schemaManager.CreateSchema(ctx)
-	if err != nil {
-		t.Fatalf("Failed to create schema: %v", err)
-	}
-
-	// Create indexer and index a simple test project
-	indexer := static.NewStaticIndexer(client, "test-service", "v1.0.0", "")
-	
-	// We'll index the current project as a test
-	projectPath := "../.." // Go up to project root
-	
-	err = indexer.IndexProject(ctx, projectPath)
-	if err != nil {
-		t.Fatalf("Failed to index project: %v", err)
-	}
-
-	// Verify that nodes were created
-	cypher := "MATCH (n) RETURN labels(n) as labels, count(n) as count"
-	result, err := client.ExecuteQuery(ctx, cypher, nil)
-	if err != nil {
-		t.Fatalf("Failed to query indexed nodes: %v", err)
-	}
-
-	nodeTypes := make(map[string]int)
-	for _, record := range result {
-		recordMap := record.AsMap()
-		if labels, ok := recordMap["labels"].([]interface{}); ok && len(labels) > 0 {
-			if label, ok := labels[0].(string); ok {
-				if count, ok := recordMap["count"].(int64); ok {
-					nodeTypes[label] = int(count)
-				}
-			}
-		}
-	}
-
-	// Check that we have the expected node types
-	expectedTypes := []string{"Service", "File", "Module", "Function", "Symbol"}
-	for _, expectedType := range expectedTypes {
-		if count, found := nodeTypes[expectedType]; !found || count == 0 {
-			t.Errorf("Expected at least 1 %s node, got %d", expectedType, count)
-		} else {
-			t.Logf("Found %d %s nodes", count, expectedType)
-		}
-	}
-
-	// Check that we can find a specific function (assuming main function exists)
-	cypher = "MATCH (f:Function {name: 'main'}) RETURN f.name, f.filePath LIMIT 1"
-	result, err = client.ExecuteQuery(ctx, cypher, nil)
-	if err != nil {
-		t.Fatalf("Failed to query for main function: %v", err)
-	}
-
-	if len(result) > 0 {
-		record := result[0].AsMap()
-		t.Logf("Found main function at %v", record["filePath"])
-	} else {
-		t.Log("No main function found (this might be expected)")
-	}
-
-	t.Log("Successfully indexed project and verified node creation")
 }
 
 func TestBatchOperations(t *testing.T) {

@@ -5,7 +5,6 @@ use (
 	./apps/cli
 	./apps/mcp-server-go
 	./libs/benchmarks-go
-	./libs/context-bundles-go
 	./libs/core-models-go
 	./libs/evals-go
 	./libs/gds-go
@@ -14,15 +13,10 @@ use (
 	./libs/inference-go
 	./libs/intelligence-go
 	./libs/llm-go
-	./libs/neo4j-client-go
 	./libs/neo4j-go
 	./libs/query-go
-	./libs/retrieval-go
 	./libs/schema-go
 	./libs/search-go
 	./libs/text-index-client-go
-	./libs/vector-client-go
 	./libs/verification-go
-	./services/indexing-go
-	./services/retrieval-go
 )

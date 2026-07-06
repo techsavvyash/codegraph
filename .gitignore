@@ -19,11 +19,13 @@ __pycache__/
 *.pyc
 
 # Local build artifacts
-bin/codegraph-new
-bin/codegraph-mcp-new
+bin/
 codegraph
 cli-go
 mcp-server/mcp-server
+/mcp-server-go
+apps/cli/cli
+apps/mcp-server-go/mcp-server-go
 
 # SvelteKit build output
 apps/chat-ui/.svelte-kit/

@@ -60,8 +60,12 @@ func (s *SystemTestSuite) setupIndexedData() {
 	require.NoError(s.T(), err)
 
 	// Index the current project (../../ relative to test/integration/) using
-	// the static AST indexer to populate Function/Method/File/Symbol nodes.
-	indexer := static.NewStaticIndexer(s.client, "system-test-service", "v1.0.0", "")
+	// the SCIP indexer to populate Function/Method/File/Symbol nodes.
+	indexer := static.NewSCIPIndexer(s.client, "system-test-service", "v1.0.0", "")
+	if err := indexer.ValidateEnvironment(); err != nil {
+		s.T().Logf("Warning: SCIP environment unavailable, skipping indexing: %v", err)
+		return
+	}
 	projectPath := "../../"
 	if err := indexer.IndexProject(s.ctx, projectPath); err != nil {
 		// Non-fatal: system tests will see whatever was indexed

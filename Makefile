@@ -14,16 +14,12 @@ GO_MODULES := \
 	libs/core-models-go \
 	libs/llm-go \
 	libs/text-index-client-go \
-	libs/vector-client-go \
 	libs/neo4j-go \
-	libs/neo4j-client-go \
 	libs/schema-go \
 	libs/search-go \
 	libs/query-go \
 	libs/indexer-go \
 	libs/benchmarks-go \
-	services/indexing-go \
-	services/retrieval-go \
 	apps/mcp-server-go \
 	apps/cli
 
@@ -55,7 +51,6 @@ test: ## Run unit tests across all workspace modules (excludes integration)
 		echo "--- testing $$mod ---"; \
 		(cd $$mod && go test ./...) || exit 1; \
 	done
-	go test ./test/
 
 test-integration: ## Run integration tests (requires Neo4j)
 	go test -v ./test/integration/...
@@ -140,19 +135,8 @@ neo4j-schema-info: ## Show schema information
 	go run ./apps/cli schema info
 
 # Code indexing operations
-index-self: ## Index this project itself using AST parsing
-	go run ./apps/cli index project . --service="context-maximiser" --version="v1.0.0"
-
 index-self-scip: ## Index this project itself using SCIP (Go)
 	go run ./apps/cli index scip . --service="context-maximiser" --version="v1.0.0"
-
-index-ts-example: ## Index a TypeScript project example
-	@echo "To index a TypeScript project:"
-	@echo "  go run ./apps/cli index scip /path/to/ts/project --language=typescript --service=\"my-service\""
-
-index-python-example: ## Index a Python project example
-	@echo "To index a Python project:"
-	@echo "  go run ./apps/cli index scip /path/to/python/project --language=python --service=\"my-service\""
 
 query-example: ## Run example queries
 	go run ./apps/cli query search "Client"
@@ -160,7 +144,7 @@ query-example: ## Run example queries
 # Development workflow
 dev-setup: docker-up install-deps neo4j-schema ## Set up development environment
 	@echo "Development environment is ready!"
-	@echo "Run 'make index-self' for AST indexing or 'make index-self-scip' for SCIP indexing"
+	@echo "Run 'make index-self-scip' to index this project with SCIP"
 
 dev-teardown: docker-down ## Tear down development environment
 
@@ -198,9 +182,6 @@ debug: ## Run with debug logging
 	DEBUG=true go run ./apps/cli --verbose
 
 # Quick development cycle
-dev: build index-self ## Build and index project with AST
-	@echo "Ready for development!"
-
 dev-scip: build index-self-scip ## Build and index project with SCIP
 	@echo "Ready for development with SCIP indexing!"
 

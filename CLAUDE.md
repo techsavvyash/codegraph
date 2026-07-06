@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Building
 - `make build` - Build the CLI application (outputs to `bin/codegraph`)
-- `make build-server` - Build the server application (outputs to `bin/server`)
+- `make build-mcp` - Build the MCP server (outputs to `bin/codegraph-mcp`)
 
 ### Testing
 - `make test` - Run unit tests
@@ -26,9 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make db-reset` - Reset database completely
 
 ### Quick Development
-- `make dev` - Build and index project with AST parsing
 - `make dev-scip` - Build and index project with SCIP indexing
-- `make index-self` - Index this project using AST parsing
 - `make index-self-scip` - Index this project using SCIP
 
 ## Architecture Overview
@@ -41,7 +39,7 @@ CodeGraph is a Neo4j-based code intelligence platform that creates a Code Proper
 3. **Neo4j Client** (`libs/neo4j-go/`) - Database connectivity and query building
 4. **Schema Management** (`libs/schema-go/`) - Neo4j constraints and indexes
 5. **Indexing Pipelines** (`libs/indexer-go/`) - Two main indexers:
-   - `static/` - AST-based Go code indexing and SCIP protocol indexing
+   - `static/` - SCIP protocol indexing (multi-language)
    - `documents/` - Document and feature extraction
 6. **Query Services** (`libs/query-go/`) - LSP-like features and advanced queries
 7. **Data Models** (`libs/core-models-go/`) - Graph node and relationship definitions
@@ -63,9 +61,8 @@ The platform uses a rich graph schema with node types:
 - **DEFINES/REFERENCES** - Symbol definitions and usages
 - **INHERITS_FROM/IMPLEMENTS** - OOP relationships
 
-### Indexing Approaches
-1. **AST Indexing** - Direct Go AST parsing for fast local analysis
-2. **SCIP Indexing** - Uses SCIP protocol for cross-language compatibility and precise symbol resolution
+### Indexing Approach
+**SCIP Indexing** is the only indexing path - uses the SCIP protocol for cross-language compatibility and precise symbol resolution.
 
 ## Configuration
 
@@ -103,9 +100,6 @@ verbose: false
 # Explicitly specify language (go, typescript, javascript, python, java, scala, kotlin)
 ./bin/codegraph index scip /path/to/ts/project --language=typescript --service="frontend"
 ./bin/codegraph index scip /path/to/py/project --language=python --service="ml-service"
-
-# Index a Go project using AST parsing (legacy, Go-only)
-./bin/codegraph index project /path/to/go/project --service="my-service"
 
 # Search for symbols
 ./bin/codegraph query search "Client"
