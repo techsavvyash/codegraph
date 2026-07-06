@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   neo4j:
     image: neo4j:5.26-community
@@ -11,7 +9,9 @@ services:
       - NEO4J_AUTH=neo4j/password123
       # GDS plugin is installed manually: download neo4j-graph-data-science-2.13.2.jar
       # to ./plugins/ and it will be mounted into the container. See scripts/setup-gds.sh.
-      - NEO4J_PLUGINS=[]
+      # APOC is downloaded by the image entrypoint (procedures are allowlisted below
+      # and used by batch node creation and the Phase 2 traversal tools).
+      - NEO4J_PLUGINS=["apoc"]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
       - NEO4J_dbms_security_allow__csv__import__from__file__urls=true
@@ -39,21 +39,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: code-graph-qdrant
-    ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC
-    volumes:
-      - qdrant_storage:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q '200'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   opensearch:
     image: opensearchproject/opensearch:2.11.0
@@ -91,7 +76,6 @@ volumes:
   neo4j_logs:
   neo4j_import:
   neo4j_plugins:
-  qdrant_storage:
   opensearch_data:
 
 # Development network
