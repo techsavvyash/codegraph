@@ -1,4 +1,14 @@
-# **V.1. RFC-1: Semantic Linking of Documents to Code via Graph Embeddings and LLM Analysis**
+# RFC 008: Semantic Linking of Documents to Code via Graph Embeddings and LLM Analysis
+
+| Field | Value |
+|-------|-------|
+| **Status** | Withdrawn |
+| **Author** | Code Graph Team |
+
+> **Status note:** The LLM/embedding-driven document-linking subsystem this RFC
+> specifies (Qdrant vector search, LLM-based feature-to-code matching) was
+> removed per RFC-004 (doc-linking declared out of scope). A redesigned docs
+> plane is specified in RFC-005 §7 and scheduled in RFC-006 Phase 4.
 
 Problem Statement:  
 The current document indexing pipeline creates links between :Document/:Feature nodes and code symbols primarily through explicit mentions (:MENTIONS relationship) or direct naming conventions that an LLM can easily identify. This approach is effective but limited. It fails to connect a document that describes a high-level business logic (e.g., "Calculate the user's final invoice amount by applying regional taxes and any applicable promotional discounts") to the specific cluster of functions that implement this logic, especially if those functions have non-obvious names (e.g., compute\_final\_cost, apply\_vat, get\_promo\_value). This is a semantic gap between the "what" described in the document and the "how" implemented in the code.54  

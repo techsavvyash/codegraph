@@ -1,9 +1,15 @@
-# RFC 003: Evidence-Driven Intelligence Architecture
+# RFC 009: Evidence-Driven Intelligence Architecture
 
 **Author:** Code Graph Team  
 **Date:** 2026-02-28  
-**Status:** Draft  
+**Status:** Superseded by RFC-005  
 **Version:** 1.0
+
+> **Status note:** The evidence-first principles here (every inferred link, flow,
+> and generated sentence must be explainable through graph-backed evidence) were
+> carried forward into RFC-005 as the provenance invariant (I4). The concrete
+> architecture proposed in this document is obsolete — see
+> `005-grounded-context-engine.md`.
 
 ## Summary
 

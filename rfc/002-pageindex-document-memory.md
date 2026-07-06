@@ -2,10 +2,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
+| **Status** | Withdrawn |
 | **Created** | 2026-03-09 |
 | **Authors** | @techsavvyash |
 | **Relates to** | `libs/indexer-go/documents/`, `libs/core-models-go/`, `libs/schema-go/`, `libs/retrieval-go/` |
+
+> **Status note:** Withdrawn — RFC-004 declared doc-linking and the embedding
+> pipeline out of scope, obsoleting this proposal. A redesigned docs plane is
+> specified in RFC-005 §7 and scheduled in RFC-006 Phase 4.
 
 ## Problem
 

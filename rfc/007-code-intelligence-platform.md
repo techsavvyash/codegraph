@@ -1,9 +1,14 @@
-# RFC 001: Neo4j-Based Code Intelligence Platform
+# RFC 007: Neo4j-Based Code Intelligence Platform
 
 **Author:** Code Graph Team  
 **Date:** 2025-09-13  
-**Status:** Draft  
+**Status:** Superseded by RFC-005  
 **Version:** 1.0
+
+> **Status note:** This is the original platform vision (2025-09). The doc-linking
+> and multi-store (Qdrant/OpenSearch) design described here was retired by
+> RFC-004, and the architecture was re-founded by RFC-005
+> (`005-grounded-context-engine.md`). Kept for historical context only.
 
 ## Summary
 

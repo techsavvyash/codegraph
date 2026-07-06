@@ -12,7 +12,7 @@ Related references:
 
 - `docs/19-pristine-state-task-backlog.md`
 - `docs/20-pristine-audit-action-plan.md`
-- `docs/rfc/003-evidence-driven-intelligence-architecture.md`
+- `rfc/009-evidence-driven-intelligence-architecture.md` (superseded by RFC-005)
 - `docs/18-business-context-gap-closure-plan.md`
 
 ---

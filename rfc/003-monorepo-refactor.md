@@ -1,8 +1,12 @@
 # RFC-003: Monorepo Refactor & Codebase Cleanup
 
+> **Status note:** Superseded by RFC-005 before implementation. The multi-module
+> layout this RFC proposes is replaced by the single-module `cmd/`+`internal/`
+> collapse in RFC-006 Phase 0d. Kept for historical context only.
+
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
+| **Status** | Superseded by RFC-005 |
 | **Created** | 2026-03-09 |
 | **Authors** | @techsavvyash |
 | **Depends on** | RFC-002 (PageIndex Document Memory) |

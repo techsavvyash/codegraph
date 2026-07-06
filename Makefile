@@ -170,7 +170,7 @@ release-build: ## Build release binaries
 # Documentation
 docs-serve: ## Serve documentation locally
 	@echo "Documentation available at:"
-	@echo "  RFC: docs/rfc/001-code-intelligence-platform.md"
+	@echo "  RFC: rfc/007-code-intelligence-platform.md"
 	@echo "  Schema: docs/schema/neo4j-schema.md"
 
 # Development helpers
