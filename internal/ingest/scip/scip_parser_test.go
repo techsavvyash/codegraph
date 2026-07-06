@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/sourcegraph/scip/bindings/go/scip"
 )
 
@@ -150,6 +150,9 @@ func TestExtractDisplayName(t *testing.T) {
 // 1d. convertRange — 6 table-driven cases
 // ===========================================================================
 
+// TestConvertRange locks the 0-based (SCIP) -> 1-based (graph-wide
+// convention) line conversion. Every case's expectedLine is the raw SCIP
+// scipRange[0]/[2] value + 1; columns pass through unchanged.
 func TestConvertRange(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -158,10 +161,21 @@ func TestConvertRange(t *testing.T) {
 		expectedLine int
 		expectedCol  int
 	}{
-		{"3elem_start", []int32{10, 5, 15}, true, 10, 5},
-		{"3elem_end", []int32{10, 5, 15}, false, 10, 15},
-		{"4elem_start", []int32{10, 5, 20, 30}, true, 10, 5},
-		{"4elem_end", []int32{10, 5, 20, 30}, false, 20, 30},
+		// 3-element (single-line) ranges: [startLine, startCol, endCol].
+		{"3elem_start", []int32{10, 5, 15}, true, 11, 5},
+		{"3elem_end", []int32{10, 5, 15}, false, 11, 15},
+		// 4-element (multi-line) ranges: [startLine, startCol, endLine, endCol].
+		{"4elem_start", []int32{10, 5, 20, 30}, true, 11, 5},
+		{"4elem_end", []int32{10, 5, 20, 30}, false, 21, 30},
+		// SCIP's first line is 0; the converted graph-wide line must be 1, not
+		// silently rejected the way calculateByteOffsets used to reject a raw
+		// 0-based first line via its "startLine <= 0" guard.
+		{"3elem_first_line_start", []int32{0, 0, 5}, true, 1, 0},
+		{"3elem_first_line_end", []int32{0, 0, 5}, false, 1, 5},
+		{"4elem_first_line_start", []int32{0, 2, 3, 8}, true, 1, 2},
+		{"4elem_first_line_end", []int32{0, 2, 3, 8}, false, 4, 8},
+		// Invalid ranges return the zero value untouched — no +1 applied to
+		// what is explicitly "no data".
 		{"2elem_too_short", []int32{1, 2}, true, 0, 0},
 		{"empty", []int32{}, false, 0, 0},
 	}
@@ -331,7 +345,7 @@ func TestExtractGoImports(t *testing.T) {
 				pkg        string
 				isExternal bool
 			}{
-				{"fmt", false},                      // block import: isExternal = contains("/") = false
+				{"fmt", false},                  // block import: isExternal = contains("/") = false
 				{"github.com/pkg/errors", true}, // block import: isExternal = contains("/") = true
 			},
 		},

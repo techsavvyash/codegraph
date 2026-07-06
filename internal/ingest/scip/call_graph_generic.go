@@ -3,10 +3,13 @@ package static
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // GenericCallGraphBuilder infers CALLS relationships for non-Go languages
@@ -17,10 +20,12 @@ import (
 // declarations within each file: each function's body extends from its declaration
 // line to the line before the next function declaration (or EOF).
 type GenericCallGraphBuilder struct {
-	client      *neo4j.Client
-	serviceName string
-	packageName string // NPM package name or module path used to filter targets
-	scopeCtx    models.ScopeContext
+	client           *neo4j.Client
+	serviceName      string
+	packageName      string // NPM package name or module path used to filter targets
+	projectPath      string // Root used to resolve relative File.path when reading content for byte offsets
+	scopeCtx         models.ScopeContext
+	fileContentCache map[string][]byte
 }
 
 // NewGenericCallGraphBuilder creates a new language-agnostic call graph builder.
@@ -42,16 +47,26 @@ func (cg *GenericCallGraphBuilder) SetPackageName(name string) {
 	cg.packageName = name
 }
 
+// SetProjectPath sets the root directory used to resolve relative File.path
+// values when reading file content to compute startByte/endByte for the
+// declaration-order body range estimate.
+func (cg *GenericCallGraphBuilder) SetProjectPath(path string) {
+	cg.projectPath = path
+}
+
 // SetScope sets the scope context for the builder.
 func (cg *GenericCallGraphBuilder) SetScope(scope models.ScopeContext) {
 	cg.scopeCtx = scope
 }
 
-// genericFuncInfo holds a function's graph ID and line range.
+// genericFuncInfo holds a function's graph ID, line range, and (once
+// computed by computeByteRanges) the corresponding byte range.
 type genericFuncInfo struct {
 	ID        string
 	StartLine int
 	EndLine   int
+	StartByte int
+	EndByte   int
 }
 
 // BuildCallGraph infers CALLS relationships for all source files in the service.
@@ -135,7 +150,13 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 		}
 	}
 
-	// Step 3: Update the endLine in Neo4j so downstream tools have body ranges.
+	// Step 2b: Compute startByte/endByte from the same line-arithmetic used by
+	// calculateByteOffsets, so non-Go source retrieval spans the estimated
+	// body instead of the identifier-only range SCIP originally provided.
+	cg.computeByteRanges(filePath, funcs)
+
+	// Step 3: Update the endLine (and byte range, when computed) in Neo4j so
+	// downstream tools have body ranges.
 	if err := cg.updateBodyRanges(ctx, funcs); err != nil {
 		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
 	}
@@ -223,6 +244,8 @@ func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, fileP
 				ID:        id,
 				StartLine: startLine,
 				EndLine:   startLine, // will be computed
+				StartByte: -1,        // sentinel: "not computed" (0 would look like a valid offset)
+				EndByte:   -1,
 			})
 		}
 	}
@@ -286,26 +309,119 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 	return refs, nil
 }
 
-// updateBodyRanges writes computed endLine values back to Neo4j.
+// updateBodyRanges writes computed endLine (and, when successfully computed,
+// startByte/endByte) values back to Neo4j. startByte/endByte are only SET
+// when >= 0 — a failed read (missing file, unresolvable path) must not
+// clobber whatever byte offsets were already stored for the node.
 func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs []genericFuncInfo) error {
 	updates := make([]map[string]any, len(funcs))
 	for i, f := range funcs {
 		updates[i] = map[string]any{
-			"id":      f.ID,
-			"endLine": f.EndLine,
+			"id":        f.ID,
+			"endLine":   f.EndLine,
+			"startByte": f.StartByte,
+			"endByte":   f.EndByte,
 		}
 	}
 	cypher := `
 		UNWIND $updates AS u
 		MATCH (fn) WHERE elementId(fn) = u.id
 		SET fn.endLine = u.endLine
+		FOREACH (ignoreMe IN CASE WHEN u.startByte >= 0 THEN [1] ELSE [] END |
+			SET fn.startByte = u.startByte, fn.endByte = u.endByte
+		)
 	`
 	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})
 	return err
 }
 
-// computeDegreeProperties sets inDegree and outDegree on Function/Method nodes.
-func (cg *GenericCallGraphBuilder) computeDegreeProperties(ctx context.Context) error {
+// computeByteRanges fills in StartByte/EndByte for each func's (already
+// computed) line range by summing line lengths in the file content. Leaves
+// the -1 sentinel in place (see getFunctionsInFile) if the file can't be
+// read, so callers can distinguish "not computed" from a real offset.
+func (cg *GenericCallGraphBuilder) computeByteRanges(filePath string, funcs []genericFuncInfo) {
+	content, ok := cg.readFile(filePath)
+	if !ok {
+		return
+	}
+	lines := strings.Split(string(content), "\n")
+	for i := range funcs {
+		start, end := lineRangeByteOffsets(lines, funcs[i].StartLine, funcs[i].EndLine)
+		funcs[i].StartByte = start
+		funcs[i].EndByte = end
+	}
+}
+
+// readFile resolves filePath against projectPath (when relative) and returns
+// its content, caching by resolved path to avoid re-reading the same file for
+// every function within it.
+func (cg *GenericCallGraphBuilder) readFile(filePath string) ([]byte, bool) {
+	resolved := filePath
+	if !filepath.IsAbs(resolved) && cg.projectPath != "" {
+		resolved = filepath.Join(cg.projectPath, filePath)
+	}
+	if cg.fileContentCache != nil {
+		if content, ok := cg.fileContentCache[resolved]; ok {
+			return content, true
+		}
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, false
+	}
+	if cg.fileContentCache == nil {
+		cg.fileContentCache = make(map[string][]byte)
+	}
+	cg.fileContentCache[resolved] = content
+	return content, true
+}
+
+// lineRangeByteOffsets converts a 1-based [startLine, endLine] line range
+// into a [startByte, endByte) byte range spanning the start of startLine
+// through the end of endLine's content (excluding endLine's trailing
+// newline). endLine is clamped to len(lines), so callers may pass an
+// EOF-proxy value larger than the file's actual line count (see the "last
+// function" branch in processFile). Returns (-1, -1) if startLine is out of
+// bounds. Pure function, no I/O — testable without Neo4j.
+func lineRangeByteOffsets(lines []string, startLine, endLine int) (int, int) {
+	// strings.Split leaves a trailing "" entry when content ends with a
+	// newline (the common case for source files). That entry isn't a real
+	// line and must not be counted when clamping an EOF-proxy endLine, or the
+	// clamped range would include one phantom extra "line".
+	lineCount := len(lines)
+	if lineCount > 0 && lines[lineCount-1] == "" {
+		lineCount--
+	}
+	if startLine <= 0 || startLine > lineCount {
+		return -1, -1
+	}
+	if endLine > lineCount {
+		endLine = lineCount
+	}
+	if endLine < startLine {
+		endLine = startLine
+	}
+	startByte := 0
+	for i := 0; i < startLine-1; i++ {
+		startByte += len(lines[i]) + 1
+	}
+	endByte := startByte
+	for i := startLine - 1; i < endLine; i++ {
+		endByte += len(lines[i]) + 1
+	}
+	endByte-- // drop the trailing newline counted for the last included line
+	if endByte < startByte {
+		endByte = startByte
+	}
+	return startByte, endByte
+}
+
+// genericDegreeQuery builds the Cypher and bound parameters for
+// computeDegreeProperties. Extracted as a pure function so tests can assert
+// the SET target is constrained to a single service (via the bound
+// $serviceName parameter, walked through Service-CONTAINS->File-CONTAINS->fn)
+// without a live Neo4j connection.
+func genericDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	// Scope to service functions only to avoid cross-service contamination.
 	cypher := `
 		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(:File)-[:CONTAINS]->(fn)
@@ -320,10 +436,17 @@ func (cg *GenericCallGraphBuilder) computeDegreeProperties(ctx context.Context) 
 		WITH fn, count(DISTINCT caller) AS inD, count(DISTINCT callee) AS outD
 		SET fn.inDegree = inD, fn.outDegree = outD
 	`
-	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId":     cg.scopeCtx.ScopeID,
-		"serviceName": cg.serviceName,
-	})
+	params := map[string]any{
+		"scopeId":     scopeCtx.ScopeID,
+		"serviceName": serviceName,
+	}
+	return cypher, params
+}
+
+// computeDegreeProperties sets inDegree and outDegree on Function/Method nodes.
+func (cg *GenericCallGraphBuilder) computeDegreeProperties(ctx context.Context) error {
+	cypher, params := genericDegreeQuery(cg.serviceName, cg.scopeCtx)
+	_, err := cg.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}

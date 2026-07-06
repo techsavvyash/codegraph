@@ -9,7 +9,7 @@
         "accessModifier": "public",
         "docstring": "",
         "endColumn": 12,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "server.go",
         "fqn": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
         "isAbstract": false,
@@ -17,9 +17,10 @@
         "nodeKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "class:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#|main",
         "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
         "startColumn": 5,
-        "startLine": 4
+        "startLine": 5
       }
     },
     {
@@ -31,7 +32,7 @@
         "accessModifier": "public",
         "docstring": "",
         "endColumn": 23,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "src/index.ts",
         "fqn": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
         "isAbstract": false,
@@ -39,9 +40,10 @@
         "nodeKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "class:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#|main",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
         "startColumn": 13,
-        "startLine": 4
+        "startLine": 5
       }
     },
     {
@@ -51,13 +53,14 @@
       "nodeKey": "file:polyglot/backend:server.go",
       "props": {
         "absolutePath": "server.go",
-        "hash": "",
+        "hash": "ac4192c0c6db69c18be2464c631de28c19a260f3b8f9b44b9167bc335e435dd3",
         "language": "Go",
         "lineCount": 0,
         "nodeKey": "file:polyglot/backend:server.go",
         "path": "server.go",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "file:polyglot/backend:server.go|main",
         "serviceName": "polyglot/backend"
       }
     },
@@ -68,13 +71,14 @@
       "nodeKey": "file:polyglot/frontend:src/index.ts",
       "props": {
         "absolutePath": "src/index.ts",
-        "hash": "",
+        "hash": "415c84bdbfe4f9e9113d3751bb8ca56e18de2ce85f7f98c5f7c4b4ba806b0cc9",
         "language": "TypeScript",
         "lineCount": 0,
         "nodeKey": "file:polyglot/frontend:src/index.ts",
         "path": "src/index.ts",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "file:polyglot/frontend:src/index.ts|main",
         "serviceName": "polyglot/frontend"
       }
     },
@@ -85,6 +89,7 @@
       "nodeKey": "func:polyglot/backend:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
       "props": {
         "docstring": "",
+        "endByte": 238,
         "endColumn": 9,
         "endLine": 16,
         "filePath": "server.go",
@@ -99,8 +104,10 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "func:polyglot/backend:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().|main",
         "serviceName": "polyglot/backend",
         "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
+        "startByte": 165,
         "startColumn": 5,
         "startLine": 13
       }
@@ -112,8 +119,9 @@
       "nodeKey": "func:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
       "props": {
         "docstring": "",
+        "endByte": 536,
         "endColumn": 19,
-        "endLine": 10016,
+        "endLine": 10017,
         "filePath": "src/index.ts",
         "inDegree": 0,
         "isExported": true,
@@ -124,10 +132,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "func:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+        "startByte": 350,
         "startColumn": 15,
-        "startLine": 16
+        "startLine": 17
       }
     },
     {
@@ -137,15 +147,16 @@
       "nodeKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
       "props": {
         "endColumn": 23,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
         "name": "Client",
         "nodeKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#|main",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
         "startColumn": 17,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
@@ -155,6 +166,7 @@
       "nodeKey": "method:polyglot/backend:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
       "props": {
         "docstring": "",
+        "endByte": 163,
         "endColumn": 23,
         "endLine": 11,
         "filePath": "server.go",
@@ -171,8 +183,10 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:polyglot/backend:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().|main",
         "serviceName": "polyglot/backend",
         "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+        "startByte": 66,
         "startColumn": 17,
         "startLine": 9
       }
@@ -184,8 +198,9 @@
       "nodeKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
       "props": {
         "docstring": "",
+        "endByte": 114,
         "endColumn": 6,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "src/index.ts",
         "inDegree": 0,
         "isExported": true,
@@ -196,10 +211,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+        "startByte": 26,
         "startColumn": 2,
-        "startLine": 1
+        "startLine": 2
       }
     },
     {
@@ -209,8 +226,9 @@
       "nodeKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
       "props": {
         "docstring": "",
+        "endByte": 166,
         "endColumn": 13,
-        "endLine": 6,
+        "endLine": 7,
         "filePath": "src/index.ts",
         "inDegree": 1,
         "isExported": true,
@@ -221,10 +239,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+        "startByte": 115,
         "startColumn": 2,
-        "startLine": 5
+        "startLine": 6
       }
     },
     {
@@ -234,8 +254,9 @@
       "nodeKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
       "props": {
         "docstring": "",
+        "endByte": 349,
         "endColumn": 12,
-        "endLine": 15,
+        "endLine": 16,
         "filePath": "src/index.ts",
         "inDegree": 1,
         "isExported": true,
@@ -246,10 +267,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
+        "startByte": 167,
         "startColumn": 8,
-        "startLine": 7
+        "startLine": 8
       }
     },
     {
@@ -259,15 +282,16 @@
       "nodeKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
       "props": {
         "endColumn": 12,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "server.go",
         "name": "backend",
         "nodeKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "mod:scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/|main",
         "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
         "startColumn": 8,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
@@ -277,177 +301,187 @@
       "nodeKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
       "props": {
         "endColumn": 0,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
         "name": "index.ts",
         "nodeKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "mod:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/|main",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
         "startColumn": 0,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/backend:server.go:13:14",
-      "props": {
-        "context": "",
-        "endColumn": 18,
-        "endLine": 13,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:13:14",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 14,
-        "startLine": 13
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:13:6",
-      "props": {
-        "context": "",
-        "endColumn": 13,
-        "endLine": 13,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:13:6",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 6,
-        "startLine": 13
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:14:1",
-      "props": {
-        "context": "",
-        "endColumn": 4,
-        "endLine": 14,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:14:1",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 1,
-        "startLine": 14
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:14:15",
-      "props": {
-        "context": "",
-        "endColumn": 21,
-        "endLine": 14,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:14:15",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 15,
-        "startLine": 14
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:14:5",
-      "props": {
-        "context": "",
-        "endColumn": 12,
-        "endLine": 14,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:14:5",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 5,
-        "startLine": 14
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:2:8",
-      "props": {
-        "context": "",
-        "endColumn": 11,
-        "endLine": 2,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:2:8",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 8,
-        "startLine": 2
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:8:8",
-      "props": {
-        "context": "",
-        "endColumn": 15,
-        "endLine": 8,
-        "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:8:8",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/backend",
-        "startColumn": 8,
-        "startLine": 8
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/backend:server.go:9:12",
+      "nodeKey": "ref:polyglot/backend:server.go:10:12",
       "props": {
         "context": "",
         "endColumn": 19,
-        "endLine": 9,
+        "endLine": 10,
         "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:9:12",
+        "nodeKey": "ref:polyglot/backend:server.go:10:12",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:10:12|main",
         "serviceName": "polyglot/backend",
         "startColumn": 12,
-        "startLine": 9
+        "startLine": 10
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/backend:server.go:9:40",
+      "nodeKey": "ref:polyglot/backend:server.go:10:40",
       "props": {
         "context": "",
         "endColumn": 44,
-        "endLine": 9,
+        "endLine": 10,
         "filePath": "server.go",
-        "nodeKey": "ref:polyglot/backend:server.go:9:40",
+        "nodeKey": "ref:polyglot/backend:server.go:10:40",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:10:40|main",
         "serviceName": "polyglot/backend",
         "startColumn": 40,
-        "startLine": 9
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:10:8",
+      "props": {
+        "context": "",
+        "endColumn": 11,
+        "endLine": 10,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:10:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:10:8|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 8,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:14:14",
+      "props": {
+        "context": "",
+        "endColumn": 18,
+        "endLine": 14,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:14:14",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:14:14|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 14,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:14:6",
+      "props": {
+        "context": "",
+        "endColumn": 13,
+        "endLine": 14,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:14:6",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:14:6|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 6,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:15:1",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 15,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:15:1",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:15:1|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 1,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:15:15",
+      "props": {
+        "context": "",
+        "endColumn": 21,
+        "endLine": 15,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:15:15",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:15:15|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 15,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:15:5",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 15,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:15:5",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:15:5|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 5,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/backend:server.go:3:8",
+      "props": {
+        "context": "",
+        "endColumn": 11,
+        "endLine": 3,
+        "filePath": "server.go",
+        "nodeKey": "ref:polyglot/backend:server.go:3:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:3:8|main",
+        "serviceName": "polyglot/backend",
+        "startColumn": 8,
+        "startLine": 3
       }
     },
     {
@@ -457,12 +491,13 @@
       "nodeKey": "ref:polyglot/backend:server.go:9:8",
       "props": {
         "context": "",
-        "endColumn": 11,
+        "endColumn": 15,
         "endLine": 9,
         "filePath": "server.go",
         "nodeKey": "ref:polyglot/backend:server.go:9:8",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/backend:server.go:9:8|main",
         "serviceName": "polyglot/backend",
         "startColumn": 8,
         "startLine": 9
@@ -472,107 +507,75 @@
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:10:12",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:11:12",
       "props": {
         "context": "",
         "endColumn": 19,
-        "endLine": 10,
+        "endLine": 11,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:10:12",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:11:12",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:11:12|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 12,
-        "startLine": 10
+        "startLine": 11
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:12:15",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:13:15",
       "props": {
         "context": "",
         "endColumn": 19,
-        "endLine": 12,
+        "endLine": 13,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:12:15",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:13:15",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:13:15|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 15,
-        "startLine": 12
+        "startLine": 13
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "props": {
         "context": "",
         "endColumn": 30,
-        "endLine": 16,
+        "endLine": 17,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:16:23",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:17:23",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:17:23|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 23,
-        "startLine": 16
+        "startLine": 17
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:17:16",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:18:16",
       "props": {
         "context": "",
         "endColumn": 22,
-        "endLine": 17,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:17:16",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/frontend",
-        "startColumn": 16,
-        "startLine": 17
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:17:29",
-      "props": {
-        "context": "",
-        "endColumn": 39,
-        "endLine": 17,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:17:29",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/frontend",
-        "startColumn": 29,
-        "startLine": 17
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:18:32",
-      "props": {
-        "context": "",
-        "endColumn": 36,
         "endLine": 18,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:18:32",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:18:16",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:18:16|main",
         "serviceName": "polyglot/frontend",
-        "startColumn": 32,
+        "startColumn": 16,
         "startLine": 18
       }
     },
@@ -580,144 +583,190 @@
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:19:10",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:18:29",
+      "props": {
+        "context": "",
+        "endColumn": 39,
+        "endLine": 18,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:18:29",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:18:29|main",
+        "serviceName": "polyglot/frontend",
+        "startColumn": 29,
+        "startLine": 18
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:19:32",
+      "props": {
+        "context": "",
+        "endColumn": 36,
+        "endLine": 19,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:19:32",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:19:32|main",
+        "serviceName": "polyglot/frontend",
+        "startColumn": 32,
+        "startLine": 19
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:20:10",
       "props": {
         "context": "",
         "endColumn": 13,
-        "endLine": 19,
+        "endLine": 20,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:19:10",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:20:10",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:20:10|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 10,
-        "startLine": 19
+        "startLine": 20
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:19:2",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:20:2",
       "props": {
         "context": "",
         "endColumn": 9,
-        "endLine": 19,
+        "endLine": 20,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:19:2",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:20:2",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:20:2|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 2,
-        "startLine": 19
+        "startLine": 20
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "props": {
-        "context": "",
-        "endColumn": 32,
-        "endLine": 1,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:1:25",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/frontend",
-        "startColumn": 25,
-        "startLine": 1
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:22:0",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:23:0",
       "props": {
         "context": "",
         "endColumn": 4,
-        "endLine": 22,
+        "endLine": 23,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:22:0",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:23:0",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:23:0|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 0,
-        "startLine": 22
+        "startLine": 23
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:4:35",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "props": {
+        "context": "",
+        "endColumn": 32,
+        "endLine": 2,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:2:25",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:2:25|main",
+        "serviceName": "polyglot/frontend",
+        "startColumn": 25,
+        "startLine": 2
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:5:35",
       "props": {
         "context": "",
         "endColumn": 41,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:4:35",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:5:35",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:5:35|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 35,
-        "startLine": 4
+        "startLine": 5
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "props": {
         "context": "",
         "endColumn": 38,
-        "endLine": 7,
+        "endLine": 8,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:7:31",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:8:31",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:8:31|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 31,
-        "startLine": 7
+        "startLine": 8
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:8:22",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:9:22",
       "props": {
         "context": "",
         "endColumn": 27,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:8:22",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:9:22",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:9:22|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 22,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:polyglot/frontend:src/index.ts:8:36",
+      "nodeKey": "ref:polyglot/frontend:src/index.ts:9:36",
       "props": {
         "context": "",
         "endColumn": 43,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:polyglot/frontend:src/index.ts:8:36",
+        "nodeKey": "ref:polyglot/frontend:src/index.ts:9:36",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:polyglot/frontend:src/index.ts:9:36|main",
         "serviceName": "polyglot/frontend",
         "startColumn": 36,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
@@ -733,6 +782,7 @@
         "repositoryUrl": "https://example.com/polyglot",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "svc:polyglot/backend|main",
         "version": "v0.0.0"
       }
     },
@@ -749,6 +799,7 @@
         "repositoryUrl": "https://example.com/polyglot",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "svc:polyglot/frontend|main",
         "version": "v0.0.0"
       }
     },
@@ -764,6 +815,7 @@
         "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/|main",
         "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/"
       }
     },
@@ -779,6 +831,7 @@
         "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#|main",
         "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#"
       }
     },
@@ -794,6 +847,7 @@
         "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().|main",
         "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle()."
       }
     },
@@ -809,6 +863,7 @@
         "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.|main",
         "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name."
       }
     },
@@ -824,6 +879,7 @@
         "nodeKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().|main",
         "symbol": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main()."
       }
     },
@@ -839,6 +895,7 @@
         "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/|main",
         "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/"
       }
     },
@@ -854,6 +911,7 @@
         "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().|main",
         "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println()."
       }
     },
@@ -869,6 +927,7 @@
         "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().|main",
         "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf()."
       }
     },
@@ -884,6 +943,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/"
       }
     },
@@ -899,6 +959,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#"
       }
     },
@@ -914,6 +975,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send()."
       }
     },
@@ -929,6 +991,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)"
       }
     },
@@ -944,6 +1007,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#"
       }
     },
@@ -959,6 +1023,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`()."
       }
     },
@@ -974,6 +1039,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)"
       }
     },
@@ -989,6 +1055,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send()."
       }
     },
@@ -1004,6 +1071,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)"
       }
     },
@@ -1019,6 +1087,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:"
       }
     },
@@ -1034,6 +1103,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main()."
       }
     },
@@ -1049,6 +1119,7 @@
         "nodeKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:|main",
         "symbol": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:"
       }
     },
@@ -1064,6 +1135,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text().|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Body#text()."
       }
     },
@@ -1079,6 +1151,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log()."
       }
     },
@@ -1094,6 +1167,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console."
       }
     },
@@ -1109,6 +1183,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch().|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/fetch()."
       }
     },
@@ -1124,6 +1199,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#"
       }
     },
@@ -1139,6 +1215,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise."
       }
     },
@@ -1154,6 +1231,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#"
       }
     },
@@ -1169,6 +1247,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#"
       }
     },
@@ -1184,6 +1263,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#"
       }
     },
@@ -1191,20 +1271,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:polyglot/backend:server.go#Name:5",
+      "nodeKey": "var:polyglot/backend:server.go#Name:6",
       "props": {
         "endColumn": 5,
-        "endLine": 5,
+        "endLine": 6,
         "filePath": "server.go",
         "isConstant": false,
         "name": "Name",
-        "nodeKey": "var:polyglot/backend:server.go#Name:5",
+        "nodeKey": "var:polyglot/backend:server.go#Name:6",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:polyglot/backend:server.go#Name:6|main",
         "serviceName": "polyglot/backend",
         "signature": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
         "startColumn": 1,
-        "startLine": 5,
+        "startLine": 6,
         "type": ""
       }
     },
@@ -1212,20 +1293,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:polyglot/frontend:src/index.ts#baseUrl:5",
+      "nodeKey": "var:polyglot/frontend:src/index.ts#baseUrl:6",
       "props": {
         "endColumn": 38,
-        "endLine": 5,
+        "endLine": 6,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "baseUrl",
-        "nodeKey": "var:polyglot/frontend:src/index.ts#baseUrl:5",
+        "nodeKey": "var:polyglot/frontend:src/index.ts#baseUrl:6",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:polyglot/frontend:src/index.ts#baseUrl:6|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().(baseUrl)",
         "startColumn": 31,
-        "startLine": 5,
+        "startLine": 6,
         "type": ""
       }
     },
@@ -1233,18 +1315,41 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:polyglot/frontend:src/index.ts#body0:10",
+      "nodeKey": "var:polyglot/frontend:src/index.ts#body0:11",
       "props": {
         "endColumn": 10,
-        "endLine": 10,
+        "endLine": 11,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "body0",
-        "nodeKey": "var:polyglot/frontend:src/index.ts#body0:10",
+        "nodeKey": "var:polyglot/frontend:src/index.ts#body0:11",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:polyglot/frontend:src/index.ts#body0:11|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/body0:",
+        "startColumn": 6,
+        "startLine": 11,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:polyglot/frontend:src/index.ts#method0:10",
+      "props": {
+        "endColumn": 12,
+        "endLine": 10,
+        "filePath": "src/index.ts",
+        "isConstant": false,
+        "name": "method0",
+        "nodeKey": "var:polyglot/frontend:src/index.ts#method0:10",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:polyglot/frontend:src/index.ts#method0:10|main",
+        "serviceName": "polyglot/frontend",
+        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
         "startColumn": 6,
         "startLine": 10,
         "type": ""
@@ -1254,41 +1359,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:polyglot/frontend:src/index.ts#method0:9",
-      "props": {
-        "endColumn": 12,
-        "endLine": 9,
-        "filePath": "src/index.ts",
-        "isConstant": false,
-        "name": "method0",
-        "nodeKey": "var:polyglot/frontend:src/index.ts#method0:9",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "polyglot/frontend",
-        "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/method0:",
-        "startColumn": 6,
-        "startLine": 9,
-        "type": ""
-      }
-    },
-    {
-      "labels": [
-        "Variable"
-      ],
-      "nodeKey": "var:polyglot/frontend:src/index.ts#payload:1",
+      "nodeKey": "var:polyglot/frontend:src/index.ts#payload:2",
       "props": {
         "endColumn": 14,
-        "endLine": 1,
+        "endLine": 2,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "payload",
-        "nodeKey": "var:polyglot/frontend:src/index.ts#payload:1",
+        "nodeKey": "var:polyglot/frontend:src/index.ts#payload:2",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:polyglot/frontend:src/index.ts#payload:2|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().(payload)",
         "startColumn": 7,
-        "startLine": 1,
+        "startLine": 2,
         "type": ""
       }
     },
@@ -1296,20 +1381,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:polyglot/frontend:src/index.ts#payload:7",
+      "nodeKey": "var:polyglot/frontend:src/index.ts#payload:8",
       "props": {
         "endColumn": 20,
-        "endLine": 7,
+        "endLine": 8,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "payload",
-        "nodeKey": "var:polyglot/frontend:src/index.ts#payload:7",
+        "nodeKey": "var:polyglot/frontend:src/index.ts#payload:8",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:polyglot/frontend:src/index.ts#payload:8|main",
         "serviceName": "polyglot/frontend",
         "signature": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
         "startColumn": 13,
-        "startLine": 7,
+        "startLine": 8,
         "type": ""
       }
     }
@@ -1329,7 +1415,7 @@
         "branchDepth": 0,
         "filePath": "server.go",
         "isConditional": false,
-        "line": 14,
+        "line": 15,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1346,7 +1432,7 @@
       "endKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
       "props": {
         "filePath": "src/index.ts",
-        "line": 17,
+        "line": 18,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1363,7 +1449,7 @@
       "endKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().",
       "props": {
         "filePath": "src/index.ts",
-        "line": 18,
+        "line": 19,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1437,7 +1523,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:13:14",
+      "endKey": "ref:polyglot/backend:server.go:10:12",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1452,7 +1538,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:13:6",
+      "endKey": "ref:polyglot/backend:server.go:10:40",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1467,7 +1553,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:14:1",
+      "endKey": "ref:polyglot/backend:server.go:10:8",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1482,7 +1568,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:14:15",
+      "endKey": "ref:polyglot/backend:server.go:14:14",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1497,7 +1583,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:14:5",
+      "endKey": "ref:polyglot/backend:server.go:14:6",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1512,7 +1598,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:2:8",
+      "endKey": "ref:polyglot/backend:server.go:15:1",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1527,7 +1613,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:8:8",
+      "endKey": "ref:polyglot/backend:server.go:15:15",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1542,7 +1628,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:9:12",
+      "endKey": "ref:polyglot/backend:server.go:15:5",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1557,7 +1643,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/backend:server.go:9:40",
+      "endKey": "ref:polyglot/backend:server.go:3:8",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1587,7 +1673,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/backend:server.go#Name:5",
+      "endKey": "var:polyglot/backend:server.go#Name:6",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1707,7 +1793,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:10:12",
+      "endKey": "ref:polyglot/frontend:src/index.ts:11:12",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1722,7 +1808,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:12:15",
+      "endKey": "ref:polyglot/frontend:src/index.ts:13:15",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1737,7 +1823,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "endKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1752,7 +1838,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:17:16",
+      "endKey": "ref:polyglot/frontend:src/index.ts:18:16",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1767,7 +1853,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:17:29",
+      "endKey": "ref:polyglot/frontend:src/index.ts:18:29",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1782,7 +1868,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:18:32",
+      "endKey": "ref:polyglot/frontend:src/index.ts:19:32",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1797,7 +1883,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:19:10",
+      "endKey": "ref:polyglot/frontend:src/index.ts:20:10",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1812,7 +1898,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:19:2",
+      "endKey": "ref:polyglot/frontend:src/index.ts:20:2",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1827,7 +1913,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:1:25",
+      "endKey": "ref:polyglot/frontend:src/index.ts:23:0",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1842,7 +1928,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:22:0",
+      "endKey": "ref:polyglot/frontend:src/index.ts:2:25",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1857,7 +1943,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:4:35",
+      "endKey": "ref:polyglot/frontend:src/index.ts:5:35",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1872,7 +1958,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "endKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1887,7 +1973,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:8:22",
+      "endKey": "ref:polyglot/frontend:src/index.ts:9:22",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1902,7 +1988,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:polyglot/frontend:src/index.ts:8:36",
+      "endKey": "ref:polyglot/frontend:src/index.ts:9:36",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1917,7 +2003,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/frontend:src/index.ts#baseUrl:5",
+      "endKey": "var:polyglot/frontend:src/index.ts#baseUrl:6",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1932,7 +2018,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/frontend:src/index.ts#body0:10",
+      "endKey": "var:polyglot/frontend:src/index.ts#body0:11",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1947,7 +2033,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/frontend:src/index.ts#method0:9",
+      "endKey": "var:polyglot/frontend:src/index.ts#method0:10",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1962,7 +2048,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/frontend:src/index.ts#payload:1",
+      "endKey": "var:polyglot/frontend:src/index.ts#payload:2",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1977,7 +2063,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:polyglot/frontend:src/index.ts#payload:7",
+      "endKey": "var:polyglot/frontend:src/index.ts#payload:8",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -2194,7 +2280,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/backend:server.go#Name:5",
+      "startKey": "var:polyglot/backend:server.go#Name:6",
       "endLabels": [
         "Symbol"
       ],
@@ -2210,7 +2296,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/frontend:src/index.ts#baseUrl:5",
+      "startKey": "var:polyglot/frontend:src/index.ts#baseUrl:6",
       "endLabels": [
         "Symbol"
       ],
@@ -2226,7 +2312,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/frontend:src/index.ts#body0:10",
+      "startKey": "var:polyglot/frontend:src/index.ts#body0:11",
       "endLabels": [
         "Symbol"
       ],
@@ -2242,7 +2328,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/frontend:src/index.ts#method0:9",
+      "startKey": "var:polyglot/frontend:src/index.ts#method0:10",
       "endLabels": [
         "Symbol"
       ],
@@ -2258,7 +2344,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/frontend:src/index.ts#payload:1",
+      "startKey": "var:polyglot/frontend:src/index.ts#payload:2",
       "endLabels": [
         "Symbol"
       ],
@@ -2274,7 +2360,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:polyglot/frontend:src/index.ts#payload:7",
+      "startKey": "var:polyglot/frontend:src/index.ts#payload:8",
       "endLabels": [
         "Symbol"
       ],
@@ -2320,191 +2406,11 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/backend:server.go:13:14",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
-      "props": {
-        "column": 14,
-        "isDefinition": false,
-        "line": 13,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:13:6",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
-      "props": {
-        "column": 6,
-        "isDefinition": false,
-        "line": 13,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:14:1",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
-      "props": {
-        "column": 1,
-        "isDefinition": false,
-        "line": 14,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:14:15",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
-      "props": {
-        "column": 15,
-        "isDefinition": false,
-        "line": 14,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:14:5",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
-      "props": {
-        "column": 5,
-        "isDefinition": false,
-        "line": 14,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:2:8",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
-      "props": {
-        "column": 8,
-        "isDefinition": false,
-        "line": 2,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:8:8",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
-      "props": {
-        "column": 8,
-        "isDefinition": false,
-        "line": 8,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:9:12",
+      "startKey": "ref:polyglot/backend:server.go:10:12",
       "endLabels": [
         "Symbol"
       ],
       "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Sprintf().",
-      "props": {
-        "column": 12,
-        "isDefinition": false,
-        "line": 9,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:9:40",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
-      "props": {
-        "column": 40,
-        "isDefinition": false,
-        "line": 9,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/backend:server.go:9:8",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
-      "props": {
-        "column": 8,
-        "isDefinition": false,
-        "line": 9,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:10:12",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
       "props": {
         "column": 12,
         "isDefinition": false,
@@ -2518,7 +2424,187 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:12:15",
+      "startKey": "ref:polyglot/backend:server.go:10:40",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "column": 40,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:10:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:14:14",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Name.",
+      "props": {
+        "column": 14,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:14:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "column": 6,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:15:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:15:15",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#Handle().",
+      "props": {
+        "column": 15,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:15:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "column": 5,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:3:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/backend:server.go:9:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/Handler#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 9,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:11:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#send().(payload)",
+      "props": {
+        "column": 12,
+        "isDefinition": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:13:15",
       "endLabels": [
         "Symbol"
       ],
@@ -2526,7 +2612,7 @@
       "props": {
         "column": 15,
         "isDefinition": false,
-        "line": 12,
+        "line": 13,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2536,7 +2622,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "startKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "endLabels": [
         "Symbol"
       ],
@@ -2544,7 +2630,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 16,
+        "line": 17,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2554,7 +2640,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "startKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "endLabels": [
         "Symbol"
       ],
@@ -2562,7 +2648,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 16,
+        "line": 17,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2572,7 +2658,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "startKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "endLabels": [
         "Symbol"
       ],
@@ -2580,7 +2666,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 16,
+        "line": 17,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2590,7 +2676,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "startKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "endLabels": [
         "Symbol"
       ],
@@ -2598,7 +2684,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 16,
+        "line": 17,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2608,7 +2694,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:16:23",
+      "startKey": "ref:polyglot/frontend:src/index.ts:17:23",
       "endLabels": [
         "Symbol"
       ],
@@ -2616,7 +2702,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 16,
+        "line": 17,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2626,49 +2712,13 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:17:16",
+      "startKey": "ref:polyglot/frontend:src/index.ts:18:16",
       "endLabels": [
         "Symbol"
       ],
       "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
       "props": {
         "column": 16,
-        "isDefinition": false,
-        "line": 17,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:17:29",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
-      "props": {
-        "column": 29,
-        "isDefinition": false,
-        "line": 17,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:18:32",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
-      "props": {
-        "column": 32,
         "isDefinition": false,
         "line": 18,
         "scope": "main",
@@ -2680,7 +2730,43 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:19:10",
+      "startKey": "ref:polyglot/frontend:src/index.ts:18:29",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/HttpClient#`\u003cconstructor\u003e`().",
+      "props": {
+        "column": 29,
+        "isDefinition": false,
+        "line": 18,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:19:32",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
+      "props": {
+        "column": 32,
+        "isDefinition": false,
+        "line": 19,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:20:10",
       "endLabels": [
         "Symbol"
       ],
@@ -2688,7 +2774,7 @@
       "props": {
         "column": 10,
         "isDefinition": false,
-        "line": 19,
+        "line": 20,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2698,7 +2784,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:19:2",
+      "startKey": "ref:polyglot/frontend:src/index.ts:20:2",
       "endLabels": [
         "Symbol"
       ],
@@ -2706,7 +2792,7 @@
       "props": {
         "column": 2,
         "isDefinition": false,
-        "line": 19,
+        "line": 20,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2716,97 +2802,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
-      "props": {
-        "column": 25,
-        "isDefinition": false,
-        "line": 1,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
-      "props": {
-        "column": 25,
-        "isDefinition": false,
-        "line": 1,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
-      "props": {
-        "column": 25,
-        "isDefinition": false,
-        "line": 1,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
-      "props": {
-        "column": 25,
-        "isDefinition": false,
-        "line": 1,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:1:25",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
-      "props": {
-        "column": 25,
-        "isDefinition": false,
-        "line": 1,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:22:0",
+      "startKey": "ref:polyglot/frontend:src/index.ts:23:0",
       "endLabels": [
         "Symbol"
       ],
@@ -2814,7 +2810,7 @@
       "props": {
         "column": 0,
         "isDefinition": false,
-        "line": 22,
+        "line": 23,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2824,7 +2820,97 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:4:35",
+      "startKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.iterable.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.promise.d.ts`/Promise.",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es2018.promise.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:2:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Promise#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 2,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:polyglot/frontend:src/index.ts:5:35",
       "endLabels": [
         "Symbol"
       ],
@@ -2832,7 +2918,7 @@
       "props": {
         "column": 35,
         "isDefinition": false,
-        "line": 4,
+        "line": 5,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2842,7 +2928,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "startKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "endLabels": [
         "Symbol"
       ],
@@ -2850,7 +2936,7 @@
       "props": {
         "column": 31,
         "isDefinition": false,
-        "line": 7,
+        "line": 8,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2860,7 +2946,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "startKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "endLabels": [
         "Symbol"
       ],
@@ -2868,7 +2954,7 @@
       "props": {
         "column": 31,
         "isDefinition": false,
-        "line": 7,
+        "line": 8,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2878,7 +2964,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "startKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "endLabels": [
         "Symbol"
       ],
@@ -2886,7 +2972,7 @@
       "props": {
         "column": 31,
         "isDefinition": false,
-        "line": 7,
+        "line": 8,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2896,7 +2982,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "startKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "endLabels": [
         "Symbol"
       ],
@@ -2904,7 +2990,7 @@
       "props": {
         "column": 31,
         "isDefinition": false,
-        "line": 7,
+        "line": 8,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2914,7 +3000,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:7:31",
+      "startKey": "ref:polyglot/frontend:src/index.ts:8:31",
       "endLabels": [
         "Symbol"
       ],
@@ -2922,7 +3008,7 @@
       "props": {
         "column": 31,
         "isDefinition": false,
-        "line": 7,
+        "line": 8,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2932,7 +3018,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:8:22",
+      "startKey": "ref:polyglot/frontend:src/index.ts:9:22",
       "endLabels": [
         "Symbol"
       ],
@@ -2940,7 +3026,7 @@
       "props": {
         "column": 22,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2950,7 +3036,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:polyglot/frontend:src/index.ts:8:36",
+      "startKey": "ref:polyglot/frontend:src/index.ts:9:36",
       "endLabels": [
         "Symbol"
       ],
@@ -2958,7 +3044,7 @@
       "props": {
         "column": 36,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }

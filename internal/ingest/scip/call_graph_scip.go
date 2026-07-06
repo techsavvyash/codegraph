@@ -11,16 +11,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
-// funcRange represents the line span of a function/method body in a Go file.
+// funcRange represents the line span of a function/method body in a Go file,
+// plus the exact byte range of the whole declaration (used for source-code
+// retrieval, as opposed to StartLine/EndLine which are used for line-based
+// call-site containment).
 type funcRange struct {
 	Name         string
 	DeclLine     int      // Line of the function name declaration (matches SCIP's startLine)
 	StartLine    int      // Body opening brace line
 	EndLine      int      // Body closing brace line
+	StartByte    int      // Byte offset of the "func" keyword (or closure's FuncLit start)
+	EndByte      int      // Byte offset just past the closing brace
 	ParamTypes   []string // Fully-qualified parameter types (e.g., "net/http.ResponseWriter")
 	ReceiverType string   // Receiver type for methods (e.g., "*SCIPIndexer")
 	IsClosureVar bool     // true when this range comes from `var X = func(...){}` at package scope
@@ -115,9 +120,11 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	return nil
 }
 
-// ComputeDegreeProperties sets inDegree and outDegree properties on all
-// Function/Method nodes in the current scope based on CALLS relationships.
-func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) error {
+// scipDegreeQuery builds the Cypher and bound parameters for
+// ComputeDegreeProperties. Extracted as a pure function so tests can assert
+// the SET target is constrained to a single service (via the bound
+// $serviceName parameter) without a live Neo4j connection.
+func scipDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	cypher := `
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
@@ -132,26 +139,40 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 		WITH fn, count(DISTINCT caller) AS inD, count(DISTINCT callee) AS outD
 		SET fn.inDegree = inD, fn.outDegree = outD
 	`
-	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"serviceName": cg.serviceName,
-		"scopeId":     cg.scopeCtx.ScopeID,
-	})
+	params := map[string]any{
+		"serviceName": serviceName,
+		"scopeId":     scopeCtx.ScopeID,
+	}
+	return cypher, params
+}
+
+// ComputeDegreeProperties sets inDegree and outDegree properties on all
+// Function/Method nodes in the current scope based on CALLS relationships.
+func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) error {
+	cypher, params := scipDegreeQuery(cg.serviceName, cg.scopeCtx)
+	_, err := cg.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}
 	return nil
 }
 
-// updateFunctionBodyRanges updates the startLine and endLine properties on
-// Function/Method nodes to reflect the actual AST body range (Lbrace to Rbrace).
-// SCIP indexing only stores the declaration line, which makes line-based
-// containment queries (like findContainingFunction) fail.
+// updateFunctionBodyRanges updates the startLine/endLine and startByte/endByte
+// properties on Function/Method nodes to reflect the actual AST declaration
+// range (the "func" keyword through the closing brace). SCIP indexing only
+// stores the identifier's own occurrence range (just the symbol name), which
+// makes both line-based containment queries (like findContainingFunction) and
+// byte-based source-code retrieval fail — the former resolved to the wrong
+// function, the latter returned only the ~15-character identifier span
+// instead of the function body.
 func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, callers []callerInfo) error {
 	cypher := `
 		UNWIND $updates AS u
 		MATCH (fn) WHERE elementId(fn) = u.id
 		SET fn.startLine = u.startLine,
 		    fn.endLine = u.endLine,
+		    fn.startByte = u.startByte,
+		    fn.endByte = u.endByte,
 		    fn.paramTypes = u.paramTypes,
 		    fn.receiverType = u.receiverType
 	`
@@ -161,6 +182,8 @@ func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, ca
 			"id":           c.ID,
 			"startLine":    c.StartLine,
 			"endLine":      c.EndLine,
+			"startByte":    c.StartByte,
+			"endByte":      c.EndByte,
 			"paramTypes":   c.ParamTypes,
 			"receiverType": c.ReceiverType,
 		}
@@ -219,6 +242,8 @@ type callerInfo struct {
 	ID           string   // Neo4j element ID
 	StartLine    int      // AST body start line
 	EndLine      int      // AST body end line
+	StartByte    int      // Byte offset of the "func" keyword (exact, from token.FileSet)
+	EndByte      int      // Byte offset just past the closing brace (exact, from token.FileSet)
 	ParamTypes   []string // Fully-qualified parameter types
 	ReceiverType string   // Receiver type for methods
 }
@@ -284,6 +309,8 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 			ID:           nodeID,
 			StartLine:    fr.StartLine,
 			EndLine:      fr.EndLine,
+			StartByte:    fr.StartByte,
+			EndByte:      fr.EndByte,
 			ParamTypes:   fr.ParamTypes,
 			ReceiverType: fr.ReceiverType,
 		})
@@ -494,7 +521,6 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 	return m, nil
 }
 
-
 // findEnclosingCaller finds the innermost callerInfo whose body range
 // contains the given line number.
 func findEnclosingCaller(callers []callerInfo, line int) *callerInfo {
@@ -568,12 +594,21 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 		declLine := fset.Position(fn.Name.Pos()).Line
 		startLine := fset.Position(fn.Body.Lbrace).Line
 		endLine := fset.Position(fn.Body.Rbrace).Line
+		// Byte range covers the whole declaration — "func" keyword through the
+		// closing brace — not just the body, so source-code retrieval returns
+		// the complete function rather than only its body block. fn.Pos()
+		// resolves to the "func" keyword (FuncDecl.Pos() == Type.Pos()); fn.End()
+		// resolves to Body.End(), i.e. one past the closing brace.
+		startByte := fset.Position(fn.Pos()).Offset
+		endByte := fset.Position(fn.End()).Offset
 
 		ranges = append(ranges, funcRange{
 			Name:         name,
 			DeclLine:     declLine,
 			StartLine:    startLine,
 			EndLine:      endLine,
+			StartByte:    startByte,
+			EndByte:      endByte,
 			ParamTypes:   paramTypes,
 			ReceiverType: receiverType,
 		})
@@ -620,6 +655,8 @@ func parseFuncRanges(filePath string) ([]funcRange, error) {
 					DeclLine:     fset.Position(name.Pos()).Line,
 					StartLine:    fset.Position(lit.Body.Lbrace).Line,
 					EndLine:      fset.Position(lit.Body.Rbrace).Line,
+					StartByte:    fset.Position(lit.Pos()).Offset,
+					EndByte:      fset.Position(lit.End()).Offset,
 					ParamTypes:   paramTypes,
 					IsClosureVar: true,
 				})

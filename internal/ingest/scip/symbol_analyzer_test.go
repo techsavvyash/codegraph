@@ -102,8 +102,8 @@ func TestRoutePathRegex(t *testing.T) {
 		{`r.GET("/products/:id", handler)`, "/products/:id"},
 		{`app.get('/items', listItems)`, "/items"},
 		{"mux.Handle(`/ws`, wsHandler)", "/ws"},
-		{`someVar.get("not-a-route")`, ""},            // no leading /
-		{`fmt.Println("hello")`, ""},                   // no route
+		{`someVar.get("not-a-route")`, ""}, // no leading /
+		{`fmt.Println("hello")`, ""},       // no route
 		{`http.HandleFunc("/", rootHandler)`, "/"},
 	}
 

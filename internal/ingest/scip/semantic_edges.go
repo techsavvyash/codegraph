@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // SemanticEdgeDetector analyses the indexed SCIP symbol graph to detect
@@ -150,7 +150,7 @@ func (sed *SemanticEdgeDetector) DetectScheduledFunctions(ctx context.Context) (
 	`
 
 	params := map[string]any{
-		"scopeId":            sed.scopeCtx.ScopeID,
+		"scopeId":           sed.scopeCtx.ScopeID,
 		"schedulerPatterns": schedulerPatterns,
 	}
 

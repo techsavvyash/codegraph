@@ -344,9 +344,9 @@ func TestExtractTarGz(t *testing.T) {
 
 	// Add the binary to the archive
 	hdr := &tar.Header{
-		Name: "scip-go",
-		Mode: 0755,
-		Size: int64(len(binaryContent)),
+		Name:     "scip-go",
+		Mode:     0755,
+		Size:     int64(len(binaryContent)),
 		Typeflag: tar.TypeReg,
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
@@ -395,9 +395,9 @@ func TestExtractTarGz_BinaryNotFound(t *testing.T) {
 	tw := tar.NewWriter(gw)
 
 	hdr := &tar.Header{
-		Name: "other-file",
-		Mode: 0644,
-		Size: 5,
+		Name:     "other-file",
+		Mode:     0644,
+		Size:     5,
 		Typeflag: tar.TypeReg,
 	}
 	tw.WriteHeader(hdr)
@@ -428,9 +428,9 @@ func TestExtractTarGz_NestedBinary(t *testing.T) {
 	tw := tar.NewWriter(gw)
 
 	hdr := &tar.Header{
-		Name: "subdir/scip-go",
-		Mode: 0755,
-		Size: int64(len(binaryContent)),
+		Name:     "subdir/scip-go",
+		Mode:     0755,
+		Size:     int64(len(binaryContent)),
 		Typeflag: tar.TypeReg,
 	}
 	tw.WriteHeader(hdr)

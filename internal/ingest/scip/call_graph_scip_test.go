@@ -3,7 +3,10 @@ package static
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 func TestParseFuncRanges(t *testing.T) {
@@ -57,6 +60,106 @@ func init() {
 	// Check init
 	if ranges[2].Name != "init" {
 		t.Errorf("expected init, got %s", ranges[2].Name)
+	}
+}
+
+// TestParseFuncRangesBodyByteOffsets locks fix C (RFC-006 Phase 1): the byte
+// range persisted for a Go Function/Method must cover the whole declaration —
+// the "func" keyword through the closing brace — not just the identifier,
+// so source-code retrieval returns the complete function rather than a
+// ~15-character identifier-only slice.
+func TestParseFuncRangesBodyByteOffsets(t *testing.T) {
+	dir := t.TempDir()
+	src := `package example
+
+func Add(a, b int) int {
+	return a + b
+}
+`
+	tmpFile := filepath.Join(dir, "add.go")
+	if err := os.WriteFile(tmpFile, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ranges, err := parseFuncRanges(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ranges) != 1 {
+		t.Fatalf("expected 1 func range, got %d: %+v", len(ranges), ranges)
+	}
+	fr := ranges[0]
+
+	if fr.StartByte < 0 || fr.EndByte <= fr.StartByte || fr.EndByte > len(src) {
+		t.Fatalf("invalid byte range: StartByte=%d EndByte=%d (len(src)=%d)", fr.StartByte, fr.EndByte, len(src))
+	}
+
+	extracted := src[fr.StartByte:fr.EndByte]
+	wantPrefix := "func Add(a, b int) int {"
+	if !strings.HasPrefix(extracted, wantPrefix) {
+		t.Errorf("extracted body must start with %q, got %q", wantPrefix, extracted)
+	}
+	if !strings.HasSuffix(extracted, "}") {
+		t.Errorf("extracted body must end with the closing brace, got %q", extracted)
+	}
+	if !strings.Contains(extracted, "return a + b") {
+		t.Errorf("extracted body must contain the function body, got %q", extracted)
+	}
+}
+
+// TestParseFuncRangesClosureVarByteOffsets mirrors
+// TestParseFuncRangesBodyByteOffsets for the `var X = func(...){}` closure
+// case: the byte range must cover the FuncLit itself ("func(...) {...}"),
+// not just the variable name.
+func TestParseFuncRangesClosureVarByteOffsets(t *testing.T) {
+	dir := t.TempDir()
+	src := `package example
+
+var buildManager = func() error {
+	return nil
+}
+`
+	tmpFile := filepath.Join(dir, "closure.go")
+	if err := os.WriteFile(tmpFile, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ranges, err := parseFuncRanges(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ranges) != 1 {
+		t.Fatalf("expected 1 func range, got %d: %+v", len(ranges), ranges)
+	}
+	fr := ranges[0]
+
+	if fr.StartByte < 0 || fr.EndByte <= fr.StartByte || fr.EndByte > len(src) {
+		t.Fatalf("invalid byte range: StartByte=%d EndByte=%d (len(src)=%d)", fr.StartByte, fr.EndByte, len(src))
+	}
+	extracted := src[fr.StartByte:fr.EndByte]
+	if !strings.HasPrefix(extracted, "func() error {") {
+		t.Errorf("extracted closure must start with the func literal, got %q", extracted)
+	}
+	if !strings.HasSuffix(extracted, "}") {
+		t.Errorf("extracted closure must end with the closing brace, got %q", extracted)
+	}
+}
+
+// TestScipDegreeQueryServiceScoped locks the fix requiring the degree
+// computation's SET target to be constrained by serviceName with the
+// parameter actually bound, not just a Go field being set on the struct.
+func TestScipDegreeQueryServiceScoped(t *testing.T) {
+	scope := models.ScopeContext{Scope: "main", ScopeID: "main"}
+	cypher, params := scipDegreeQuery("svc-a", scope)
+
+	if !strings.Contains(cypher, "fn.serviceName = $serviceName") {
+		t.Errorf("cypher must constrain fn.serviceName = $serviceName:\n%s", cypher)
+	}
+	if params["serviceName"] != "svc-a" {
+		t.Errorf("params[serviceName] = %v, want %q", params["serviceName"], "svc-a")
+	}
+	if params["scopeId"] != "main" {
+		t.Errorf("params[scopeId] = %v, want %q", params["scopeId"], "main")
 	}
 }
 
@@ -314,7 +417,7 @@ func TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
 		{ID: "main", StartLine: 1, EndLine: 10},
 	}
 	rows := []callRefRow{
-		{Line: 5, TargetID: "main"},   // self-call: main calls itself
+		{Line: 5, TargetID: "main"},     // self-call: main calls itself
 		{Line: 100, TargetID: "helper"}, // line 100 has no enclosing caller
 	}
 

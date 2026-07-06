@@ -9,7 +9,7 @@
         "accessModifier": "public",
         "docstring": "",
         "endColumn": 26,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "src/logger.ts",
         "fqn": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
         "isAbstract": false,
@@ -17,9 +17,10 @@
         "nodeKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "class:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#|main",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
         "startColumn": 13,
-        "startLine": 4
+        "startLine": 5
       }
     },
     {
@@ -29,13 +30,14 @@
       "nodeKey": "file:tinyts:src/index.ts",
       "props": {
         "absolutePath": "src/index.ts",
-        "hash": "",
+        "hash": "0ed94e9b1fc4c663c728f547300395b4b0f6b7818a7fafd400d6f3fb6707d099",
         "language": "TypeScript",
         "lineCount": 0,
         "nodeKey": "file:tinyts:src/index.ts",
         "path": "src/index.ts",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "file:tinyts:src/index.ts|main",
         "serviceName": "tinyts"
       }
     },
@@ -46,13 +48,14 @@
       "nodeKey": "file:tinyts:src/logger.ts",
       "props": {
         "absolutePath": "src/logger.ts",
-        "hash": "",
+        "hash": "5d0b63d979ec4cd0910e49e021d8e40dd76f3b05ec3e4c9ec324fc64517e6104",
         "language": "TypeScript",
         "lineCount": 0,
         "nodeKey": "file:tinyts:src/logger.ts",
         "path": "src/logger.ts",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "file:tinyts:src/logger.ts|main",
         "serviceName": "tinyts"
       }
     },
@@ -63,8 +66,9 @@
       "nodeKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
       "props": {
         "docstring": "",
+        "endByte": 197,
         "endColumn": 14,
-        "endLine": 10002,
+        "endLine": 10003,
         "filePath": "src/index.ts",
         "inDegree": 0,
         "isExported": true,
@@ -75,10 +79,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+        "startByte": 50,
         "startColumn": 9,
-        "startLine": 2
+        "startLine": 3
       }
     },
     {
@@ -88,8 +94,9 @@
       "nodeKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
       "props": {
         "docstring": "",
+        "endByte": 335,
         "endColumn": 28,
-        "endLine": 10012,
+        "endLine": 10013,
         "filePath": "src/logger.ts",
         "inDegree": 1,
         "isExported": true,
@@ -100,10 +107,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+        "startByte": 243,
         "startColumn": 16,
-        "startLine": 12
+        "startLine": 13
       }
     },
     {
@@ -113,15 +122,16 @@
       "nodeKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
       "props": {
         "endColumn": 23,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/logger.ts",
         "name": "Logger",
         "nodeKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#|main",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
         "startColumn": 17,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
@@ -131,8 +141,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
       "props": {
         "docstring": "",
+        "endByte": 156,
         "endColumn": 13,
-        "endLine": 6,
+        "endLine": 7,
         "filePath": "src/logger.ts",
         "inDegree": 1,
         "isExported": true,
@@ -143,10 +154,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+        "startByte": 106,
         "startColumn": 2,
-        "startLine": 5
+        "startLine": 6
       }
     },
     {
@@ -156,8 +169,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
       "props": {
         "docstring": "",
+        "endByte": 242,
         "endColumn": 5,
-        "endLine": 11,
+        "endLine": 12,
         "filePath": "src/logger.ts",
         "inDegree": 1,
         "isExported": true,
@@ -168,10 +182,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+        "startByte": 157,
         "startColumn": 2,
-        "startLine": 7
+        "startLine": 8
       }
     },
     {
@@ -181,8 +197,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
       "props": {
         "docstring": "",
+        "endByte": 105,
         "endColumn": 5,
-        "endLine": 4,
+        "endLine": 5,
         "filePath": "src/logger.ts",
         "inDegree": 0,
         "isExported": true,
@@ -193,10 +210,12 @@
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+        "startByte": 26,
         "startColumn": 2,
-        "startLine": 1
+        "startLine": 2
       }
     },
     {
@@ -206,15 +225,16 @@
       "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
       "props": {
         "endColumn": 0,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
         "name": "index.ts",
         "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/|main",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
         "startColumn": 0,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
@@ -224,105 +244,73 @@
       "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
       "props": {
         "endColumn": 0,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/logger.ts",
         "name": "logger.ts",
         "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/|main",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
         "startColumn": 0,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/index.ts:0:23",
+      "nodeKey": "ref:tinyts:src/index.ts:1:23",
       "props": {
         "context": "",
         "endColumn": 29,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:0:23",
+        "nodeKey": "ref:tinyts:src/index.ts:1:23",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:1:23|main",
         "serviceName": "tinyts",
         "startColumn": 23,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/index.ts:0:37",
+      "nodeKey": "ref:tinyts:src/index.ts:1:37",
       "props": {
         "context": "",
         "endColumn": 47,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:0:37",
+        "nodeKey": "ref:tinyts:src/index.ts:1:37",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:1:37|main",
         "serviceName": "tinyts",
         "startColumn": 37,
-        "startLine": 0
+        "startLine": 1
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/index.ts:0:9",
+      "nodeKey": "ref:tinyts:src/index.ts:1:9",
       "props": {
         "context": "",
         "endColumn": 21,
-        "endLine": 0,
+        "endLine": 1,
         "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:0:9",
+        "nodeKey": "ref:tinyts:src/index.ts:1:9",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:1:9|main",
         "serviceName": "tinyts",
         "startColumn": 9,
-        "startLine": 0
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/index.ts:2:23",
-      "props": {
-        "context": "",
-        "endColumn": 29,
-        "endLine": 2,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:2:23",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 23,
-        "startLine": 2
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/index.ts:3:2",
-      "props": {
-        "context": "",
-        "endColumn": 8,
-        "endLine": 3,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:3:2",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 2,
-        "startLine": 3
+        "startLine": 1
       }
     },
     {
@@ -332,12 +320,13 @@
       "nodeKey": "ref:tinyts:src/index.ts:3:23",
       "props": {
         "context": "",
-        "endColumn": 27,
+        "endColumn": 29,
         "endLine": 3,
         "filePath": "src/index.ts",
         "nodeKey": "ref:tinyts:src/index.ts:3:23",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:3:23|main",
         "serviceName": "tinyts",
         "startColumn": 23,
         "startLine": 3
@@ -347,143 +336,18 @@
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/index.ts:3:9",
+      "nodeKey": "ref:tinyts:src/index.ts:4:2",
       "props": {
         "context": "",
-        "endColumn": 12,
-        "endLine": 3,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:3:9",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 9,
-        "startLine": 3
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/index.ts:6:15",
-      "props": {
-        "context": "",
-        "endColumn": 27,
-        "endLine": 6,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:6:15",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 15,
-        "startLine": 6
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/index.ts:7:0",
-      "props": {
-        "context": "",
-        "endColumn": 5,
-        "endLine": 7,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:7:0",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 0,
-        "startLine": 7
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/index.ts:7:6",
-      "props": {
-        "context": "",
-        "endColumn": 12,
-        "endLine": 7,
-        "filePath": "src/index.ts",
-        "nodeKey": "ref:tinyts:src/index.ts:7:6",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 6,
-        "startLine": 7
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/logger.ts:12:46",
-      "props": {
-        "context": "",
-        "endColumn": 52,
-        "endLine": 12,
-        "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:12:46",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 46,
-        "startLine": 12
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/logger.ts:13:13",
-      "props": {
-        "context": "",
-        "endColumn": 26,
-        "endLine": 13,
-        "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:13:13",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 13,
-        "startLine": 13
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/logger.ts:13:27",
-      "props": {
-        "context": "",
-        "endColumn": 33,
-        "endLine": 13,
-        "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:13:27",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "startColumn": 27,
-        "startLine": 13
-      }
-    },
-    {
-      "labels": [
-        "Reference"
-      ],
-      "nodeKey": "ref:tinyts:src/logger.ts:4:38",
-      "props": {
-        "context": "",
-        "endColumn": 44,
+        "endColumn": 8,
         "endLine": 4,
-        "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:4:38",
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:4:2",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:4:2|main",
         "serviceName": "tinyts",
-        "startColumn": 38,
+        "startColumn": 2,
         "startLine": 4
       }
     },
@@ -491,72 +355,247 @@
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/logger.ts:8:12",
+      "nodeKey": "ref:tinyts:src/index.ts:4:23",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:4:23",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:4:23|main",
+        "serviceName": "tinyts",
+        "startColumn": 23,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/index.ts:4:9",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 4,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:4:9",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:4:9|main",
+        "serviceName": "tinyts",
+        "startColumn": 9,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/index.ts:7:15",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 7,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:7:15",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:7:15|main",
+        "serviceName": "tinyts",
+        "startColumn": 15,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/index.ts:8:0",
+      "props": {
+        "context": "",
+        "endColumn": 5,
+        "endLine": 8,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:8:0",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:8:0|main",
+        "serviceName": "tinyts",
+        "startColumn": 0,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/index.ts:8:6",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 8,
+        "filePath": "src/index.ts",
+        "nodeKey": "ref:tinyts:src/index.ts:8:6",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/index.ts:8:6|main",
+        "serviceName": "tinyts",
+        "startColumn": 6,
+        "startLine": 8
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/logger.ts:13:46",
+      "props": {
+        "context": "",
+        "endColumn": 52,
+        "endLine": 13,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:tinyts:src/logger.ts:13:46",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:13:46|main",
+        "serviceName": "tinyts",
+        "startColumn": 46,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/logger.ts:14:13",
+      "props": {
+        "context": "",
+        "endColumn": 26,
+        "endLine": 14,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:tinyts:src/logger.ts:14:13",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:14:13|main",
+        "serviceName": "tinyts",
+        "startColumn": 13,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/logger.ts:14:27",
+      "props": {
+        "context": "",
+        "endColumn": 33,
+        "endLine": 14,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:tinyts:src/logger.ts:14:27",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:14:27|main",
+        "serviceName": "tinyts",
+        "startColumn": 27,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/logger.ts:5:38",
+      "props": {
+        "context": "",
+        "endColumn": 44,
+        "endLine": 5,
+        "filePath": "src/logger.ts",
+        "nodeKey": "ref:tinyts:src/logger.ts:5:38",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:5:38|main",
+        "serviceName": "tinyts",
+        "startColumn": 38,
+        "startLine": 5
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/logger.ts:9:12",
       "props": {
         "context": "",
         "endColumn": 15,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:8:12",
+        "nodeKey": "ref:tinyts:src/logger.ts:9:12",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:9:12|main",
         "serviceName": "tinyts",
         "startColumn": 12,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/logger.ts:8:25",
+      "nodeKey": "ref:tinyts:src/logger.ts:9:25",
       "props": {
         "context": "",
         "endColumn": 31,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:8:25",
+        "nodeKey": "ref:tinyts:src/logger.ts:9:25",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:9:25|main",
         "serviceName": "tinyts",
         "startColumn": 25,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/logger.ts:8:36",
+      "nodeKey": "ref:tinyts:src/logger.ts:9:36",
       "props": {
         "context": "",
         "endColumn": 43,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:8:36",
+        "nodeKey": "ref:tinyts:src/logger.ts:9:36",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:9:36|main",
         "serviceName": "tinyts",
         "startColumn": 36,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
       "labels": [
         "Reference"
       ],
-      "nodeKey": "ref:tinyts:src/logger.ts:8:4",
+      "nodeKey": "ref:tinyts:src/logger.ts:9:4",
       "props": {
         "context": "",
         "endColumn": 11,
-        "endLine": 8,
+        "endLine": 9,
         "filePath": "src/logger.ts",
-        "nodeKey": "ref:tinyts:src/logger.ts:8:4",
+        "nodeKey": "ref:tinyts:src/logger.ts:9:4",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/logger.ts:9:4|main",
         "serviceName": "tinyts",
         "startColumn": 4,
-        "startLine": 8
+        "startLine": 9
       }
     },
     {
@@ -572,6 +611,7 @@
         "repositoryUrl": "https://example.com/tinyts",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "svc:tinyts|main",
         "version": "v0.0.0"
       }
     },
@@ -587,6 +627,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/"
       }
     },
@@ -602,6 +643,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet()."
       }
     },
@@ -617,6 +659,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)"
       }
     },
@@ -632,6 +675,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)"
       }
     },
@@ -647,6 +691,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger."
       }
     },
@@ -662,6 +707,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/"
       }
     },
@@ -677,6 +723,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#"
       }
     },
@@ -692,6 +739,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`()."
       }
     },
@@ -707,6 +755,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)"
       }
     },
@@ -722,6 +771,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log()."
       }
     },
@@ -737,6 +787,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)"
       }
     },
@@ -752,6 +803,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#"
       }
     },
@@ -767,6 +819,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log()."
       }
     },
@@ -782,6 +835,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)"
       }
     },
@@ -797,6 +851,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger()."
       }
     },
@@ -812,6 +867,7 @@
         "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)|main",
         "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)"
       }
     },
@@ -827,6 +883,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log()."
       }
     },
@@ -842,6 +899,7 @@
         "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console."
       }
     },
@@ -849,20 +907,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:tinyts:src/index.ts#logger:2",
+      "nodeKey": "var:tinyts:src/index.ts#logger:3",
       "props": {
         "endColumn": 21,
-        "endLine": 2,
+        "endLine": 3,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "logger",
-        "nodeKey": "var:tinyts:src/index.ts#logger:2",
+        "nodeKey": "var:tinyts:src/index.ts#logger:3",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:tinyts:src/index.ts#logger:3|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
         "startColumn": 15,
-        "startLine": 2,
+        "startLine": 3,
         "type": ""
       }
     },
@@ -870,81 +929,19 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:tinyts:src/index.ts#logger:6",
+      "nodeKey": "var:tinyts:src/index.ts#logger:7",
       "props": {
         "endColumn": 12,
-        "endLine": 6,
+        "endLine": 7,
         "filePath": "src/index.ts",
         "isConstant": false,
         "name": "logger",
-        "nodeKey": "var:tinyts:src/index.ts#logger:6",
+        "nodeKey": "var:tinyts:src/index.ts#logger:7",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:tinyts:src/index.ts#logger:7|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
-        "startColumn": 6,
-        "startLine": 6,
-        "type": ""
-      }
-    },
-    {
-      "labels": [
-        "Variable"
-      ],
-      "nodeKey": "var:tinyts:src/index.ts#name:2",
-      "props": {
-        "endColumn": 35,
-        "endLine": 2,
-        "filePath": "src/index.ts",
-        "isConstant": false,
-        "name": "name",
-        "nodeKey": "var:tinyts:src/index.ts#name:2",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
-        "startColumn": 31,
-        "startLine": 2,
-        "type": ""
-      }
-    },
-    {
-      "labels": [
-        "Variable"
-      ],
-      "nodeKey": "var:tinyts:src/logger.ts#message:1",
-      "props": {
-        "endColumn": 13,
-        "endLine": 1,
-        "filePath": "src/logger.ts",
-        "isConstant": false,
-        "name": "message",
-        "nodeKey": "var:tinyts:src/logger.ts#message:1",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
-        "startColumn": 6,
-        "startLine": 1,
-        "type": ""
-      }
-    },
-    {
-      "labels": [
-        "Variable"
-      ],
-      "nodeKey": "var:tinyts:src/logger.ts#message:7",
-      "props": {
-        "endColumn": 13,
-        "endLine": 7,
-        "filePath": "src/logger.ts",
-        "isConstant": false,
-        "name": "message",
-        "nodeKey": "var:tinyts:src/logger.ts#message:7",
-        "scope": "main",
-        "scopeId": "main",
-        "serviceName": "tinyts",
-        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
         "startColumn": 6,
         "startLine": 7,
         "type": ""
@@ -954,20 +951,21 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:tinyts:src/logger.ts#prefix:12",
+      "nodeKey": "var:tinyts:src/index.ts#name:3",
       "props": {
         "endColumn": 35,
-        "endLine": 12,
-        "filePath": "src/logger.ts",
+        "endLine": 3,
+        "filePath": "src/index.ts",
         "isConstant": false,
-        "name": "prefix",
-        "nodeKey": "var:tinyts:src/logger.ts#prefix:12",
+        "name": "name",
+        "nodeKey": "var:tinyts:src/index.ts#name:3",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:tinyts:src/index.ts#name:3|main",
         "serviceName": "tinyts",
-        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
-        "startColumn": 29,
-        "startLine": 12,
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+        "startColumn": 31,
+        "startLine": 3,
         "type": ""
       }
     },
@@ -975,20 +973,87 @@
       "labels": [
         "Variable"
       ],
-      "nodeKey": "var:tinyts:src/logger.ts#prefix:5",
+      "nodeKey": "var:tinyts:src/logger.ts#message:2",
       "props": {
-        "endColumn": 37,
-        "endLine": 5,
+        "endColumn": 13,
+        "endLine": 2,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "message",
+        "nodeKey": "var:tinyts:src/logger.ts#message:2",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinyts:src/logger.ts#message:2|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().(message)",
+        "startColumn": 6,
+        "startLine": 2,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinyts:src/logger.ts#message:8",
+      "props": {
+        "endColumn": 13,
+        "endLine": 8,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "message",
+        "nodeKey": "var:tinyts:src/logger.ts#message:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinyts:src/logger.ts#message:8|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().(message)",
+        "startColumn": 6,
+        "startLine": 8,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinyts:src/logger.ts#prefix:13",
+      "props": {
+        "endColumn": 35,
+        "endLine": 13,
         "filePath": "src/logger.ts",
         "isConstant": false,
         "name": "prefix",
-        "nodeKey": "var:tinyts:src/logger.ts#prefix:5",
+        "nodeKey": "var:tinyts:src/logger.ts#prefix:13",
         "scope": "main",
         "scopeId": "main",
+        "scopedKey": "var:tinyts:src/logger.ts#prefix:13|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+        "startColumn": 29,
+        "startLine": 13,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinyts:src/logger.ts#prefix:6",
+      "props": {
+        "endColumn": 37,
+        "endLine": 6,
+        "filePath": "src/logger.ts",
+        "isConstant": false,
+        "name": "prefix",
+        "nodeKey": "var:tinyts:src/logger.ts#prefix:6",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinyts:src/logger.ts#prefix:6|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
         "startColumn": 31,
-        "startLine": 5,
+        "startLine": 6,
         "type": ""
       }
     }
@@ -1006,7 +1071,7 @@
       "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
       "props": {
         "filePath": "src/index.ts",
-        "line": 6,
+        "line": 7,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1023,7 +1088,7 @@
       "endKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
       "props": {
         "filePath": "src/index.ts",
-        "line": 3,
+        "line": 4,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1040,7 +1105,7 @@
       "endKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
       "props": {
         "filePath": "src/logger.ts",
-        "line": 13,
+        "line": 14,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1084,7 +1149,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:0:23",
+      "endKey": "ref:tinyts:src/index.ts:1:23",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1099,7 +1164,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:0:37",
+      "endKey": "ref:tinyts:src/index.ts:1:37",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1114,37 +1179,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:0:9",
-      "props": {
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "CONTAINS",
-      "startLabels": [
-        "File"
-      ],
-      "startKey": "file:tinyts:src/index.ts",
-      "endLabels": [
-        "Reference"
-      ],
-      "endKey": "ref:tinyts:src/index.ts:2:23",
-      "props": {
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "CONTAINS",
-      "startLabels": [
-        "File"
-      ],
-      "startKey": "file:tinyts:src/index.ts",
-      "endLabels": [
-        "Reference"
-      ],
-      "endKey": "ref:tinyts:src/index.ts:3:2",
+      "endKey": "ref:tinyts:src/index.ts:1:9",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1174,7 +1209,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:3:9",
+      "endKey": "ref:tinyts:src/index.ts:4:2",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1189,7 +1224,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:6:15",
+      "endKey": "ref:tinyts:src/index.ts:4:23",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1204,7 +1239,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:7:0",
+      "endKey": "ref:tinyts:src/index.ts:4:9",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1219,7 +1254,37 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/index.ts:7:6",
+      "endKey": "ref:tinyts:src/index.ts:7:15",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/index.ts:8:0",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/index.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/index.ts:8:6",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1234,7 +1299,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/index.ts#logger:2",
+      "endKey": "var:tinyts:src/index.ts#logger:3",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1249,7 +1314,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/index.ts#logger:6",
+      "endKey": "var:tinyts:src/index.ts#logger:7",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1264,7 +1329,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/index.ts#name:2",
+      "endKey": "var:tinyts:src/index.ts#name:3",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1384,7 +1449,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:12:46",
+      "endKey": "ref:tinyts:src/logger.ts:13:46",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1399,7 +1464,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:13:13",
+      "endKey": "ref:tinyts:src/logger.ts:14:13",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1414,7 +1479,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:13:27",
+      "endKey": "ref:tinyts:src/logger.ts:14:27",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1429,7 +1494,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:4:38",
+      "endKey": "ref:tinyts:src/logger.ts:5:38",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1444,7 +1509,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:8:12",
+      "endKey": "ref:tinyts:src/logger.ts:9:12",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1459,7 +1524,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:8:25",
+      "endKey": "ref:tinyts:src/logger.ts:9:25",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1474,7 +1539,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:8:36",
+      "endKey": "ref:tinyts:src/logger.ts:9:36",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1489,7 +1554,7 @@
       "endLabels": [
         "Reference"
       ],
-      "endKey": "ref:tinyts:src/logger.ts:8:4",
+      "endKey": "ref:tinyts:src/logger.ts:9:4",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1504,7 +1569,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/logger.ts#message:1",
+      "endKey": "var:tinyts:src/logger.ts#message:2",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1519,7 +1584,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/logger.ts#message:7",
+      "endKey": "var:tinyts:src/logger.ts#message:8",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1534,7 +1599,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/logger.ts#prefix:12",
+      "endKey": "var:tinyts:src/logger.ts#prefix:13",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1549,7 +1614,7 @@
       "endLabels": [
         "Variable"
       ],
-      "endKey": "var:tinyts:src/logger.ts#prefix:5",
+      "endKey": "var:tinyts:src/logger.ts#prefix:6",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1734,7 +1799,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/index.ts#logger:2",
+      "startKey": "var:tinyts:src/index.ts#logger:3",
       "endLabels": [
         "Symbol"
       ],
@@ -1750,7 +1815,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/index.ts#logger:6",
+      "startKey": "var:tinyts:src/index.ts#logger:7",
       "endLabels": [
         "Symbol"
       ],
@@ -1766,7 +1831,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/index.ts#name:2",
+      "startKey": "var:tinyts:src/index.ts#name:3",
       "endLabels": [
         "Symbol"
       ],
@@ -1782,7 +1847,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/logger.ts#message:1",
+      "startKey": "var:tinyts:src/logger.ts#message:2",
       "endLabels": [
         "Symbol"
       ],
@@ -1798,7 +1863,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/logger.ts#message:7",
+      "startKey": "var:tinyts:src/logger.ts#message:8",
       "endLabels": [
         "Symbol"
       ],
@@ -1814,7 +1879,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/logger.ts#prefix:12",
+      "startKey": "var:tinyts:src/logger.ts#prefix:13",
       "endLabels": [
         "Symbol"
       ],
@@ -1830,7 +1895,7 @@
       "startLabels": [
         "Variable"
       ],
-      "startKey": "var:tinyts:src/logger.ts#prefix:5",
+      "startKey": "var:tinyts:src/logger.ts#prefix:6",
       "endLabels": [
         "Symbol"
       ],
@@ -1876,7 +1941,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/index.ts:0:23",
+      "startKey": "ref:tinyts:src/index.ts:1:23",
       "endLabels": [
         "Symbol"
       ],
@@ -1884,7 +1949,7 @@
       "props": {
         "column": 23,
         "isDefinition": false,
-        "line": 0,
+        "line": 1,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1894,7 +1959,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/index.ts:0:37",
+      "startKey": "ref:tinyts:src/index.ts:1:37",
       "endLabels": [
         "Symbol"
       ],
@@ -1902,7 +1967,7 @@
       "props": {
         "column": 37,
         "isDefinition": false,
-        "line": 0,
+        "line": 1,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1912,7 +1977,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/index.ts:0:9",
+      "startKey": "ref:tinyts:src/index.ts:1:9",
       "endLabels": [
         "Symbol"
       ],
@@ -1920,43 +1985,7 @@
       "props": {
         "column": 9,
         "isDefinition": false,
-        "line": 0,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/index.ts:2:23",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
-      "props": {
-        "column": 23,
-        "isDefinition": false,
-        "line": 2,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/index.ts:3:2",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
-      "props": {
-        "column": 2,
-        "isDefinition": false,
-        "line": 3,
+        "line": 1,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1970,7 +1999,7 @@
       "endLabels": [
         "Symbol"
       ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
       "props": {
         "column": 23,
         "isDefinition": false,
@@ -1984,139 +2013,13 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/index.ts:3:9",
+      "startKey": "ref:tinyts:src/index.ts:4:2",
       "endLabels": [
         "Symbol"
       ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(logger)",
       "props": {
-        "column": 9,
-        "isDefinition": false,
-        "line": 3,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/index.ts:6:15",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
-      "props": {
-        "column": 15,
-        "isDefinition": false,
-        "line": 6,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/index.ts:7:0",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
-      "props": {
-        "column": 0,
-        "isDefinition": false,
-        "line": 7,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/index.ts:7:6",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
-      "props": {
-        "column": 6,
-        "isDefinition": false,
-        "line": 7,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/logger.ts:12:46",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
-      "props": {
-        "column": 46,
-        "isDefinition": false,
-        "line": 12,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/logger.ts:13:13",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
-      "props": {
-        "column": 13,
-        "isDefinition": false,
-        "line": 13,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/logger.ts:13:27",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
-      "props": {
-        "column": 27,
-        "isDefinition": false,
-        "line": 13,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
-      "type": "REFERENCES",
-      "startLabels": [
-        "Reference"
-      ],
-      "startKey": "ref:tinyts:src/logger.ts:4:38",
-      "endLabels": [
-        "Symbol"
-      ],
-      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
-      "props": {
-        "column": 38,
+        "column": 2,
         "isDefinition": false,
         "line": 4,
         "scope": "main",
@@ -2128,7 +2031,169 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/logger.ts:8:12",
+      "startKey": "ref:tinyts:src/index.ts:4:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().(name)",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 4,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/index.ts:4:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 4,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/index.ts:7:15",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "column": 15,
+        "isDefinition": false,
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/index.ts:8:0",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "column": 0,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/index.ts:8:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/logger.",
+      "props": {
+        "column": 6,
+        "isDefinition": false,
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/logger.ts:13:46",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 46,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/logger.ts:14:13",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
+      "props": {
+        "column": 13,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/logger.ts:14:27",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().(prefix)",
+      "props": {
+        "column": 27,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/logger.ts:5:38",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
+      "props": {
+        "column": 38,
+        "isDefinition": false,
+        "line": 5,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/logger.ts:9:12",
       "endLabels": [
         "Symbol"
       ],
@@ -2136,7 +2201,7 @@
       "props": {
         "column": 12,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2146,7 +2211,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/logger.ts:8:25",
+      "startKey": "ref:tinyts:src/logger.ts:9:25",
       "endLabels": [
         "Symbol"
       ],
@@ -2154,7 +2219,7 @@
       "props": {
         "column": 25,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2164,7 +2229,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/logger.ts:8:36",
+      "startKey": "ref:tinyts:src/logger.ts:9:36",
       "endLabels": [
         "Symbol"
       ],
@@ -2172,7 +2237,7 @@
       "props": {
         "column": 36,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }
@@ -2182,7 +2247,7 @@
       "startLabels": [
         "Reference"
       ],
-      "startKey": "ref:tinyts:src/logger.ts:8:4",
+      "startKey": "ref:tinyts:src/logger.ts:9:4",
       "endLabels": [
         "Symbol"
       ],
@@ -2190,7 +2255,7 @@
       "props": {
         "column": 4,
         "isDefinition": false,
-        "line": 8,
+        "line": 9,
         "scope": "main",
         "scopeId": "main"
       }

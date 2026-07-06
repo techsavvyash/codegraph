@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // ---------------------------------------------------------------------------
@@ -341,6 +341,35 @@ func TestComputeDefinitionPropsByteOffsets(t *testing.T) {
 	}
 }
 
+// TestComputeFileHash verifies the SHA-256 hex digest computed for file
+// content, using a temp file with known content compared against an
+// independently-computed expected digest (sha256sum of "hello world").
+func TestComputeFileHash(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(filePath, []byte("hello world"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := computeFileHash(content)
+	want := "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+	if got != want {
+		t.Errorf("computeFileHash(%q) = %q, want %q", "hello world", got, want)
+	}
+
+	if computeFileHash(nil) != "" {
+		t.Errorf("computeFileHash(nil) = %q, want empty string", computeFileHash(nil))
+	}
+	if computeFileHash([]byte{}) != "" {
+		t.Errorf("computeFileHash([]byte{}) = %q, want empty string", computeFileHash([]byte{}))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestDefaultReleasesHaveURLs — P1: verify Go release has download URL
 // ---------------------------------------------------------------------------
@@ -630,6 +659,47 @@ func TestDegreePropertyQueryConstraints(t *testing.T) {
 
 		if cgBuilder.serviceName != "test-svc" {
 			t.Errorf("serviceName not set: got %q, want %q", cgBuilder.serviceName, "test-svc")
+		}
+	})
+
+	// The above only asserts the field was set; the following assert the
+	// *actual Cypher text and bound parameters* that would be sent to Neo4j,
+	// so a future refactor that drops the serviceName filter (or forgets to
+	// bind the parameter) fails a test instead of silently degree-computing
+	// across every service in the graph.
+	t.Run("SCIPCallGraphBuilder_degree_query_constrains_SET_target_by_serviceName", func(t *testing.T) {
+		scope := models.ScopeContext{Scope: "pr", ScopeID: "pr-42"}
+		cypher, params := scipDegreeQuery("my-service", scope)
+
+		if !strings.Contains(cypher, "fn.serviceName = $serviceName") {
+			t.Errorf("expected cypher to constrain fn.serviceName = $serviceName, got:\n%s", cypher)
+		}
+		if !strings.Contains(cypher, "SET fn.inDegree = inD, fn.outDegree = outD") {
+			t.Errorf("expected cypher to SET degree properties on fn, got:\n%s", cypher)
+		}
+		if params["serviceName"] != "my-service" {
+			t.Errorf("params[serviceName] = %v, want %q", params["serviceName"], "my-service")
+		}
+		if params["scopeId"] != "pr-42" {
+			t.Errorf("params[scopeId] = %v, want %q", params["scopeId"], "pr-42")
+		}
+	})
+
+	t.Run("GenericCallGraphBuilder_degree_query_constrains_SET_target_by_serviceName", func(t *testing.T) {
+		scope := models.ScopeContext{Scope: "pr", ScopeID: "pr-42"}
+		cypher, params := genericDegreeQuery("my-service", scope)
+
+		if !strings.Contains(cypher, "(s:Service {name: $serviceName})-[:CONTAINS]->(:File)-[:CONTAINS]->(fn)") {
+			t.Errorf("expected cypher to walk Service{name:$serviceName}->File->fn, got:\n%s", cypher)
+		}
+		if !strings.Contains(cypher, "SET fn.inDegree = inD, fn.outDegree = outD") {
+			t.Errorf("expected cypher to SET degree properties on fn, got:\n%s", cypher)
+		}
+		if params["serviceName"] != "my-service" {
+			t.Errorf("params[serviceName] = %v, want %q", params["serviceName"], "my-service")
+		}
+		if params["scopeId"] != "pr-42" {
+			t.Errorf("params[scopeId] = %v, want %q", params["scopeId"], "pr-42")
 		}
 	})
 }

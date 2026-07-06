@@ -3,7 +3,7 @@ package static
 import (
 	"testing"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 const tombSvc = "codegraph/apps/cli"

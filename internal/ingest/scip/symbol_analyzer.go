@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // FrameworkPattern describes a known HTTP framework symbol pattern for detection.

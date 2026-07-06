@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // PipelineTimer is an optional interface for timing pipeline phases.
@@ -41,7 +41,7 @@ type SCIPIndexer struct {
 	scopeCtx         models.ScopeContext
 	timer            PipelineTimer
 	fileContentCache map[string][]byte // cache for calculateByteOffsets
-	projectPath      string             // project root path for resolving relative file paths
+	projectPath      string            // project root path for resolving relative file paths
 
 	// skipDependencyResolution defers the DEPENDS_ON-creation pass so the
 	// polyglot orchestrator can run it once at the end, after every sibling
@@ -262,6 +262,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		cgBuilder := NewGenericCallGraphBuilder(si.client)
 		cgBuilder.SetScope(si.scopeCtx)
 		cgBuilder.SetServiceName(si.serviceName)
+		cgBuilder.SetProjectPath(projectPath)
 		// Use the NPM package name or service name for target filtering.
 		pkgName := si.extractNPMPackageName(projectPath)
 		if pkgName == "" {
@@ -716,12 +717,21 @@ func (si *SCIPIndexer) extractNPMPackageName(projectPath string) string {
 	return packageData.Name
 }
 
+// computeFileHash returns the SHA-256 hex digest of file content, used to
+// detect content changes across re-indexing runs. Returns "" for empty
+// content.
+func computeFileHash(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+	h := sha256.Sum256(content)
+	return hex.EncodeToString(h[:])
+}
+
 // createFileNode creates a file node in Neo4j
 func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, serviceID string) (string, error) {
 	nodeKey := models.FileNodeKey(si.serviceName, file.Path)
 
-	// Compute file hash from content
-	hash := ""
 	var content []byte
 
 	// Resolve the file path once (consistent key for all uses)
@@ -748,11 +758,7 @@ func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, se
 		si.fileContentCache[resolvedPath] = content
 	}
 
-	// Compute SHA-256 hash if content was successfully read
-	if len(content) > 0 {
-		h := sha256.Sum256(content)
-		hash = hex.EncodeToString(h[:])
-	}
+	hash := computeFileHash(content)
 
 	fileProps := map[string]any{
 		"path":         file.Path,
@@ -1365,7 +1371,6 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	return nil
 }
 
-
 // SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
 func (si *SCIPIndexer) SetSCIPBinary(binary string) {
 	si.langConfig.SCIPBinary = binary
@@ -1427,12 +1432,12 @@ func (si *SCIPIndexer) SetBenchmarkTimer(timer PipelineTimer) {
 func (si *SCIPIndexer) createPullRequestNode(ctx context.Context, prID, title string) (string, error) {
 	nodeKey := models.PullRequestNodeKey(prID)
 	props := map[string]any{
-		"prId":      prID,
-		"title":     title,
-		"status":    "open",
-		"nodeKey":   nodeKey,
-		"scope":     si.scopeCtx.Scope,
-		"scopeId":   si.scopeCtx.ScopeID,
+		"prId":    prID,
+		"title":   title,
+		"status":  "open",
+		"nodeKey": nodeKey,
+		"scope":   si.scopeCtx.Scope,
+		"scopeId": si.scopeCtx.ScopeID,
 	}
 
 	id, err := si.client.MergeNode(ctx, []string{"PullRequest"},
@@ -1489,7 +1494,11 @@ func (si *SCIPIndexer) resolvePath(filePath string) string {
 	return filepath.Join(si.projectPath, filePath)
 }
 
-// calculateByteOffsets calculates the start and end byte positions for a code location
+// calculateByteOffsets calculates the start and end byte positions for a code
+// location. startLine/endLine are 1-based (the graph-wide convention — see
+// convertRange's doc comment); startColumn/endColumn are 0-based, matching
+// SCIP. Returns (-1, -1) if the file can't be read or the line range is out
+// of bounds.
 func (si *SCIPIndexer) calculateByteOffsets(filePath string, startLine, startColumn, endLine, endColumn int) (int, int) {
 	// Resolve relative paths using projectPath
 	resolvedPath := si.resolvePath(filePath)

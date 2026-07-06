@@ -28,15 +28,15 @@ const (
 
 // IndexerRelease describes a downloadable SCIP indexer binary.
 type IndexerRelease struct {
-	Language  Language
-	Binary    string            // e.g. "scip-go"
-	Version   string            // e.g. "v0.1.26"
-	Method    InstallMethod     // primary install method
-	URL       string            // for binary downloads
-	Checksums map[string]string // SHA-256 hex keyed by "os/arch"
-	Package   string            // npm package name or Maven coordinate
-	MainClass string            // for coursier (Java)
-	FallbackCmd string          // fallback install command (e.g. go install ...)
+	Language    Language
+	Binary      string            // e.g. "scip-go"
+	Version     string            // e.g. "v0.1.26"
+	Method      InstallMethod     // primary install method
+	URL         string            // for binary downloads
+	Checksums   map[string]string // SHA-256 hex keyed by "os/arch"
+	Package     string            // npm package name or Maven coordinate
+	MainClass   string            // for coursier (Java)
+	FallbackCmd string            // fallback install command (e.g. go install ...)
 }
 
 // DefaultReleases returns the known-good release definitions for each language.
@@ -71,11 +71,11 @@ func DefaultReleases() []IndexerRelease {
 			Package:  "@sourcegraph/scip-python",
 		},
 		{
-			Language: LanguageJava,
-			Binary:   "scip-java",
-			Version:  "0.8.23",
-			Method:   InstallCoursier,
-			Package:  "com.sourcegraph:scip-java_2.13",
+			Language:  LanguageJava,
+			Binary:    "scip-java",
+			Version:   "0.8.23",
+			Method:    InstallCoursier,
+			Package:   "com.sourcegraph:scip-java_2.13",
 			MainClass: "com.sourcegraph.scip_java.ScipJava",
 		},
 		{

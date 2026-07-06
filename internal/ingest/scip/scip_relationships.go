@@ -12,8 +12,9 @@ import (
 // with boolean flags matching the SCIP protocol.
 //
 // For implementation relationships (IsImplementation=true):
-//   FromSymbol is the concrete type/method that implements
-//   ToSymbol is the interface type/method being implemented
+//
+//	FromSymbol is the concrete type/method that implements
+//	ToSymbol is the interface type/method being implemented
 type SCIPRelationship struct {
 	FromSymbol       string // SCIP symbol string of the declaring symbol
 	ToSymbol         string // SCIP symbol string of the target symbol

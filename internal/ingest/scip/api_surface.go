@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
 )
 
 // APISurfaceDetector identifies API surface using purely graph-structural
@@ -14,9 +14,9 @@ import (
 // cross-package call edges, and export status to determine which functions
 // constitute the project's API boundary.
 type APISurfaceDetector struct {
-	client       *neo4j.Client
+	client        *neo4j.Client
 	projectModule string // Go module path (e.g., "github.com/context-maximiser/code-graph")
-	scopeCtx     models.ScopeContext
+	scopeCtx      models.ScopeContext
 }
 
 // NewAPISurfaceDetector creates a new structural API surface detector.

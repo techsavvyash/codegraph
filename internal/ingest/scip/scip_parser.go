@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/context-maximiser/code-graph/internal/model"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/sourcegraph/scip/bindings/go/scip"
 	"google.golang.org/protobuf/proto"
 )
@@ -103,12 +103,12 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 			endLine, endColumn := convertRange(occurrence.Range, false)
 
 			ref := &models.SymbolReference{
-				Symbol:      scipSymbol,
-				FilePath:    filePath,
-				StartLine:   startLine,
-				EndLine:     endLine,
-				StartColumn: startColumn,
-				EndColumn:   endColumn,
+				Symbol:       scipSymbol,
+				FilePath:     filePath,
+				StartLine:    startLine,
+				EndLine:      endLine,
+				StartColumn:  startColumn,
+				EndColumn:    endColumn,
 				IsDefinition: occurrence.SymbolRoles&int32(scip.SymbolRole_Definition) != 0,
 			}
 
@@ -469,6 +469,18 @@ func extractSignature(symbolInfo *scip.SymbolInformation) string {
 	return symbolInfo.Symbol
 }
 
+// convertRange converts a raw SCIP occurrence range into (line, column).
+//
+// Line convention: SCIP ranges are 0-based on the line axis. This function is
+// the single conversion point for the entire graph — it returns 1-based lines
+// (the editor/AST convention used everywhere else: Go's token.FileSet,
+// findEnclosingCaller's AST body ranges, calculateByteOffsets, etc.). Every
+// downstream consumer of Symbol/Function/Method/Variable/Reference
+// startLine/endLine relies on this having already happened; nothing past this
+// point should add another +1.
+//
+// Column convention: SCIP columns are 0-based and are passed through
+// unchanged — columns are not touched by this conversion.
 func convertRange(scipRange []int32, isStart bool) (int, int) {
 	// SCIP ranges come in two forms:
 	// 3-element: [startLine, startCol, endCol] (single-line span)
@@ -478,15 +490,15 @@ func convertRange(scipRange []int32, isStart bool) (int, int) {
 	}
 
 	if isStart {
-		return int(scipRange[0]), int(scipRange[1])
+		return int(scipRange[0]) + 1, int(scipRange[1])
 	}
 
 	// End position
 	if len(scipRange) == 3 {
 		// Single-line: endLine == startLine, endCol is scipRange[2]
-		return int(scipRange[0]), int(scipRange[2])
+		return int(scipRange[0]) + 1, int(scipRange[2])
 	}
-	return int(scipRange[2]), int(scipRange[3])
+	return int(scipRange[2]) + 1, int(scipRange[3])
 }
 
 func inferLanguage(filePath string) string {
@@ -531,7 +543,7 @@ func (sp *SCIPParser) DebugPrintSCIPFile() error {
 	}
 
 	fmt.Println("=== SCIP Index Debug Output ===")
-	
+
 	// Print metadata
 	if metadata := sp.index.Metadata; metadata != nil {
 		fmt.Printf("Project Root: %s\n", metadata.ProjectRoot)
@@ -555,7 +567,7 @@ func (sp *SCIPParser) DebugPrintSCIPFile() error {
 	for i, doc := range sp.index.Documents {
 		if i < 5 { // Limit output
 			fmt.Printf("  %s (%d occurrences)\n", doc.RelativePath, len(doc.Occurrences))
-			
+
 			// Print first few occurrences
 			for j, occ := range doc.Occurrences {
 				if j < 3 {

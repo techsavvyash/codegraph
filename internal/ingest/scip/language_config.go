@@ -30,14 +30,14 @@ const (
 
 // LanguageConfig holds configuration for a specific language's SCIP indexer
 type LanguageConfig struct {
-	Name            Language
-	DisplayName     string
-	SCIPBinary      string
-	FileExtensions  []string
-	InstallCommand  string
-	InstallDocs     string
-	IndexFlags      []string
-	DetectionFiles  []string // Files that indicate this language (e.g., go.mod, package.json)
+	Name           Language
+	DisplayName    string
+	SCIPBinary     string
+	FileExtensions []string
+	InstallCommand string
+	InstallDocs    string
+	IndexFlags     []string
+	DetectionFiles []string // Files that indicate this language (e.g., go.mod, package.json)
 }
 
 // LanguageRegistry holds all supported language configurations

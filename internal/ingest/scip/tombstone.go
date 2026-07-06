@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/context-maximiser/code-graph/internal/model"
-	"github.com/context-maximiser/code-graph/internal/graph"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
 // TombstoneCreator handles creating tombstone nodes for PR overlays.
