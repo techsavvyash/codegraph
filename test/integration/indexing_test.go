@@ -9,6 +9,7 @@ import (
 	"github.com/context-maximiser/code-graph/internal/ingest/scip"
 	"github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -45,16 +46,28 @@ func (s *IndexingTestSuite) SetupSuite() {
 }
 
 func (s *IndexingTestSuite) TearDownSuite() {
+	cypher := `
+		MATCH (n)
+		WHERE n.scopeId = $scope
+		DETACH DELETE n
+	`
+	params := map[string]any{"scope": "itest-indexing"}
+	_, _ = s.client.ExecuteQuery(s.ctx, cypher, params)
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}
 }
 
 func (s *IndexingTestSuite) setupTestSchema() {
-	// Clear existing data
-	_, err := s.client.ExecuteQuery(s.ctx, "MATCH (n) DETACH DELETE n", nil)
+	cypher := `
+		MATCH (n)
+		WHERE n.scopeId = $scope
+		DETACH DELETE n
+	`
+	params := map[string]any{"scope": "itest-indexing"}
+	_, err := s.client.ExecuteQuery(s.ctx, cypher, params)
 	require.NoError(s.T(), err)
-	
+
 	// Create fresh schema
 	schemaManager := schema.NewSchemaManager(s.client)
 	err = schemaManager.CreateSchema(s.ctx)
@@ -63,9 +76,10 @@ func (s *IndexingTestSuite) setupTestSchema() {
 
 func (s *IndexingTestSuite) TestCodeIndexingIntegration() {
 	s.T().Log("Testing complete code indexing integration")
-	
-	// Create SCIP indexer
-	scipIndexer := static.NewSCIPIndexer(s.client, "test-service", "v1.0.0", "https://github.com/test/repo")
+
+	// Create SCIP indexer with test-scoped service name
+	scipIndexer := static.NewSCIPIndexer(s.client, "itest-indexing", "v1.0.0", "https://github.com/test/repo")
+	scipIndexer.SetScope(models.ScopeContext{Scope: "main", ScopeID: "itest-indexing"})
 	
 	// Validate environment first
 	err := scipIndexer.ValidateEnvironment()

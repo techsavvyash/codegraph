@@ -11,10 +11,13 @@ import (
 	"github.com/context-maximiser/code-graph/internal/ingest/scip"
 	"github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+const systemTestSuiteScopeID = "itest-system"
 
 // SystemTestSuite tests the complete system functionality
 type SystemTestSuite struct {
@@ -49,8 +52,14 @@ func (s *SystemTestSuite) SetupSuite() {
 }
 
 func (s *SystemTestSuite) setupIndexedData() {
-	// Clear database for a clean slate
-	_, err := s.client.ExecuteQuery(s.ctx, "MATCH (n) DETACH DELETE n", nil)
+	// Clear test-specific data first (in case a previous run crashed)
+	cypher := `
+		MATCH (n)
+		WHERE n.scopeId = $scope
+		DETACH DELETE n
+	`
+	params := map[string]any{"scope": systemTestSuiteScopeID}
+	_, err := s.client.ExecuteQuery(s.ctx, cypher, params)
 	require.NoError(s.T(), err)
 
 	// Create schema indexes
@@ -60,7 +69,8 @@ func (s *SystemTestSuite) setupIndexedData() {
 
 	// Index the current project (../../ relative to test/integration/) using
 	// the SCIP indexer to populate Function/Method/File/Symbol nodes.
-	indexer := static.NewSCIPIndexer(s.client, "system-test-service", "v1.0.0", "")
+	indexer := static.NewSCIPIndexer(s.client, "itest-system", "v1.0.0", "")
+	indexer.SetScope(models.ScopeContext{Scope: "main", ScopeID: systemTestSuiteScopeID})
 	if err := indexer.ValidateEnvironment(); err != nil {
 		s.T().Logf("Warning: SCIP environment unavailable, skipping indexing: %v", err)
 		return
@@ -73,6 +83,13 @@ func (s *SystemTestSuite) setupIndexedData() {
 }
 
 func (s *SystemTestSuite) TearDownSuite() {
+	cypher := `
+		MATCH (n)
+		WHERE n.scopeId = $scope
+		DETACH DELETE n
+	`
+	params := map[string]any{"scope": systemTestSuiteScopeID}
+	_, _ = s.client.ExecuteQuery(s.ctx, cypher, params)
 	if s.client != nil {
 		s.client.Close(s.ctx)
 	}

@@ -77,7 +77,7 @@ func RunSelfBenchmark(ctx context.Context, cfg SelfBenchmarkConfig, client *neo4
 
 	// 2. Wipe database.
 	log.Printf("[self-benchmark] Wiping database...")
-	if err := wipeDatabase(ctx, client); err != nil {
+	if err := wipeDatabase(ctx, client, cfg.ServiceName); err != nil {
 		return nil, fmt.Errorf("failed to wipe database: %w", err)
 	}
 
@@ -265,14 +265,22 @@ func detectGitCommit(repoRoot string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func wipeDatabase(ctx context.Context, client *neo4j.Client) error {
+func wipeDatabase(ctx context.Context, client *neo4j.Client, serviceName string) error {
+	// Only wipe nodes created by this benchmark run's service.
+	// This preserves all other data in the shared database (developer indexes, other benchmarks, etc).
+	// Note: some shared nodes (Class/Interface/Module) may merge on FQN across services and don't carry
+	// serviceName — those will be left behind and accumulate across runs. If this becomes an issue,
+	// either switch benchmarks to use a unique, timestamped serviceName, or migrate those node types
+	// to carry serviceName for proper scoping.
 	query := `
 		MATCH (n)
+		WHERE n.serviceName = $service OR (n:Service AND n.name = $service)
 		CALL {
 			WITH n
 			DETACH DELETE n
 		} IN TRANSACTIONS OF 1000 ROWS
 	`
-	_, err := client.ExecuteQuery(ctx, query, nil)
+	params := map[string]any{"service": serviceName}
+	_, err := client.ExecuteQuery(ctx, query, params)
 	return err
 }
