@@ -35,6 +35,14 @@ const (
 
 	// Async / Message Queue Relationships
 	ConsumesFromRel RelationshipType = "CONSUMES_FROM"
+	// EmitsEventRel connects an OutboxCall publish site to the EventType hub node it
+	// broadcasts on. Written by the event detector during indexing. Carries destQueue,
+	// destService and transport so a traversal knows the next hop without extra lookups.
+	EmitsEventRel RelationshipType = "EMITS_EVENT"
+	// RoutedToRel connects an EventType hub to the concrete listener/handler Function in
+	// the consuming service. Written by ResolveCrossServiceHandlersStage after all
+	// services are indexed. Carries service, tier ("entry"|"handler") and confidence.
+	RoutedToRel RelationshipType = "ROUTED_TO"
 	// Deprecated: noise — not written during call-graph indexing; cron trigger has no value in RPC context
 	ScheduledByRel RelationshipType = "SCHEDULED_BY"
 
@@ -229,6 +237,25 @@ type ResolvesToRelationship struct {
 	ResolutionMethod string  `json:"resolutionMethod" neo4j:"resolutionMethod"` // "proto_matched", "http_route_matched", "heuristic"
 }
 
+// EmitsEventRelationship connects an OutboxCall publish site to the EventType hub it
+// broadcasts on. DestService lets a traversal jump straight to the consuming service.
+type EmitsEventRelationship struct {
+	BaseRelationship
+	Transport   string `json:"transport" neo4j:"transport"`     // "sqs", "kafka", "nats", "outbox"
+	DestQueue   string `json:"destQueue" neo4j:"destQueue"`     // resolved queue/topic, e.g. "queue.event.event"
+	DestService string `json:"destService" neo4j:"destService"` // owning service of destQueue, e.g. "event"
+}
+
+// RoutedToRelationship connects an EventType hub to the concrete listener/handler
+// Function/Method in the consuming service. Tier is "entry" (the SQS listener entry,
+// confidence 1.0) or "handler" (best-effort per-event handler, confidence ~0.8).
+type RoutedToRelationship struct {
+	BaseRelationship
+	Service    string  `json:"service" neo4j:"service"`
+	Tier       string  `json:"tier" neo4j:"tier"`
+	Confidence float64 `json:"confidence" neo4j:"confidence"`
+}
+
 // RelationshipFactory creates relationships from type and properties
 func RelationshipFactory(relType RelationshipType, startID, endID string, props map[string]any) interface{} {
 	base := BaseRelationship{
@@ -275,6 +302,10 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &InTxRelationship{BaseRelationship: base}
 	case ResolvesToRel:
 		return &ResolvesToRelationship{BaseRelationship: base}
+	case EmitsEventRel:
+		return &EmitsEventRelationship{BaseRelationship: base}
+	case RoutedToRel:
+		return &RoutedToRelationship{BaseRelationship: base}
 	case TransitiveCallsAPIRel:
 		return &TransitiveCallsAPIRelationship{BaseRelationship: base}
 	case DefinesMethodRel:

@@ -60,7 +60,108 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 	total := grpcCount + unlinkedCount + httpCount
 	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (%d gRPC-linked, %d gRPC-unlinked, %d HTTP)",
 		total, grpcCount, unlinkedCount, httpCount)
+
+	// Async pass: link EventType hubs to their listener/handler functions via ROUTED_TO.
+	asyncCount, err := r.resolveAsyncConsumers(ctx)
+	if err != nil {
+		log.Printf("[CrossServiceResolver] async resolution error: %v", err)
+	}
+	log.Printf("[CrossServiceResolver] Wrote %d ROUTED_TO edges (async event listeners/handlers)", asyncCount)
+
 	return total, nil
+}
+
+// resolveAsyncConsumers links each EventType hub to the concrete listener/handler functions
+// in its consuming service(s), mirroring the two-tier gRPC/HTTP resolution:
+//
+//   - Tier 1 (confidence 1.0): the SQS listener entry. For every distinct destQueue that an
+//     EventType is emitted to, find the function marked listensOnQueue = destQueue and write
+//     ROUTED_TO {tier:'entry'}. This is always correct — the queue→listener binding is exact.
+//   - Tier 2 (confidence 0.8, best-effort): the precise per-event handler. Within destService,
+//     find a function whose handlesEvents list contains the event name and write
+//     ROUTED_TO {tier:'handler'}. Skipped silently when nothing matches (e.g. dynamic hubs).
+func (r *CrossServiceHandlerResolver) resolveAsyncConsumers(ctx context.Context) (int, error) {
+	written := 0
+
+	// Tier 1 — listener entry (per distinct destQueue an event is emitted to).
+	entryQuery := `
+		MATCH (oc:OutboxCall)-[e:EMITS_EVENT]->(et:EventType)
+		WITH DISTINCT et, e.destQueue AS destQueue, e.destService AS destService
+		WHERE destQueue IS NOT NULL AND destQueue <> ''
+		MATCH (f)
+		WHERE (f:Function OR f:Method) AND f.listensOnQueue = destQueue
+		RETURN elementId(et) AS etId, elementId(f) AS fId,
+		       coalesce(destService, f.listensService, '') AS service
+	`
+	entryRows, err := r.client.ExecuteQuery(ctx, entryQuery, map[string]any{})
+	if err != nil {
+		return written, fmt.Errorf("resolveAsyncConsumers: entry query: %w", err)
+	}
+	for _, row := range entryRows {
+		rm := row.AsMap()
+		etId := getString(rm, "etId")
+		fId := getString(rm, "fId")
+		if etId == "" || fId == "" {
+			continue
+		}
+		if err := r.writeRoutedToEdge(ctx, etId, fId, getString(rm, "service"), "entry", 1.0); err != nil {
+			log.Printf("[CrossServiceResolver] ROUTED_TO(entry) write failed (%s → %s): %v", etId, fId, err)
+			continue
+		}
+		written++
+	}
+
+	// Tier 2 — precise per-event handler (best-effort; static events only).
+	handlerQuery := `
+		MATCH (oc:OutboxCall)-[e:EMITS_EVENT]->(et:EventType)
+		WHERE coalesce(et.dynamic, false) = false
+		WITH DISTINCT et, et.eventType AS event, e.destService AS destService
+		WHERE destService IS NOT NULL AND destService <> ''
+		MATCH (svc:Service {name: destService})-[:CONTAINS*1..5]->(f)
+		WHERE (f:Function OR f:Method) AND f.handlesEvents IS NOT NULL AND event IN f.handlesEvents
+		RETURN elementId(et) AS etId, elementId(f) AS fId, destService AS service
+	`
+	handlerRows, err := r.client.ExecuteQuery(ctx, handlerQuery, map[string]any{})
+	if err != nil {
+		return written, fmt.Errorf("resolveAsyncConsumers: handler query: %w", err)
+	}
+	for _, row := range handlerRows {
+		rm := row.AsMap()
+		etId := getString(rm, "etId")
+		fId := getString(rm, "fId")
+		if etId == "" || fId == "" {
+			continue
+		}
+		if err := r.writeRoutedToEdge(ctx, etId, fId, getString(rm, "service"), "handler", 0.8); err != nil {
+			log.Printf("[CrossServiceResolver] ROUTED_TO(handler) write failed (%s → %s): %v", etId, fId, err)
+			continue
+		}
+		written++
+	}
+
+	return written, nil
+}
+
+// writeRoutedToEdge merges a ROUTED_TO edge from an EventType hub to a listener/handler.
+func (r *CrossServiceHandlerResolver) writeRoutedToEdge(
+	ctx context.Context,
+	eventTypeId, handlerFuncId, service, tier string,
+	confidence float64,
+) error {
+	now := time.Now().UTC().Unix()
+	_, err := r.client.MergeRelationship(
+		ctx,
+		eventTypeId, handlerFuncId,
+		string(models.RoutedToRel),
+		map[string]any{"tier": tier},
+		map[string]any{
+			"service":    service,
+			"tier":       tier,
+			"confidence": confidence,
+			"resolvedAt": now,
+		},
+	)
+	return err
 }
 
 // resolveGRPC processes GRPCCall → CALLS_SERVICE → Service edges and writes

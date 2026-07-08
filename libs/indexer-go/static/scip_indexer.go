@@ -1430,6 +1430,12 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 
 	eventDet := NewEventCallDetector(si.client, si.serviceName, si.scopeCtx)
 	eventDet.SetCallNodeBuffer(callBuffer)
+	// Repo-level constant + event-emission pre-passes power semantic async event indexing:
+	// they turn "EventGroupSettlement + CharDot + EventActionFailed" into "settlement.failed"
+	// and bridge the switch-relay split between trigger functions and their SQS-send helpers.
+	constRes := newConstResolver(projectPath)
+	eventDet.SetConstResolver(constRes)
+	eventDet.SetEmissionResolver(NewEventEmissionResolver(projectPath, constRes))
 
 	repoSQLMap, sqlScanErr := ScanRepositorySQL(projectPath)
 	if sqlScanErr != nil {

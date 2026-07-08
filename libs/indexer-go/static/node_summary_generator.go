@@ -238,7 +238,8 @@ RETURN n.nodeKey AS nodeKey, s.name AS svc`, params)
 	evRows, err := client.ExecuteQuery(ctx, `
 MATCH (n)-[:CALLS_API]->(ev:OutboxCall)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
-RETURN n.nodeKey AS nodeKey, ev.eventType AS event, ev.queueOrTopic AS topic`, params)
+OPTIONAL MATCH (ev)-[:EMITS_EVENT]->(et:EventType)
+RETURN n.nodeKey AS nodeKey, coalesce(et.eventType, ev.eventType) AS event, ev.queueOrTopic AS topic`, params)
 	if err != nil {
 		return nil, fmt.Errorf("fetch event effects: %w", err)
 	}

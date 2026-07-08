@@ -21,6 +21,7 @@ const (
 	GRPCCallNode   NodeType = "GRPCCall"
 	HTTPCallNode   NodeType = "HTTPCall"
 	OutboxCallNode NodeType = "OutboxCall"
+	EventTypeNode  NodeType = "EventType"
 	DBCallNode     NodeType = "DBCall"
 	CommentNode          NodeType = "Comment"
 	FlowNode             NodeType = "Flow"
@@ -210,14 +211,36 @@ type HTTPCall struct {
 }
 
 // OutboxCall represents a message publish/enqueue site (outbox, SQS, Kafka, NATS, etc.).
+//
+// EventType now holds the SEMANTIC event name ("settlement.failed") rather than the queue
+// env-var name, split into EventGroup/EventAction. DestQueue is the resolved queue string
+// ("queue.event.event") and DestService its owning service ("event"). Dynamic is true when
+// the action could not be resolved statically (e.g. "payout.*" from a runtime status var).
 type OutboxCall struct {
 	BaseNode
 	CallerService string `json:"callerService"  neo4j:"callerService"`
 	Transport     string `json:"transport"      neo4j:"transport"`
 	EventType     string `json:"eventType"      neo4j:"eventType"`
+	EventGroup    string `json:"eventGroup"     neo4j:"eventGroup"`
+	EventAction   string `json:"eventAction"    neo4j:"eventAction"`
 	QueueOrTopic  string `json:"queueOrTopic"   neo4j:"queueOrTopic"`
+	DestQueue     string `json:"destQueue"      neo4j:"destQueue"`
+	DestService   string `json:"destService"    neo4j:"destService"`
+	Dynamic       bool   `json:"dynamic"        neo4j:"dynamic"`
 	FilePath      string `json:"filePath"       neo4j:"filePath"`
 	Line          int    `json:"line"           neo4j:"line"`
+}
+
+// EventType is the shared "channel" hub node for an async event name. Every producer that
+// broadcasts "settlement.failed" and every listener tuned to it connect to the SAME node,
+// making "who touches this event?" a one-hop query. Group-fallback hubs (action unresolved)
+// use eventType "<group>.*" with Dynamic=true.
+type EventType struct {
+	BaseNode
+	EventType string `json:"eventType" neo4j:"eventType"` // "settlement.failed" or "payout.*"
+	Group     string `json:"group"     neo4j:"group"`     // "settlement"
+	Action    string `json:"action"    neo4j:"action"`    // "failed" ("" for group-fallback)
+	Dynamic   bool   `json:"dynamic"   neo4j:"dynamic"`   // true when action is a runtime value
 }
 
 // DBCall represents a database query call site within a function body.
@@ -437,6 +460,10 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case OutboxCallNode:
 		return &OutboxCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case EventTypeNode:
+		return &EventType{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case DBCallNode:

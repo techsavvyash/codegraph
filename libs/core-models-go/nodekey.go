@@ -119,6 +119,23 @@ func SDKCallNodeKey(target string) string {
 	return "sdkcall:" + target
 }
 
+// EventTypeNodeKey returns "eventtype:{group}.{action}" — the shared channel hub key.
+// It is deliberately NOT service-scoped so producers and consumers across services share
+// one node. When action is empty (group-fallback), the key is "eventtype:{group}.*".
+func EventTypeNodeKey(group, action string) string {
+	if action == "" {
+		return "eventtype:" + group + ".*"
+	}
+	return "eventtype:" + group + "." + action
+}
+
+// OutboxCallNodeKey returns "outboxcall:{service}:{filePath}:{transport}:{event}:{line}".
+// Service-scoped (path-derived) so identical relative paths in different services stay
+// distinct. `event` is the semantic event name (or "dynamic"/queue name for non-Async sends).
+func OutboxCallNodeKey(service, filePath, transport, event string, line int) string {
+	return fmt.Sprintf("outboxcall:%s:%s:%s:%s:%d", service, filePath, transport, event, line)
+}
+
 // ReferenceNodeKey returns "ref:{service}:{filePath}:{startLine}:{startColumn}".
 func ReferenceNodeKey(service, filePath string, startLine, startColumn int) string {
 	return fmt.Sprintf("ref:%s:%s:%d:%d", service, filePath, startLine, startColumn)

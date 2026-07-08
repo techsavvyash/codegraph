@@ -36,24 +36,11 @@ var sqsPublishMethods = map[string]bool{
 	"SendMessageBatch":       true,
 }
 
-// sqsConsumeMethods are method names that indicate SQS message consumption.
-var sqsConsumeMethods = map[string]bool{
-	"ReceiveMessage":            true,
-	"ReceiveMessageWithContext": true,
-}
-
 // kafkaProduceMethods are Kafka producer method names.
 var kafkaProduceMethods = map[string]bool{
 	"Produce":       true,
 	"WriteMessages": true,
 	"WriteMessage":  true,
-}
-
-// kafkaConsumeMethods are Kafka consumer method names.
-var kafkaConsumeMethods = map[string]bool{
-	"SubscribeTopics": true,
-	"ReadMessage":     true,
-	"Poll":            true,
 }
 
 // natsPublishMethods are NATS publish method names.
@@ -63,22 +50,23 @@ var natsPublishMethods = map[string]bool{
 	"PublishRequest": true,
 }
 
-// natsSubscribeMethods are NATS subscribe method names.
-var natsSubscribeMethods = map[string]bool{
-	"Subscribe":      true,
-	"QueueSubscribe": true,
-	"ChanSubscribe":  true,
-}
-
-// EventCallDetector detects outbound async event publishes (outbox, SQS, Kafka, NATS)
-// and consumer-side registrations. Writes OutboxCall nodes with CALLS_API edges and
-// CONSUMES_FROM edges between consumers and matching OutboxCall nodes.
+// EventCallDetector detects outbound async event publishes and consumer-side listener
+// bindings. For Tazapay's uniform SQS/AsyncMessage pattern it writes semantic OutboxCall
+// nodes, shared EventType hubs, EMITS_EVENT edges and CALLS_API edges (driven by the
+// repo-level EventEmissionResolver). Generic Kafka/NATS/field-SQS/outbox-func publishes still
+// produce coarse OutboxCall nodes. On the consumer side it marks SQS listener-entry functions
+// and per-event handler functions so the cross-service resolver can write ROUTED_TO edges.
 type EventCallDetector struct {
 	client      *neo4j.Client
 	serviceName string
 	scopeCtx    models.ScopeContext
 	fset        *token.FileSet
 	callBuffer  *callNodeBuffer
+
+	// consts resolves compile-time string constants/queue names within this service repo.
+	consts *constResolver
+	// emissions holds the pre-computed producer→event attributions for this service repo.
+	emissions *EventEmissionResolver
 
 	// varTransportMap: local var name → transport type ("sqs", "kafka", "kafka-consumer", "nats").
 	// Reset per function — never reused across function boundaries.
@@ -100,8 +88,19 @@ func (d *EventCallDetector) SetCallNodeBuffer(buf *callNodeBuffer) {
 	d.callBuffer = buf
 }
 
-// DetectInFunction walks funcDecl looking for async event publish and consume sites,
-// then writes OutboxCall nodes plus CALLS_API / CONSUMES_FROM edges.
+// SetConstResolver injects the repo-wide constant resolver (queue/event name resolution).
+func (d *EventCallDetector) SetConstResolver(c *constResolver) {
+	d.consts = c
+}
+
+// SetEmissionResolver injects the pre-computed producer→event attribution index.
+func (d *EventCallDetector) SetEmissionResolver(e *EventEmissionResolver) {
+	d.emissions = e
+}
+
+// DetectInFunction walks funcDecl for async publish sites and listener bindings, writing
+// OutboxCall/EventType nodes and CALLS_API/EMITS_EVENT edges for producers, and marking
+// listener-entry and per-event handler functions for the cross-service resolver.
 func (d *EventCallDetector) DetectInFunction(
 	ctx context.Context,
 	funcDecl *ast.FuncDecl,
@@ -124,7 +123,7 @@ func (d *EventCallDetector) DetectInFunction(
 		return true
 	})
 
-	// Pass 2 — detect publish and consume call expressions.
+	// Pass 2 — generic (non-AsyncMessage) publish detection: Kafka/NATS/field-SQS/outbox funcs.
 	var firstErr error
 	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
 		callExpr, ok := n.(*ast.CallExpr)
@@ -137,15 +136,75 @@ func (d *EventCallDetector) DetectInFunction(
 				firstErr = err
 			}
 		}
-		if err := d.processConsumeCallExpr(ctx, callExpr, callerFuncID, filePath, pos.Line); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
 		return true
 	})
 
+	// Pass 3 — semantic producer writes for Tazapay's SQS/AsyncMessage pattern (precomputed).
+	d.writeEmissions(funcDecl, callerFuncID, filePath)
+
+	// Pass 4 — consumer side: SQS listener-entry bindings + per-event handler marking.
+	d.markListenerBindings(ctx, funcDecl)
+	d.markEventHandler(ctx, funcDecl, callerFuncID)
+
 	return firstErr
+}
+
+// writeEmissions materialises the pre-computed producer→event attributions for this function
+// into the graph: an OutboxCall publish site, a shared EventType hub, a CALLS_API edge from
+// the enclosing function and an EMITS_EVENT edge to the hub.
+func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID, filePath string) {
+	if d.emissions == nil || d.callBuffer == nil {
+		return
+	}
+	for _, em := range d.emissions.EmissionsFor(filePath, funcDecl.Name.Name) {
+		ocKey := models.OutboxCallNodeKey(d.serviceName, filePath, em.transport, em.event, em.line)
+		ocProps := map[string]any{
+			"nodeKey": ocKey,
+			// name is the Neo4j Browser caption: "<callerService>:<group>.<action>",
+			// e.g. "settlement:payout.created" (em.event already holds group.action).
+			"name":          d.serviceName + ":" + em.event,
+			"callerService": d.serviceName,
+			"transport":     em.transport,
+			"eventType":     em.event,
+			"eventGroup":    em.group,
+			"eventAction":   em.action,
+			"queueOrTopic":  em.destQueue,
+			"destQueue":     em.destQueue,
+			"destService":   em.destService,
+			"dynamic":       em.dynamic,
+			"filePath":      filePath,
+			"line":          em.line,
+			"createdAt":     time.Now().UTC().Unix(),
+			"updatedAt":     time.Now().UTC().Unix(),
+		}
+		maps.Copy(ocProps, d.scopeCtx.Props())
+		d.callBuffer.addOutboxCall(ocKey, ocProps)
+		d.callBuffer.addCallsAPIEdge(callerFuncID, ocKey, map[string]any{
+			"line":      em.line,
+			"transport": em.transport,
+		})
+
+		etKey := models.EventTypeNodeKey(em.group, em.action)
+		etProps := map[string]any{
+			"nodeKey": etKey,
+			// name is the Neo4j Browser caption: the full event name "<group>.<action>"
+			// (e.g. "payout.created", or "payout.*" for a dynamic hub).
+			"name":      em.event,
+			"eventType": em.event,
+			"group":     em.group,
+			"action":    em.action,
+			"dynamic":   em.dynamic,
+			"createdAt": time.Now().UTC().Unix(),
+			"updatedAt": time.Now().UTC().Unix(),
+		}
+		maps.Copy(etProps, d.scopeCtx.Props())
+		d.callBuffer.addEventTypeNode(etKey, etProps)
+		d.callBuffer.addEmitsEventEdge(ocKey, etKey, map[string]any{
+			"transport":   em.transport,
+			"destQueue":   em.destQueue,
+			"destService": em.destService,
+		})
+	}
 }
 
 // processTransportAssignment records SQS/Kafka/NATS constructor and composite literal
@@ -239,16 +298,12 @@ func (d *EventCallDetector) processPublishCallExpr(
 		switch recv := sel.X.(type) {
 		case *ast.Ident:
 			// Variable method call or package-level call.
+			// NOTE: Tazapay's queue.SendSQSMsg / SendDelaySQSMsg (AsyncMessage) pattern is
+			// intentionally NOT handled here — it is resolved semantically by the
+			// EventEmissionResolver and materialised in writeEmissions (Pass 3).
 			if outboxFuncNames[sel.Sel.Name] {
 				transport = "outbox"
 				eventType = extractEventTypeArg(callExpr)
-				detected = true
-			} else if recv.Name == "queue" &&
-				(sel.Sel.Name == "SendDelaySQSMsg" || sel.Sel.Name == "SendSQSMsg") {
-				// Tazapay SQS wrapper: queue.SendDelaySQSMsg(ctx, env.Get(svcenv.QueueXxxURL), qMsg, delay)
-				transport = "sqs"
-				queueOrTopic = extractTazapayQueueEnvKey(callExpr)
-				eventType = queueOrTopic
 				detected = true
 			} else if varTransport, tracked := d.varTransportMap[recv.Name]; tracked {
 				switch varTransport {
@@ -348,11 +403,6 @@ func (d *EventCallDetector) processPublishCallExpr(
 			"line":      line,
 			"transport": transport,
 		})
-		if eventType != "dynamic" {
-			if svcID := d.resolveConsumerServiceID(ctx, eventType); svcID != "" {
-				d.callBuffer.addCallsServiceEdge(nodeKey, svcID, map[string]any{"protocol": transport})
-			}
-		}
 		return nil
 	}
 
@@ -371,170 +421,170 @@ func (d *EventCallDetector) processPublishCallExpr(
 		log.Printf("Warning: event detector: CALLS_API edge for %s/%s: %v", transport, eventType, err)
 	}
 
-	// Best-effort: link to a consuming service via CALLS_SERVICE.
-	if eventType != "dynamic" {
-		d.linkProducerToConsumer(ctx, outboxCallID, eventType, transport)
-	}
-
 	return nil
 }
 
-// processConsumeCallExpr detects consumer-side patterns, marks the caller function with
-// consumesEvent/consumesTransport properties, and writes CONSUMES_FROM edges to matching
-// OutboxCall nodes from other services.
-func (d *EventCallDetector) processConsumeCallExpr(
-	ctx context.Context,
-	callExpr *ast.CallExpr,
-	callerFuncID, _ string,
-	_ int,
-) error {
-	var transport, eventType string
-	detected := false
-
-	sel, ok := callExpr.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil
+// markListenerBindings finds server.SQSListener{ QueueURL: <q>, Route: <fn> } composite
+// literals and marks the referenced route-entry function with the queue it listens on. This
+// is the tier-1 anchor the cross-service resolver uses to write a guaranteed ROUTED_TO edge.
+func (d *EventCallDetector) markListenerBindings(ctx context.Context, funcDecl *ast.FuncDecl) {
+	if d.consts == nil {
+		return
 	}
-
-	switch recv := sel.X.(type) {
-	case *ast.Ident:
-		if varTransport, tracked := d.varTransportMap[recv.Name]; tracked {
-			switch varTransport {
-			case "sqs":
-				if sqsConsumeMethods[sel.Sel.Name] {
-					transport = "sqs"
-					eventType = extractQueueStringLiteral(callExpr)
-					detected = true
-				}
-			case "kafka-consumer":
-				if kafkaConsumeMethods[sel.Sel.Name] {
-					transport = "kafka"
-					eventType = extractFirstStringLiteral(callExpr)
-					detected = true
-				}
-			case "nats":
-				if natsSubscribeMethods[sel.Sel.Name] {
-					transport = "nats"
-					eventType = extractStringArg(callExpr, 0)
-					detected = true
-				}
+	// Detect by the presence of both QueueURL and Route fields rather than by the literal's
+	// type name. In real code the binding is written as an elided element inside a slice —
+	// `[]*server.SQSListener{ {QueueURL: ..., Route: ...} }` — where the inner composite
+	// literal carries no explicit type (cl.Type is nil), so a type-name check never fires.
+	// The QueueURL+Route field pairing is distinctive enough to identify the binding.
+	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+		cl, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		var queueURL, routeFn string
+		var hasQueue, hasRoute bool
+		for _, elt := range cl.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			switch key.Name {
+			case "QueueURL":
+				hasQueue = true
+				queueURL = d.resolveQueueExpr(kv.Value)
+			case "Route":
+				hasRoute = true
+				routeFn = routeFuncName(kv.Value)
 			}
 		}
-
-	case *ast.SelectorExpr:
-		fieldLower := strings.ToLower(recv.Sel.Name)
-		switch {
-		case strings.Contains(fieldLower, "sqs") && sqsConsumeMethods[sel.Sel.Name]:
-			transport = "sqs"
-			eventType = extractQueueStringLiteral(callExpr)
-			detected = true
-		case (strings.Contains(fieldLower, "kafka") || strings.Contains(fieldLower, "consumer")) &&
-			kafkaConsumeMethods[sel.Sel.Name]:
-			transport = "kafka"
-			detected = true
-		case strings.Contains(fieldLower, "nats") && natsSubscribeMethods[sel.Sel.Name]:
-			transport = "nats"
-			eventType = extractStringArg(callExpr, 0)
-			detected = true
+		if !hasQueue || !hasRoute {
+			return true
 		}
-	}
+		if queueURL != "" && routeFn != "" {
+			d.markListenerEntry(ctx, routeFn, queueURL)
+		}
+		return true
+	})
+}
 
-	if !detected {
+// markListenerEntry sets listensOnQueue / listensService on the named route-entry function
+// within this service.
+func (d *EventCallDetector) markListenerEntry(ctx context.Context, routeFn, queueURL string) {
+	if _, err := d.client.ExecuteQuery(ctx, `
+		MATCH (svc:Service {name: $svc})-[:CONTAINS*1..5]->(f)
+		WHERE (f:Function OR f:Method)
+		  AND (f.name = $fn OR f.name STARTS WITH ($fn + '('))
+		SET f.listensOnQueue = $queue, f.listensService = $svc
+	`, map[string]any{
+		"svc":   d.serviceName,
+		"fn":    routeFn,
+		"queue": queueURL,
+	}); err != nil {
+		log.Printf("Warning: event detector: mark listener entry %s/%s: %v", routeFn, queueURL, err)
+	}
+}
+
+// markEventHandler is the best-effort tier-2 signal. Tazapay's event router splits dispatch
+// into "<group>ActionRoute" functions that switch over action constants (e.g.
+// settlementActionRoute → case constants.Failed). We derive the group from the function name,
+// resolve the action constants in its switch cases, and stamp handlesEvents = ["group.action"]
+// on the function so the resolver can attach a precise (lower-confidence) ROUTED_TO edge.
+func (d *EventCallDetector) markEventHandler(ctx context.Context, funcDecl *ast.FuncDecl, callerFuncID string) {
+	group := actionRouteGroup(funcDecl.Name.Name)
+	if group == "" {
+		return
+	}
+	actions := d.collectCaseActions(funcDecl)
+	if len(actions) == 0 {
+		return
+	}
+	events := make([]string, 0, len(actions))
+	for _, a := range actions {
+		events = append(events, group+"."+a)
+	}
+	if _, err := d.client.ExecuteQuery(ctx, `
+		MATCH (f) WHERE elementId(f) = $funcID
+		SET f.handlesEvents = $events, f.handlesEventGroup = $group
+	`, map[string]any{
+		"funcID": callerFuncID,
+		"events": events,
+		"group":  group,
+	}); err != nil {
+		log.Printf("Warning: event detector: set handlesEvents on %s: %v", funcDecl.Name.Name, err)
+	}
+}
+
+// collectCaseActions resolves the constants referenced in a function's switch cases to their
+// string values, keeping only single-token (dot-free) values that look like event actions.
+func (d *EventCallDetector) collectCaseActions(funcDecl *ast.FuncDecl) []string {
+	if d.consts == nil {
 		return nil
 	}
-
-	if eventType == "" {
-		eventType = "dynamic"
-	}
-
-	// Mark the caller function node with consumesEvent so producers can resolve it later.
-	updateCypher := `
-		MATCH (f) WHERE elementId(f) = $funcID
-		SET f.consumesEvent = $eventType, f.consumesTransport = $transport
-	`
-	if _, err := d.client.ExecuteQuery(ctx, updateCypher, map[string]any{
-		"funcID":    callerFuncID,
-		"eventType": eventType,
-		"transport": transport,
-	}); err != nil {
-		log.Printf("Warning: event detector: set consumesEvent on function: %v", err)
-	}
-
-	// Link this consumer function to any already-indexed matching OutboxCall nodes.
-	if eventType != "dynamic" {
-		d.linkConsumerToOutboxCalls(ctx, callerFuncID, eventType, transport)
-	}
-
-	return nil
+	seen := map[string]bool{}
+	var out []string
+	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+		cc, ok := n.(*ast.CaseClause)
+		if !ok {
+			return true
+		}
+		for _, expr := range cc.List {
+			val, static := d.consts.ResolveString(expr)
+			if !static || val == "" || strings.Contains(val, ".") {
+				continue
+			}
+			if !seen[val] {
+				seen[val] = true
+				out = append(out, val)
+			}
+		}
+		return true
+	})
+	return out
 }
 
-func (d *EventCallDetector) resolveConsumerServiceID(ctx context.Context, eventType string) string {
-	cypher := `
-		MATCH (f)
-		WHERE f.consumesEvent = $eventType
-		  AND (f:Function OR f:Method)
-		MATCH (svc:Service)-[:CONTAINS]->(file:File)-[:CONTAINS]->(f)
-		WHERE svc.name <> $serviceName
-		RETURN elementId(svc) AS svcID
-		LIMIT 1
-	`
-	results, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"eventType":   eventType,
-		"serviceName": d.serviceName,
-	})
-	if err != nil || len(results) == 0 {
+// resolveQueueExpr resolves a listener QueueURL expression to its queue string, unwrapping
+// env.Get(...) wrappers.
+func (d *EventCallDetector) resolveQueueExpr(expr ast.Expr) string {
+	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) >= 1 {
+		return d.resolveQueueExpr(call.Args[0])
+	}
+	if d.consts == nil {
 		return ""
 	}
-	return getStringFromMap(results[0].AsMap(), "svcID")
+	val, _ := d.consts.ResolveString(expr)
+	return val
 }
 
-// linkProducerToConsumer finds a consuming service for the given eventType and writes a
-// CALLS_SERVICE edge from the OutboxCall node to that service.
-func (d *EventCallDetector) linkProducerToConsumer(ctx context.Context, outboxCallID, eventType, transport string) {
-	svcID := d.resolveConsumerServiceID(ctx, eventType)
-	if svcID == "" {
-		return
+// routeFuncName extracts the handler function name from an SQSListener Route field value,
+// which is typically a call (sqs.GetEventRoutes()) but may be a selector or bare identifier.
+func routeFuncName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.CallExpr:
+		return calleeName(e)
+	case *ast.SelectorExpr:
+		return e.Sel.Name
+	case *ast.Ident:
+		return e.Name
 	}
-	if _, err := d.client.MergeRelationship(ctx,
-		outboxCallID, svcID,
-		string(models.CallsServiceRel),
-		map[string]any{},
-		map[string]any{"protocol": transport},
-	); err != nil {
-		log.Printf("Warning: event detector: CALLS_SERVICE edge for %s: %v", eventType, err)
-	}
+	return ""
 }
 
-// linkConsumerToOutboxCalls finds OutboxCall nodes in other services that publish the
-// given eventType and writes CONSUMES_FROM edges from the consumer function to each.
-func (d *EventCallDetector) linkConsumerToOutboxCalls(ctx context.Context, callerFuncID, eventType, transport string) {
-	cypher := `
-		MATCH (oc:OutboxCall {eventType: $eventType})
-		WHERE oc.callerService <> $serviceName
-		RETURN elementId(oc) AS ocID
-		LIMIT 20
-	`
-	results, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"eventType":   eventType,
-		"serviceName": d.serviceName,
-	})
-	if err != nil {
-		return
+// actionRouteGroup returns the lowercase event group encoded in a "<group>ActionRoute"
+// function name (e.g. "settlementActionRoute" → "settlement"), or "" if it doesn't match.
+func actionRouteGroup(name string) string {
+	const suffix = "ActionRoute"
+	if !strings.HasSuffix(name, suffix) {
+		return ""
 	}
-	for _, row := range results {
-		ocID, _ := row.AsMap()["ocID"].(string)
-		if ocID == "" {
-			continue
-		}
-		if _, err := d.client.MergeRelationship(ctx,
-			callerFuncID, ocID,
-			string(models.ConsumesFromRel),
-			map[string]any{},
-			map[string]any{"transport": transport, "eventType": eventType},
-		); err != nil {
-			log.Printf("Warning: event detector: CONSUMES_FROM edge for %s: %v", eventType, err)
-		}
+	prefix := name[:len(name)-len(suffix)]
+	if prefix == "" {
+		return ""
 	}
+	return strings.ToLower(prefix)
 }
 
 // extractEventTypeArg returns the first string literal in the call that is not a context
@@ -584,31 +634,6 @@ func extractQueueStringLiteral(callExpr *ast.CallExpr) string {
 		return true
 	})
 	return found
-}
-
-// extractTazapayQueueEnvKey extracts the svcenv constant name from the second argument of
-// queue.SendDelaySQSMsg / queue.SendSQSMsg calls.
-//
-// Pattern: queue.SendDelaySQSMsg(ctx, env.Get(svcenv.QueueEventURL), qMsg, delay)
-// Returns "QueueEventURL" (the constant selector name).
-func extractTazapayQueueEnvKey(callExpr *ast.CallExpr) string {
-	// Second arg (index 1) is env.Get(svcenv.QueueXxxURL)
-	if len(callExpr.Args) < 2 {
-		return "dynamic"
-	}
-	envGetCall, ok := callExpr.Args[1].(*ast.CallExpr)
-	if !ok {
-		return "dynamic"
-	}
-	if len(envGetCall.Args) == 0 {
-		return "dynamic"
-	}
-	// Arg to env.Get is svcenv.QueueXxxURL — a SelectorExpr
-	sel, ok := envGetCall.Args[0].(*ast.SelectorExpr)
-	if !ok {
-		return "dynamic"
-	}
-	return sel.Sel.Name // "QueueEventURL"
 }
 
 // extractFirstStringLiteral returns the first string literal found anywhere in the call

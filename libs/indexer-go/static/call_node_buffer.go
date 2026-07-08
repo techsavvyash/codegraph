@@ -21,6 +21,13 @@ type bufferedServiceEdge struct {
 	props       map[string]any
 }
 
+// bufferedBothNodeKeyEdge links two buffered nodes, both matched by nodeKey (within scope).
+type bufferedBothNodeKeyEdge struct {
+	fromNodeKey string
+	toNodeKey   string
+	props       map[string]any
+}
+
 // callNodeBuffer batches call-node writes and their relationships across detector passes.
 type callNodeBuffer struct {
 	scopeID string
@@ -28,11 +35,13 @@ type callNodeBuffer struct {
 	grpcCalls   map[string]map[string]any // nodeKey -> set props
 	httpCalls   map[string]map[string]any
 	outboxCalls map[string]map[string]any
+	eventTypes  map[string]map[string]any // nodeKey -> set props (shared channel hubs)
 	dbCalls     map[string]map[string]any
 
-	callsAPI map[string]bufferedNodeEdge    // fromID + toNodeKey
-	callsDB  map[string]bufferedNodeEdge    // fromID + toNodeKey
-	callsSvc map[string]bufferedServiceEdge // fromNodeKey + toID
+	callsAPI   map[string]bufferedNodeEdge         // fromID + toNodeKey
+	callsDB    map[string]bufferedNodeEdge         // fromID + toNodeKey
+	callsSvc   map[string]bufferedServiceEdge      // fromNodeKey + toID
+	emitsEvent map[string]bufferedBothNodeKeyEdge  // OutboxCall nodeKey → EventType nodeKey
 }
 
 func newCallNodeBuffer(scopeID string) *callNodeBuffer {
@@ -41,10 +50,12 @@ func newCallNodeBuffer(scopeID string) *callNodeBuffer {
 		grpcCalls:   make(map[string]map[string]any),
 		httpCalls:   make(map[string]map[string]any),
 		outboxCalls: make(map[string]map[string]any),
+		eventTypes:  make(map[string]map[string]any),
 		dbCalls:     make(map[string]map[string]any),
 		callsAPI:    make(map[string]bufferedNodeEdge),
 		callsDB:     make(map[string]bufferedNodeEdge),
 		callsSvc:    make(map[string]bufferedServiceEdge),
+		emitsEvent:  make(map[string]bufferedBothNodeKeyEdge),
 	}
 }
 
@@ -58,6 +69,23 @@ func (b *callNodeBuffer) addHTTPCall(nodeKey string, props map[string]any) {
 
 func (b *callNodeBuffer) addOutboxCall(nodeKey string, props map[string]any) {
 	b.addNode(b.outboxCalls, nodeKey, props)
+}
+
+func (b *callNodeBuffer) addEventTypeNode(nodeKey string, props map[string]any) {
+	b.addNode(b.eventTypes, nodeKey, props)
+}
+
+// addEmitsEventEdge buffers an EMITS_EVENT edge from an OutboxCall node to an EventType hub.
+func (b *callNodeBuffer) addEmitsEventEdge(fromNodeKey, toNodeKey string, props map[string]any) {
+	if b == nil || fromNodeKey == "" || toNodeKey == "" {
+		return
+	}
+	key := fromNodeKey + "->" + toNodeKey
+	b.emitsEvent[key] = bufferedBothNodeKeyEdge{
+		fromNodeKey: fromNodeKey,
+		toNodeKey:   toNodeKey,
+		props:       maps.Clone(props),
+	}
 }
 
 func (b *callNodeBuffer) addDBCall(nodeKey string, props map[string]any) {
@@ -121,6 +149,9 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 	if err := b.flushNodes(ctx, client, "OutboxCall", b.outboxCalls); err != nil {
 		return err
 	}
+	if err := b.flushNodes(ctx, client, "EventType", b.eventTypes); err != nil {
+		return err
+	}
 	if err := b.flushNodes(ctx, client, "DBCall", b.dbCalls); err != nil {
 		return err
 	}
@@ -131,6 +162,9 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 		return err
 	}
 	if err := b.flushCallsServiceRels(ctx, client, b.callsSvc); err != nil {
+		return err
+	}
+	if err := b.flushRelsByBothNodeKeys(ctx, client, models.EmitsEventRel, b.emitsEvent); err != nil {
 		return err
 	}
 
@@ -215,6 +249,37 @@ func (b *callNodeBuffer) flushCallsServiceRels(
 	return executeBatchedQuery(ctx, client, cypher, batch, b.scopeID)
 }
 
+// flushRelsByBothNodeKeys merges relationships whose endpoints are BOTH matched by nodeKey
+// (within scope) — used for OutboxCall→EventType EMITS_EVENT edges.
+func (b *callNodeBuffer) flushRelsByBothNodeKeys(
+	ctx context.Context,
+	client *neo4j.Client,
+	relType models.RelationshipType,
+	rels map[string]bufferedBothNodeKeyEdge,
+) error {
+	if len(rels) == 0 {
+		return nil
+	}
+
+	batch := make([]map[string]any, 0, len(rels))
+	for _, rel := range rels {
+		batch = append(batch, map[string]any{
+			"fromNodeKey": rel.fromNodeKey,
+			"toNodeKey":   rel.toNodeKey,
+			"props":       rel.props,
+		})
+	}
+
+	cypher := fmt.Sprintf(`
+		UNWIND $batch AS item
+		MATCH (a {nodeKey: item.fromNodeKey, scopeId: $scopeId}), (b {nodeKey: item.toNodeKey, scopeId: $scopeId})
+		MERGE (a)-[r:%s]->(b)
+		SET r += item.props
+	`, relType)
+
+	return executeBatchedQuery(ctx, client, cypher, batch, b.scopeID)
+}
+
 func executeBatchedQuery(ctx context.Context, client *neo4j.Client, cypher string, items []map[string]any, scopeID string) error {
 	if len(items) == 0 {
 		return nil
@@ -240,8 +305,10 @@ func (b *callNodeBuffer) reset() {
 	b.grpcCalls = make(map[string]map[string]any)
 	b.httpCalls = make(map[string]map[string]any)
 	b.outboxCalls = make(map[string]map[string]any)
+	b.eventTypes = make(map[string]map[string]any)
 	b.dbCalls = make(map[string]map[string]any)
 	b.callsAPI = make(map[string]bufferedNodeEdge)
 	b.callsDB = make(map[string]bufferedNodeEdge)
 	b.callsSvc = make(map[string]bufferedServiceEdge)
+	b.emitsEvent = make(map[string]bufferedBothNodeKeyEdge)
 }

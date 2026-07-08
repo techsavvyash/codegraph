@@ -60,6 +60,12 @@ func GetConstraints() []Constraint {
 			Type:      "UNIQUE",
 		},
 		{
+			Name:      "eventtype_nodekey_unique",
+			NodeLabel: "EventType",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
 			Name:      "dbcall_nodekey_unique",
 			NodeLabel: "DBCall",
 			Property:  "nodeKey",
@@ -510,6 +516,25 @@ func GetIndexes() []Index {
 			Name:       "outboxcall_event_scope_idx",
 			NodeLabel:  "OutboxCall",
 			Properties: []string{"eventType", "scopeId"},
+			Type:       "BTREE",
+		},
+		// EventType hub indexes (async event-flow indexing)
+		{
+			Name:       "eventtype_nodekey_scope_idx",
+			NodeLabel:  "EventType",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "eventtype_event_scope_idx",
+			NodeLabel:  "EventType",
+			Properties: []string{"eventType", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "eventtype_group_scope_idx",
+			NodeLabel:  "EventType",
+			Properties: []string{"group", "scopeId"},
 			Type:       "BTREE",
 		},
 		// DBCall indexes (Phase 1 — DBCall Node & Relationship)
