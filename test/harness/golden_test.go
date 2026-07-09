@@ -15,6 +15,7 @@ import (
 	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/test/harness"
+	neo4jdrv "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 )
 
@@ -267,7 +268,17 @@ func deleteFixtureData(ctx context.Context, client *neo4j.Client) error {
 	}
 	params := map[string]any{"services": fixtureServices, "markers": fixtureModuleMarkers}
 	for _, q := range queries {
-		if _, err := client.ExecuteQuery(ctx, q, params); err != nil {
+		// Deletes are idempotent, so retry transient failures (deadlocks,
+		// leader switches). A cleanup that gives up on a transient error
+		// fails the test AND leaves the fixture in the shared database.
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if _, err = client.ExecuteQuery(ctx, q, params); err == nil || !neo4jdrv.IsRetryable(err) {
+				break
+			}
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		if err != nil {
 			return err
 		}
 	}
