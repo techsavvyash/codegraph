@@ -177,6 +177,54 @@ func (g *FlowSpineGenerator) filterGraphSeedsByService(ctx context.Context, seed
 	return filtered, nil
 }
 
+// GenerateFlowFromNode generates a single flow from a specific node (resolved by nodeKey).
+// It uses the node as an anchor and traces its callees up to maxDepth, wrapping the
+// result in a FlowSpineResult with flowType "manual". Returns a single-element slice
+// on success, or an error.
+func (g *FlowSpineGenerator) GenerateFlowFromNode(ctx context.Context, nodeKey, nodeName, nodeLabel string, maxDepth int) ([]FlowSpineResult, error) {
+	if nodeKey == "" {
+		return nil, fmt.Errorf("nodeKey is required")
+	}
+	if maxDepth <= 0 {
+		maxDepth = g.budget.MaxDepth
+	}
+	if maxDepth <= 0 {
+		maxDepth = 2
+	}
+
+	// Build flow spine from the resolved node.
+	steps := []FlowStep{
+		{NodeKey: nodeKey, Name: nodeName, Label: nodeLabel, Order: 0},
+	}
+
+	// Trace callees from the node. Unlike the seed-discovery paths, a caller
+	// explicitly asked for THIS node's flow — a traversal failure is an error,
+	// not something to silently degrade into a single-step flow.
+	callees, err := g.traceCallees(ctx, nodeKey, maxDepth, 1)
+	if err != nil {
+		return nil, fmt.Errorf("trace callees from %s: %w", nodeKey, err)
+	}
+	steps = append(steps, callees...)
+
+	// Deduplicate; the node itself is an anchor so it is never filtered. A
+	// single-step result is returned as-is (leaf nodes have valid flows).
+	steps = g.deduplicateSteps(steps, 1)
+
+	flowNodeKey := models.FlowNodeKey("manual", nodeKey)
+	if err := g.persistFlow(ctx, flowNodeKey, nodeName, "manual", nodeKey, maxDepth, steps); err != nil {
+		return nil, fmt.Errorf("failed to persist flow: %w", err)
+	}
+
+	return []FlowSpineResult{
+		{
+			FlowNodeKey: flowNodeKey,
+			FlowName:    nodeName,
+			FlowType:    "manual",
+			Steps:       steps,
+		},
+	}, nil
+}
+
 // GenerateFlows uses the graph-structural seed finder to discover entry points
 // and build flow spines. Falls back to the heuristic-based approach if no
 // graph-structural seeds are found.

@@ -14,7 +14,7 @@ func (s *CodeGraphMCPServer) resolveNodeID(ctx context.Context, nodeIDArg, name,
 	if nodeIDArg != "" {
 		records, err := s.client.ExecuteQuery(ctx,
 			`MATCH (n) WHERE elementId(n) = $id
-			 RETURN elementId(n) AS node_id, labels(n)[0] AS label,
+			 RETURN elementId(n) AS node_id, n.nodeKey AS node_key, labels(n)[0] AS label,
 			        coalesce(n.name, n.path, '') AS name,
 			        n.fqn AS qualified_name,
 			        n.filePath AS file_path,
@@ -49,7 +49,7 @@ func (s *CodeGraphMCPServer) resolveNodeID(ctx context.Context, nodeIDArg, name,
 	}
 
 	queryStr += `
-RETURN elementId(n) AS node_id, labels(n)[0] AS label,
+RETURN elementId(n) AS node_id, n.nodeKey AS node_key, labels(n)[0] AS label,
        coalesce(n.name, n.path, '') AS name,
        n.fqn AS qualified_name,
        n.filePath AS file_path,

@@ -291,50 +291,19 @@ func (f *GraphSeedFinder) findTopologicalRootSeeds(ctx context.Context) ([]Graph
 // that have no higher-centrality caller in the same component. These are
 // structurally important "gateway" functions.
 func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed, error) {
-	// First check if betweennessCentrality property exists on any node.
-	checkCypher := `
-		MATCH (fn:Function)
-		WHERE fn.betweennessCentrality IS NOT NULL
-		RETURN count(fn) AS cnt LIMIT 1
-	`
-	checkRecords, err := f.client.ExecuteQuery(ctx, checkCypher, nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(checkRecords) == 0 {
-		return nil, nil
-	}
-	cnt := int64Val(checkRecords[0].AsMap(), "cnt")
-	if cnt == 0 {
-		return nil, nil // No centrality data available (GDS not run yet).
-	}
-
-	// Determine threshold: use configured value or compute mean + 1 stddev.
+	// Determine threshold: an explicitly configured value wins; otherwise use
+	// THE shared centrality definition (see ComputeCentralityThreshold) so
+	// this finder and the entry_points tool cannot drift apart.
 	threshold := f.CentralityThreshold
 	if threshold <= 0 {
-		statsCypher := `
-			MATCH (fn)
-			WHERE (fn:Function OR fn:Method)
-			  AND fn.betweennessCentrality IS NOT NULL
-			  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
-			WITH avg(fn.betweennessCentrality) AS mean,
-			     stDev(fn.betweennessCentrality) AS sd
-			RETURN mean + sd AS threshold
-		`
-		statsRecords, err := f.client.ExecuteQuery(ctx, statsCypher, map[string]any{
-			"scopeId": f.scopeCtx.ScopeID,
-		})
+		t, hasData, err := ComputeCentralityThreshold(ctx, f.client, f.scopeCtx.ScopeID)
 		if err != nil {
 			return nil, err
 		}
-		if len(statsRecords) > 0 {
-			if t, ok := statsRecords[0].AsMap()["threshold"].(float64); ok && t > 0 {
-				threshold = t
-			}
+		if !hasData {
+			return nil, nil // No centrality data available (GDS not run yet).
 		}
-		if threshold <= 0 {
-			threshold = 1.0 // fallback minimum
-		}
+		threshold = t
 	}
 
 	// Find high-centrality nodes that have no caller with higher centrality
@@ -398,6 +367,42 @@ func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed,
 		})
 	}
 	return seeds, nil
+}
+
+// ComputeCentralityThreshold is THE high-centrality definition, shared by
+// GraphSeedFinder's Tier 4 seeds and the entry_points MCP tool: a node is
+// highly central when betweennessCentrality > mean + 1 stddev over the scope.
+// hasData is false when no node in the scope carries betweennessCentrality
+// (the GDS metrics stage hasn't run) — callers should treat the tier as empty
+// rather than comparing against the returned fallback.
+func ComputeCentralityThreshold(ctx context.Context, client *neo4j.Client, scopeId string) (threshold float64, hasData bool, err error) {
+	statsCypher := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND fn.betweennessCentrality IS NOT NULL
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		WITH count(fn) AS cnt,
+		     avg(fn.betweennessCentrality) AS mean,
+		     stDev(fn.betweennessCentrality) AS sd
+		RETURN cnt, mean + sd AS threshold
+	`
+	records, err := client.ExecuteQuery(ctx, statsCypher, map[string]any{"scopeId": scopeId})
+	if err != nil {
+		return 0, false, err
+	}
+	if len(records) == 0 {
+		return 0, false, nil
+	}
+	m := records[0].AsMap()
+	if int64Val(m, "cnt") == 0 {
+		return 0, false, nil
+	}
+	if t, ok := m["threshold"].(float64); ok && t > 0 {
+		return t, true, nil
+	}
+	// Degenerate but present data (e.g. all zeros): a tiny positive floor
+	// keeps the > comparison meaningful.
+	return 1.0, true, nil
 }
 
 // labelType extracts "Function" or "Method" from a labels array in a record map.

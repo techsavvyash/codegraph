@@ -193,7 +193,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_flows",
-			Description: "Generate flow spines from entry points using the multi-strategy seed finder + traversal budget. Same algorithm as codegraph_generate_flows but with format=json|text|mermaid (each flow renders as a graph LR chain).",
+			Description: "Generate flow spines. Default: discover entry points via the multi-strategy seed finder and trace each (workspace-filtered). With from/from_name: generate one flow anchored at that specific node (name-or-id addressing; ambiguous names return a candidates list). format=json|text|mermaid.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -202,6 +202,10 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 					"scope_id":     map[string]interface{}{"type": "string", "default": "main"},
 					"service_name": map[string]interface{}{"type": "string", "description": "Optional service filter"},
 					"format":       map[string]interface{}{"type": "string", "enum": []string{"json", "text", "mermaid"}, "default": "json"},
+					"from":         map[string]interface{}{"type": "string", "description": "Node elementId to anchor a single flow at (from expand/path/find results)"},
+					"from_name":    map[string]interface{}{"type": "string", "description": "Function/Method name (or File path) to anchor a single flow at; ambiguous matches return candidates"},
+					"from_label":   map[string]interface{}{"type": "string", "description": "Optional label to disambiguate from_name (e.g. Function, Method)"},
+					"from_service": map[string]interface{}{"type": "string", "description": "Optional serviceName to disambiguate from_name"},
 				},
 			},
 		},
@@ -616,13 +620,14 @@ func parseTimeoutMs(args map[string]interface{}) int {
 	return defaultTimeoutMs
 }
 
+// serviceFilterClause filters by the node's own serviceName property (set at
+// creation by the indexer) instead of an EXISTS Service-CONTAINS*1..3
+// traversal per row — RFC-006 Phase 2 item 3. Prefix matching covers polyglot
+// sub-services ("codegraph" also matches "codegraph/web/chat-ui").
 func serviceFilterClause(nodeVar string) string {
 	return fmt.Sprintf(`
-                  AND (size($serviceNames) = 0 OR EXISTS {
-                        MATCH (svc:Service)-[:CONTAINS*1..3]->(%s)
-                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
-                          AND svc.name IN $serviceNames
-                  })`, nodeVar)
+                  AND (size($serviceNames) = 0
+                       OR any(svc IN $serviceNames WHERE %[1]s.serviceName = svc OR %[1]s.serviceName STARTS WITH svc + '/'))`, nodeVar)
 }
 
 func (s *CodeGraphMCPServer) resolveWorkspaceServices(ctx context.Context, scopeID, explicitService string) []string {

@@ -7,10 +7,13 @@ import (
 	"strings"
 
 	"github.com/context-maximiser/code-graph/internal/query"
+	"github.com/context-maximiser/code-graph/internal/query/inference"
 )
 
 // handleFlowsToolV2 is the RFC-004 flows primitive. Wraps the existing
 // FlowSpineGenerator logic with format=json|text|mermaid output.
+// Supports name-or-id addressing via optional from/from_name arguments to generate
+// a flow from a specific node.
 func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[string]interface{}) ToolCallResponse {
 	maxDepth := 5
 	if d, ok := args["max_depth"].(float64); ok && d > 0 {
@@ -31,11 +34,51 @@ func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[str
 	gen := query.NewFlowSpineGenerator(s.client)
 	gen.SetScope(scopeCtx)
 	gen.SetServiceFilter(serviceNames)
-	flows, err := gen.GenerateFlows(ctx, maxDepth)
-	if err != nil {
-		return errorResponse(fmt.Sprintf("flows: generation failed: %v", err))
+
+	// Check if from/from_name is provided for manual node-driven flow generation.
+	fromIDArg, _ := args["from"].(string)
+	fromName, _ := args["from_name"].(string)
+	fromLabel, _ := args["from_label"].(string)
+	fromService, _ := args["from_service"].(string)
+
+	var flows []query.FlowSpineResult
+	var err error
+
+	// If from/from_name is provided, resolve the node and generate a single flow from it.
+	if fromIDArg != "" || fromName != "" {
+		_, nodeRecord, errResp := s.resolveNodeID(ctx, fromIDArg, fromName, fromLabel, fromService)
+		if errResp.Content != nil {
+			return errResp
+		}
+
+		// The flow generator addresses nodes by nodeKey (its traversal and
+		// HAS_STEP writes MATCH on nodeKey) — the elementId that resolveNodeID
+		// primarily yields matches nothing there.
+		nodeKey := getStringFromRecord(nodeRecord, "node_key")
+		nodeName := getStringFromRecord(nodeRecord, "name")
+		nodeLabel := getStringFromRecord(nodeRecord, "label")
+		if nodeKey == "" {
+			return errorResponse(fmt.Sprintf("flows: resolved node %q has no nodeKey; flows can only start from indexed code nodes", nodeName))
+		}
+
+		flows, err = gen.GenerateFlowFromNode(ctx, nodeKey, nodeName, nodeLabel, maxDepth)
+		if err != nil {
+			return errorResponse(fmt.Sprintf("flows: generation from node failed: %v", err))
+		}
+		// No workspace filtering here: the caller addressed a specific node,
+		// so dropping its flow because the files live outside the current
+		// workspace would silently answer with "no flows" for a node that
+		// verifiably exists.
+	} else {
+		// Normal mode: generate flows from all structural seeds, filtered to
+		// the current workspace so discovery stays relevant to the open repo.
+		flows, err = gen.GenerateFlows(ctx, maxDepth)
+		if err != nil {
+			return errorResponse(fmt.Sprintf("flows: generation failed: %v", err))
+		}
+		flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
 	}
-	flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
+
 	if len(flows) > limit {
 		flows = flows[:limit]
 	}
@@ -119,6 +162,14 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		tierFilter = int(t)
 	}
 
+	// The shared high-centrality definition (mean + 1 stddev of
+	// betweennessCentrality) — same as GraphSeedFinder's Tier 4. Without GDS
+	// data the threshold comparison below matches nothing, which is correct.
+	centralityThreshold, hasCentralityData, err := inference.ComputeCentralityThreshold(ctx, s.client, scopeCtx.ScopeID)
+	if err != nil || !hasCentralityData {
+		centralityThreshold = -1 // sentinel: fn.betweennessCentrality > -1 never matches NULL, and no node carries the property
+	}
+
 	type entryOut struct {
 		NodeKey     string `json:"node_key"`
 		Name        string `json:"name"`
@@ -129,7 +180,11 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		ServiceName string `json:"service,omitempty"`
 	}
 
-	params := map[string]any{"scopeId": scopeCtx.ScopeID, "serviceNames": serviceNames}
+	params := map[string]any{
+		"scopeId":             scopeCtx.ScopeID,
+		"serviceNames":        serviceNames,
+		"centralityThreshold": centralityThreshold,
+	}
 	seen := make(map[string]bool)
 	entries := []entryOut{}
 
@@ -223,22 +278,23 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		LIMIT 50`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })
 
-	// Tier 4: High centrality (top callees count).
+	// Tier 4: High centrality — the same betweennessCentrality > mean+stddev
+	// definition GraphSeedFinder uses (inference.ComputeCentralityThreshold).
+	// Requires the GDS metrics stage; without it no node carries
+	// betweennessCentrality and this tier is empty by design.
 	runTier(4, "High centrality", fmt.Sprintf(`
 		MATCH (fn) WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.isTestFunction, false) = false
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  %s
-		MATCH (fn)-[:CALLS]->(callee)
-		WITH fn, count(DISTINCT callee) AS calleeCount
-		WHERE calleeCount >= 5
+		WITH fn WHERE fn.betweennessCentrality > $centralityThreshold
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       toString(calleeCount) AS source
-		ORDER BY calleeCount DESC LIMIT 30`, serviceFilterClause("fn")),
-		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })
+		       toString(round(fn.betweennessCentrality, 2)) AS source
+		ORDER BY fn.betweennessCentrality DESC LIMIT 30`, serviceFilterClause("fn")),
+		func(m map[string]interface{}) string { return "bc:" + getStringFromRecord(m, "source") })
 
 	if len(entries) > limit {
 		entries = entries[:limit]
