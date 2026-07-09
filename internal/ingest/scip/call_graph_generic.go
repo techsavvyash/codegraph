@@ -71,6 +71,11 @@ type genericFuncInfo struct {
 
 // BuildCallGraph infers CALLS relationships for all source files in the service.
 func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
+	if cg.serviceName == "" {
+		return fmt.Errorf("generic call graph builder requires a service name: " +
+			"file paths are relative to each service's root, so unbounded queries " +
+			"merge same-named files across services and corrupt their body ranges")
+	}
 	fmt.Println("Building call graph from SCIP references (language-agnostic)...")
 
 	files, err := cg.listFiles(ctx)
@@ -217,18 +222,22 @@ func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo) []genericC
 	return collapseToMinLinePerPair(triples)
 }
 
-// getFunctionsInFile returns all Function/Method nodes in a file with their IDs and declaration lines.
+// getFunctionsInFile returns all Function/Method nodes in a file with their IDs
+// and declaration lines. File paths are service-relative, so the match must be
+// service-bounded: two services with a src/index.ts would otherwise merge into
+// one declaration order and get each other's line ranges written back.
 func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, filePath string) ([]genericFuncInfo, error) {
 	query := `
-		MATCH (f:File {path: $filePath, scopeId: $scopeId})-[:CONTAINS]->(fn)
+		MATCH (f:File {path: $filePath, scopeId: $scopeId, serviceName: $serviceName})-[:CONTAINS]->(fn)
 		WHERE (fn:Function OR fn:Method)
 		  AND fn.startLine IS NOT NULL
 		RETURN elementId(fn) AS id, fn.startLine AS startLine
 		ORDER BY fn.startLine
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath": filePath,
-		"scopeId":  cg.scopeCtx.ScopeID,
+		"filePath":    filePath,
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
 	})
 	if err != nil {
 		return nil, err
@@ -270,8 +279,13 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 	// IMPLEMENTS traversal: if the direct target has incoming IMPLEMENTS
 	// edges from concrete types, return those instead (may-call fan-out).
 	// Otherwise fall back to the direct target.
+	// References are matched service-bounded for the same reason as
+	// getFunctionsInFile: filePath is service-relative, and a same-named file
+	// in another service would have its call sites attributed to this file's
+	// callers. Targets stay cross-service (filtered by packageName) — a real
+	// reference to another sub-service's symbol is a legitimate edge.
 	query := `
-		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
+		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId, serviceName: $serviceName})
 		      -[:REFERENCES]->(sym:Symbol)
 		      <-[:DEFINES]-(directTarget)
 		WHERE (directTarget:Function OR directTarget:Method)
@@ -291,6 +305,7 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
 		"filePath":    filePath,
 		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
 		"packageName": cg.packageName,
 	})
 	if err != nil {

@@ -1,6 +1,7 @@
 package static
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -185,5 +186,20 @@ func TestGenericDegreeQueryServiceScoped(t *testing.T) {
 	}
 	if params["scopeId"] != "main" {
 		t.Errorf("params[scopeId] = %v, want %q", params["scopeId"], "main")
+	}
+}
+
+// TestGenericBuildCallGraphRequiresServiceName locks the cross-service
+// isolation guard: file paths are service-relative, so a builder without a
+// bound service would merge same-named files across services. The guard fires
+// before any query, so no Neo4j connection is needed.
+func TestGenericBuildCallGraphRequiresServiceName(t *testing.T) {
+	cg := NewGenericCallGraphBuilder(nil)
+	err := cg.BuildCallGraph(context.Background())
+	if err == nil {
+		t.Fatal("BuildCallGraph without a service name must error, got nil")
+	}
+	if !strings.Contains(err.Error(), "service name") {
+		t.Errorf("error should name the missing service name, got: %v", err)
 	}
 }

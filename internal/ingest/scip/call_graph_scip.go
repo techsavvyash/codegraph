@@ -92,6 +92,11 @@ func (cg *SCIPCallGraphBuilder) SetScope(scope models.ScopeContext) {
 
 // BuildCallGraph infers CALLS relationships for all Go source files in the graph.
 func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
+	if cg.serviceName == "" {
+		return fmt.Errorf("SCIP call graph builder requires a service name: " +
+			"file paths are relative to each service's root, so unbounded queries " +
+			"attribute another service's same-named files to this one")
+	}
 	fmt.Println("Building call graph from SCIP references...")
 
 	// Get all Go source files in the graph.
@@ -192,34 +197,19 @@ func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, ca
 	return err
 }
 
-// listGoFiles returns all file paths with a .go extension that are indexed in the graph.
-// When serviceName is set, only files owned by that Service node are returned, preventing
-// cross-module path mismatches during call graph construction.
+// listGoFiles returns the .go file paths owned by the builder's Service node.
+// BuildCallGraph guarantees serviceName is set — an unbounded listing would
+// pull same-named files from every indexed service.
 func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]string, error) {
-	var query string
-	var params map[string]any
-
-	if cg.serviceName != "" {
-		query = `
-			MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
-			WHERE f.path ENDS WITH '.go'
-			  AND f.scopeId = $scopeId
-			RETURN f.path AS path
-		`
-		params = map[string]any{
-			"scopeId":     cg.scopeCtx.ScopeID,
-			"serviceName": cg.serviceName,
-		}
-	} else {
-		query = `
-			MATCH (f:File)
-			WHERE f.path ENDS WITH '.go'
-			  AND f.scopeId = $scopeId
-			RETURN f.path AS path
-		`
-		params = map[string]any{
-			"scopeId": cg.scopeCtx.ScopeID,
-		}
+	query := `
+		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
+		WHERE f.path ENDS WITH '.go'
+		  AND f.scopeId = $scopeId
+		RETURN f.path AS path
+	`
+	params := map[string]any{
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
 	}
 
 	results, err := cg.client.ExecuteQuery(ctx, query, params)
@@ -335,8 +325,13 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	// IMPLEMENTS traversal: if the direct target has incoming IMPLEMENTS
 	// edges from concrete types, return those instead (may-call fan-out).
 	// Otherwise fall back to the direct target.
+	// The reference match is service-bounded: filePath is service-relative, so
+	// a same-named file in another service would have its call sites attributed
+	// to this file's callers by line number. Targets stay cross-service
+	// (filtered by modulePath) — a real reference to another sub-service's
+	// symbol is a legitimate edge.
 	query := `
-		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId})
+		MATCH (ref:Reference {filePath: $filePath, scopeId: $scopeId, serviceName: $serviceName})
 		      -[:REFERENCES]->(sym:Symbol)
 		      <-[:DEFINES]-(directTarget)
 		WHERE (directTarget:Function OR directTarget:Method)
@@ -355,9 +350,10 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	`
 
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath":   filePath,
-		"scopeId":    cg.scopeCtx.ScopeID,
-		"modulePath": cg.modulePath,
+		"filePath":    filePath,
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
+		"modulePath":  cg.modulePath,
 	})
 	if err != nil {
 		return 0, err
@@ -457,17 +453,22 @@ func (cg *SCIPCallGraphBuilder) upgradeClosureVarsToFunction(ctx context.Context
 	if len(names) == 0 {
 		return nil
 	}
+	// Service-bounded because this MUTATES matched nodes: without it, a
+	// Variable with the same name in another service's same-named file gets
+	// the :Function label added to it.
 	query := `
 		MATCH (v:Variable)
 		WHERE v.filePath = $filePath
 		  AND v.scopeId = $scopeId
+		  AND v.serviceName = $serviceName
 		  AND v.name IN $names
 		SET v:Function
 	`
 	_, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath": filePath,
-		"scopeId":  cg.scopeCtx.ScopeID,
-		"names":    names,
+		"filePath":    filePath,
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
+		"names":       names,
 	})
 	return err
 }
@@ -488,11 +489,15 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 	// in "." with a "#" parent) stay excluded — they collide with
 	// implementation method names in the same file and SCIP fans out to
 	// impls via IMPLEMENTS in processFile.
+	// Service-bounded: these element IDs receive AST-derived body ranges via
+	// updateFunctionBodyRanges, so matching another service's same-named file
+	// would overwrite that service's line/byte ranges with this file's.
 	query := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method)
 		  AND f.filePath = $filePath
 		  AND f.scopeId = $scopeId
+		  AND f.serviceName = $serviceName
 		  AND f.signature CONTAINS $pkgDir
 		  AND (f.signature ENDS WITH '().'
 		       OR (f.signature ENDS WITH '.' AND NOT f.signature CONTAINS '#'))
@@ -500,9 +505,10 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 	`
 
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath": filePath,
-		"scopeId":  cg.scopeCtx.ScopeID,
-		"pkgDir":   pkgDir,
+		"filePath":    filePath,
+		"scopeId":     cg.scopeCtx.ScopeID,
+		"serviceName": cg.serviceName,
+		"pkgDir":      pkgDir,
 	})
 	if err != nil {
 		return nil, err

@@ -359,12 +359,16 @@ func (sa *SymbolAnalyzer) createClientCallNode(ctx context.Context, m symbolMatc
 }
 
 // findContainingFunction returns the element ID of the Function or Method
-// whose line range contains the given line number.
+// whose line range contains the given line number. Service-bounded because
+// filePath is service-relative: a same-named file in another service could
+// otherwise win the innermost-range pick and receive this file's CALLS_API
+// edge.
 func (sa *SymbolAnalyzer) findContainingFunction(ctx context.Context, filePath string, line int) (string, error) {
 	query := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method)
 		  AND f.filePath = $filePath
+		  AND f.serviceName = $serviceName
 		  AND f.startLine <= $line
 		  AND f.endLine >= $line
 		  AND f.scopeId = $scopeId
@@ -374,9 +378,10 @@ func (sa *SymbolAnalyzer) findContainingFunction(ctx context.Context, filePath s
 	`
 
 	results, err := sa.client.ExecuteQuery(ctx, query, map[string]any{
-		"filePath": filePath,
-		"line":     line,
-		"scopeId":  sa.scopeCtx.ScopeID,
+		"filePath":    filePath,
+		"serviceName": sa.serviceName,
+		"line":        line,
+		"scopeId":     sa.scopeCtx.ScopeID,
 	})
 	if err != nil || len(results) == 0 {
 		return "", err

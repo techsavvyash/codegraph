@@ -1,6 +1,7 @@
 package static
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -424,5 +425,20 @@ func TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
 	edges := resolveCallEdges(rows, callers, nil)
 	if len(edges) != 0 {
 		t.Fatalf("expected 0 edges (self-call and unresolved-caller rows both dropped), got %d: %+v", len(edges), edges)
+	}
+}
+
+// TestSCIPBuildCallGraphRequiresServiceName locks the cross-service isolation
+// guard on the Go builder — same rationale as the generic builder's test:
+// service-relative file paths make unbounded queries merge foreign services'
+// same-named files. The guard fires before any query, so no Neo4j needed.
+func TestSCIPBuildCallGraphRequiresServiceName(t *testing.T) {
+	cg := NewSCIPCallGraphBuilder(nil, t.TempDir())
+	err := cg.BuildCallGraph(context.Background())
+	if err == nil {
+		t.Fatal("BuildCallGraph without a service name must error, got nil")
+	}
+	if !strings.Contains(err.Error(), "service name") {
+		t.Errorf("error should name the missing service name, got: %v", err)
 	}
 }
