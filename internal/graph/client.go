@@ -9,6 +9,36 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// retryOnTransient retries a function up to `attempts` times if it returns a transient/retryable error.
+// Between retries, it sleeps for backoff*attemptNumber, respecting context cancellation.
+// Non-retryable errors and exhaustion return immediately/last error.
+func retryOnTransient(ctx context.Context, attempts int, backoff time.Duration, fn func() error) error {
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if !neo4j.IsRetryable(err) {
+			return err
+		}
+		lastErr = err
+
+		if attempt < attempts {
+			sleepDuration := backoff * time.Duration(attempt)
+			timer := time.NewTimer(sleepDuration)
+			select {
+			case <-timer.C:
+				// Sleep completed, continue to next attempt
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			}
+		}
+	}
+	return lastErr
+}
+
 // ScopedKey derives a composite identity key from nodeKey and scopeId.
 // If scopeId is empty, defaults to "main". Returns "nodeKey|scopeId".
 // This is used for UNIQUE constraints on per-label scopedKey properties.
@@ -131,6 +161,28 @@ func (c *Client) ExecuteQueryWithSummary(ctx context.Context, cypher string, par
 	return records, summary, nil
 }
 
+// ExecuteQueryWithoutRecords executes a Cypher query and discards its records,
+// returning only an error. Useful for MATCH/MERGE/SET operations that don't
+// need result data, or for checking connectivity without consuming memory.
+func (c *Client) ExecuteQueryWithoutRecords(ctx context.Context, cypher string, params map[string]any) error {
+	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: c.database,
+	})
+	defer session.Close(ctx)
+
+	result, err := session.Run(ctx, cypher, params)
+	if err != nil {
+		return err
+	}
+
+	_, err = result.Collect(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // ExecuteWrite executes a write transaction
 func (c *Client) ExecuteWrite(ctx context.Context, work func(tx neo4j.ManagedTransaction) (any, error)) (any, error) {
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
@@ -231,18 +283,27 @@ func (c *Client) MergeNode(ctx context.Context, labels []string, mergeProps, set
 		RETURN elementId(n) as id
 	`, labelStr, mergeClause, setClause)
 
-	result, err := c.ExecuteQuery(ctx, cypher, params)
+	var id string
+	err := retryOnTransient(ctx, 3, 200*time.Millisecond, func() error {
+		result, err := c.ExecuteQuery(ctx, cypher, params)
+		if err != nil {
+			return err
+		}
+
+		if len(result) == 0 {
+			return fmt.Errorf("no records returned from merge node query")
+		}
+
+		idVal, ok := result[0].AsMap()["id"].(string)
+		if !ok {
+			return fmt.Errorf("failed to extract node ID from result")
+		}
+		id = idVal
+		return nil
+	})
+
 	if err != nil {
 		return "", fmt.Errorf("failed to merge node: %w", err)
-	}
-
-	if len(result) == 0 {
-		return "", fmt.Errorf("no records returned from merge node query")
-	}
-
-	id, ok := result[0].AsMap()["id"].(string)
-	if !ok {
-		return "", fmt.Errorf("failed to extract node ID from result")
 	}
 
 	return id, nil
@@ -308,18 +369,27 @@ func (c *Client) MergeRelationship(ctx context.Context, fromID, toID, relType st
 		"set":    setProps,
 	}
 
-	result, err := c.ExecuteQuery(ctx, cypher, params)
+	var id string
+	err := retryOnTransient(ctx, 3, 200*time.Millisecond, func() error {
+		result, err := c.ExecuteQuery(ctx, cypher, params)
+		if err != nil {
+			return err
+		}
+
+		if len(result) == 0 {
+			return fmt.Errorf("no records returned from merge relationship query")
+		}
+
+		idVal, ok := result[0].AsMap()["id"].(string)
+		if !ok {
+			return fmt.Errorf("failed to extract relationship ID from result")
+		}
+		id = idVal
+		return nil
+	})
+
 	if err != nil {
 		return "", fmt.Errorf("failed to merge relationship: %w", err)
-	}
-
-	if len(result) == 0 {
-		return "", fmt.Errorf("no records returned from merge relationship query")
-	}
-
-	id, ok := result[0].AsMap()["id"].(string)
-	if !ok {
-		return "", fmt.Errorf("failed to extract relationship ID from result")
 	}
 
 	return id, nil
@@ -353,18 +423,24 @@ func (c *Client) MergeNodesBatch(ctx context.Context, label string, items []map[
 		}
 		chunk := items[start:end]
 
-		records, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+		err := retryOnTransient(ctx, 3, 200*time.Millisecond, func() error {
+			records, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+			if err != nil {
+				return err
+			}
+
+			for _, rec := range records {
+				m := rec.AsMap()
+				nk, _ := m["nodeKey"].(string)
+				id, _ := m["id"].(string)
+				if nk != "" && id != "" {
+					result[nk] = id
+				}
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, fmt.Errorf("MergeNodesBatch(%s) chunk %d-%d failed: %w", label, start, end, err)
-		}
-
-		for _, rec := range records {
-			m := rec.AsMap()
-			nk, _ := m["nodeKey"].(string)
-			id, _ := m["id"].(string)
-			if nk != "" && id != "" {
-				result[nk] = id
-			}
 		}
 	}
 
@@ -434,7 +510,10 @@ func (c *Client) MergeRelsBatch(ctx context.Context, relType string, items []map
 		}
 		chunk := items[start:end]
 
-		_, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+		err := retryOnTransient(ctx, 3, 200*time.Millisecond, func() error {
+			_, err := c.ExecuteQuery(ctx, cypher, map[string]any{"batch": chunk})
+			return err
+		})
 		if err != nil {
 			return fmt.Errorf("MergeRelsBatch(%s) chunk %d-%d failed: %w", relType, start, end, err)
 		}
@@ -514,7 +593,10 @@ func (c *Client) BatchMergeNodes(ctx context.Context, nodes []BatchMergeNode) er
 		"nodes": nodeParams,
 	}
 
-	_, err := c.ExecuteQuery(ctx, cypher, params)
+	err := retryOnTransient(ctx, 3, 200*time.Millisecond, func() error {
+		_, err := c.ExecuteQuery(ctx, cypher, params)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("failed to batch merge nodes: %w", err)
 	}
