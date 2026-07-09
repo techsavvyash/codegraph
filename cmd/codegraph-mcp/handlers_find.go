@@ -91,10 +91,13 @@ func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string
 
 	// Mode 2: structural listing (query empty, label non-empty)
 	if label != "" {
-		// Validate label against schema
+		// Structural listing accepts every label with a nodeKey constraint —
+		// a wider set than fulltext search, which is limited to the indexed
+		// hot labels. Listing Services/APIRoutes/Modules is a core discovery
+		// path and needs no fulltext index.
 		validLabelsMap := make(map[string]bool)
-		for _, idx := range schema.GetFulltextIndexes() {
-			validLabelsMap[idx.NodeLabel] = true
+		for _, c := range schema.GetConstraints() {
+			validLabelsMap[c.NodeLabel] = true
 		}
 		if !validLabelsMap[label] {
 			validLabels := make([]string, 0, len(validLabelsMap))

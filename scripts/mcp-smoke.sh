@@ -208,7 +208,7 @@ fi
 if [[ -z "$id_a" ]]; then
   # fall back to an unfiltered find to get any node id at all (e.g. graph has
   # no Service label, or the graph is empty).
-  call_tool "codegraph_find (fallback, no label)" '{"limit":5}'
+  call_tool "codegraph_find" '{"label":"Function","limit":5}'
   fb_reply="$LAST_REPLY"
   id_a=$(echo "$fb_reply" | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.results[0].node_id // empty' 2>/dev/null)
   id_b=$(echo "$fb_reply" | jq -r '.result.content[0].text' 2>/dev/null | jq -r '.results[1].node_id // empty' 2>/dev/null)
