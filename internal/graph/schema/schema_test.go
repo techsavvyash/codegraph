@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,75 @@ func TestGetConstraintsNamingConvention(t *testing.T) {
 		expectedName := c.NodeLabel + "_scoped_key_unique"
 		if c.Name != expectedName {
 			t.Errorf("constraint name %q does not match expected pattern %q", c.Name, expectedName)
+		}
+	}
+}
+
+// TestGetFulltextIndexes verifies that GetFulltextIndexes returns the expected set
+// with only real properties for each label.
+func TestGetFulltextIndexes(t *testing.T) {
+	indexes := GetFulltextIndexes()
+
+	// Expected indexes for hot labels: 7 total
+	expectedIndexes := map[string][]string{
+		"function_fulltext":  {"name", "signature"},
+		"method_fulltext":    {"name", "signature"},
+		"class_fulltext":     {"name"},
+		"interface_fulltext": {"name"},
+		"symbol_fulltext":    {"name", "displayName"},
+		"file_fulltext":      {"path"},
+		"variable_fulltext":  {"name"},
+	}
+
+	// Verify we have exactly the expected indexes
+	if len(indexes) != len(expectedIndexes) {
+		t.Errorf("GetFulltextIndexes returned %d indexes, want %d", len(indexes), len(expectedIndexes))
+	}
+
+	indexMap := make(map[string][]string)
+	for _, idx := range indexes {
+		indexMap[idx.Name] = idx.Properties
+	}
+
+	// Verify each expected index exists with correct properties
+	for expectedName, expectedProps := range expectedIndexes {
+		props, ok := indexMap[expectedName]
+		if !ok {
+			t.Errorf("missing fulltext index: %s", expectedName)
+			continue
+		}
+
+		// Check properties match exactly
+		if len(props) != len(expectedProps) {
+			t.Errorf("index %s has %d properties, want %d", expectedName, len(props), len(expectedProps))
+			continue
+		}
+
+		for i, prop := range props {
+			if prop != expectedProps[i] {
+				t.Errorf("index %s property %d: got %q, want %q", expectedName, i, prop, expectedProps[i])
+			}
+		}
+	}
+
+	// Verify no unexpected indexes
+	for name := range indexMap {
+		if _, ok := expectedIndexes[name]; !ok {
+			t.Errorf("unexpected fulltext index: %s", name)
+		}
+	}
+}
+
+// TestGetFulltextIndexesNamingConvention verifies index naming follows the pattern.
+func TestGetFulltextIndexesNamingConvention(t *testing.T) {
+	indexes := GetFulltextIndexes()
+
+	for _, idx := range indexes {
+		// Index names follow the pattern {label}_fulltext (labels here are
+		// all single-word, so plain lowercasing is the whole rule).
+		expectedName := strings.ToLower(idx.NodeLabel) + "_fulltext"
+		if idx.Name != expectedName {
+			t.Errorf("index name %q does not follow {label}_fulltext pattern (expected %q)", idx.Name, expectedName)
 		}
 	}
 }

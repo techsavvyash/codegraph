@@ -35,6 +35,13 @@ type Index struct {
 	Type       string // "BTREE", "TEXT", "POINT", "LOOKUP"
 }
 
+// FulltextIndex represents a Neo4j FULLTEXT index for full-text search
+type FulltextIndex struct {
+	Name       string
+	NodeLabel  string
+	Properties []string
+}
+
 // GetConstraints returns all constraint definitions for the code graph schema.
 // Note: Old UNIQUE constraints (symbol_unique, service_name_unique, file_path_unique,
 // class_fqn_unique, interface_fqn_unique, module_fqn_unique) have been removed
@@ -618,6 +625,54 @@ func GetIndexes() []Index {
 	}
 }
 
+// GetFulltextIndexes returns all FULLTEXT index definitions for Phase 2 find rewrite.
+// FULLTEXT indexes enable efficient full-text search across commonly queried properties.
+// Property evidence:
+// - Function/Method: name and signature both exist (neo4j tags in model/node.go)
+// - Class/Interface: name exists; signature does NOT exist on these types
+// - Symbol: name and displayName both exist
+// - File: path exists
+// - Variable: name exists
+func GetFulltextIndexes() []FulltextIndex {
+	return []FulltextIndex{
+		{
+			Name:       "function_fulltext",
+			NodeLabel:  "Function",
+			Properties: []string{"name", "signature"},
+		},
+		{
+			Name:       "method_fulltext",
+			NodeLabel:  "Method",
+			Properties: []string{"name", "signature"},
+		},
+		{
+			Name:       "class_fulltext",
+			NodeLabel:  "Class",
+			Properties: []string{"name"},
+		},
+		{
+			Name:       "interface_fulltext",
+			NodeLabel:  "Interface",
+			Properties: []string{"name"},
+		},
+		{
+			Name:       "symbol_fulltext",
+			NodeLabel:  "Symbol",
+			Properties: []string{"name", "displayName"},
+		},
+		{
+			Name:       "file_fulltext",
+			NodeLabel:  "File",
+			Properties: []string{"path"},
+		},
+		{
+			Name:       "variable_fulltext",
+			NodeLabel:  "Variable",
+			Properties: []string{"name"},
+		},
+	}
+}
+
 // CreateSchema creates all constraints and indexes for the code graph
 func (sm *SchemaManager) CreateSchema(ctx context.Context) error {
 	// Drop legacy constraints that conflict with scope model
@@ -637,6 +692,11 @@ func (sm *SchemaManager) CreateSchema(ctx context.Context) error {
 	// Create indexes
 	if err := sm.createIndexes(ctx); err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)
+	}
+
+	// Create fulltext indexes
+	if err := sm.createFulltextIndexes(ctx); err != nil {
+		return fmt.Errorf("failed to create fulltext indexes: %w", err)
 	}
 
 	return nil
@@ -888,6 +948,31 @@ func (sm *SchemaManager) createIndex(ctx context.Context, index Index) error {
 	return nil
 }
 
+// createFulltextIndexes creates all FULLTEXT index definitions using Neo4j 5 syntax
+func (sm *SchemaManager) createFulltextIndexes(ctx context.Context) error {
+	indexes := GetFulltextIndexes()
+
+	for _, index := range indexes {
+		// Neo4j 5 syntax: CREATE FULLTEXT INDEX name IF NOT EXISTS FOR (n:Label) ON EACH [n.prop1, n.prop2]
+		props := make([]string, len(index.Properties))
+		for i, prop := range index.Properties {
+			props[i] = "n." + prop
+		}
+		propertiesStr := strings.Join(props, ", ")
+
+		cypher := fmt.Sprintf(
+			"CREATE FULLTEXT INDEX %s IF NOT EXISTS FOR (n:%s) ON EACH [%s]",
+			index.Name, index.NodeLabel, propertiesStr,
+		)
+
+		if _, err := sm.client.ExecuteQuery(ctx, cypher, nil); err != nil {
+			return fmt.Errorf("failed to create fulltext index %s: %w", index.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // DropSchema drops all constraints and indexes
 func (sm *SchemaManager) DropSchema(ctx context.Context) error {
 	// Drop constraints first (constraint-backed indexes can't be dropped separately)
@@ -895,7 +980,8 @@ func (sm *SchemaManager) DropSchema(ctx context.Context) error {
 		return fmt.Errorf("failed to drop constraints: %w", err)
 	}
 
-	// Drop remaining indexes
+	// Drop remaining indexes. SHOW INDEXES lists FULLTEXT indexes too, so
+	// this sweep covers them — no separate fulltext drop pass is needed.
 	if err := sm.dropAllIndexes(ctx); err != nil {
 		return fmt.Errorf("failed to drop indexes: %w", err)
 	}
