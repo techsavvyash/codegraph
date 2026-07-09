@@ -511,6 +511,7 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 
 	// Prepare language-specific command
 	var cmd *exec.Cmd
+	removeInferredTsconfig := false
 	switch si.language {
 	case LanguageGo:
 		// scip-go --module-name <name> --module-version <version> --output <file>
@@ -534,10 +535,16 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 			fmt.Println("Detected yarn workspace, using --yarn-workspaces")
 		}
 
-		// If no tsconfig.json at root, use --infer-tsconfig
+		// If no tsconfig.json at root, use --infer-tsconfig. scip-typescript
+		// MATERIALIZES the inferred config into the project directory, so
+		// remember to remove it afterward — indexing must never leave
+		// artifacts in repos it only reads (a stray inferred tsconfig.json at
+		// a repo root also makes the whole repo detect as a TypeScript root
+		// on the next polyglot run).
 		if _, err := os.Stat(filepath.Join(absPath, "tsconfig.json")); os.IsNotExist(err) {
 			args = append(args, "--infer-tsconfig")
 			fmt.Println("No root tsconfig.json found, using --infer-tsconfig")
+			removeInferredTsconfig = true
 		}
 
 		cmd = exec.Command(si.langConfig.SCIPBinary, args...)
@@ -581,6 +588,11 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	// Run the command
 	fmt.Printf("Running: %s in %s\n", cmd.String(), absPath)
 	output, err := cmd.CombinedOutput()
+	if removeInferredTsconfig {
+		if rmErr := os.Remove(filepath.Join(absPath, "tsconfig.json")); rmErr != nil && !os.IsNotExist(rmErr) {
+			fmt.Printf("Warning: could not remove inferred tsconfig.json: %v\n", rmErr)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s command failed: %w\nOutput: %s", si.langConfig.SCIPBinary, err, string(output))
 	}

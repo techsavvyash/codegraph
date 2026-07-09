@@ -187,6 +187,7 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 	}
 	seen := make(map[string]bool)
 	entries := []entryOut{}
+	var tierErrors []string
 
 	addEntry := func(e entryOut) {
 		if e.NodeKey == "" || seen[e.NodeKey] {
@@ -205,6 +206,9 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		}
 		records, err := s.client.ExecuteQuery(ctx, cypher, params)
 		if err != nil {
+			// A broken tier query silently returning nothing reads as "this
+			// codebase has no entry points" — surface it instead.
+			tierErrors = append(tierErrors, fmt.Sprintf("tier %d (%s): %v", tier, label, err))
 			return
 		}
 		for _, r := range records {
@@ -270,7 +274,7 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		MATCH (fn)-[:CALLS]->(callee)
 		WITH fn, count(DISTINCT callee) AS calleeCount
 		WHERE calleeCount > 0
-		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
+		RETURN fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
 		       toString(calleeCount) AS source
@@ -350,10 +354,14 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		b.WriteString("```\n")
 		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}
 	default:
-		body, err := json.MarshalIndent(map[string]interface{}{
+		payload := map[string]interface{}{
 			"count":   len(entries),
 			"entries": entries,
-		}, "", "  ")
+		}
+		if len(tierErrors) > 0 {
+			payload["tier_errors"] = tierErrors
+		}
+		body, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return errorResponse(fmt.Sprintf("entry_points: encode failed: %v", err))
 		}

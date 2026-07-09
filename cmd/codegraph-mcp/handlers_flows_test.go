@@ -375,3 +375,45 @@ func TestEntryPointsHandlerTier1(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "API-exposed", tierLabel, "tier_label should be 'API-exposed'")
 }
+
+// TestEntryPointsTier3TopologicalRoot: the tier-3 query silently returned
+// nothing for its whole life — RETURN DISTINCT made ORDER BY calleeCount a
+// syntax error and runTier swallowed it. GetData (no callers, one callee) is
+// a known-positive topological root.
+func TestEntryPointsTier3TopologicalRoot(t *testing.T) {
+	server, _, cleanup := setupFlowsTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	response := server.handleEntryPointsToolV2(ctx, map[string]interface{}{
+		"service_name": "flows-mcp-svc",
+		"scope_id":     "itest-flows-mcp",
+		"tier":         float64(3),
+		"format":       "json",
+	})
+
+	require.False(t, response.IsError)
+	require.Len(t, response.Content, 1)
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &result))
+
+	if tierErrs, ok := result["tier_errors"].([]interface{}); ok {
+		t.Fatalf("tier query errored: %v", tierErrs)
+	}
+
+	entries, ok := result["entries"].([]interface{})
+	require.True(t, ok)
+	found := false
+	for _, e := range entries {
+		if em, ok := e.(map[string]interface{}); ok {
+			if em["name"] == "GetData" {
+				found = true
+				tier, _ := em["tier"].(float64)
+				assert.Equal(t, float64(3), tier)
+			}
+		}
+	}
+	assert.True(t, found, "GetData (no callers, has callee) must be a tier-3 topological root, got: %v", entries)
+}
