@@ -377,21 +377,26 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_find",
-			Description: "List/filter nodes in the code graph by label, name pattern, and/or service. Returns paginated results, each including a node_id usable as input to expand/path. Pair with codegraph_schema to discover available labels and properties.",
+			Description: "Find nodes in the code graph. With `query`: relevance-ranked fulltext search (RRF fusion across per-label indexes, exact-name matches first). With only `label`: structural listing ordered by name. Both paginate via next_cursor. Each result carries a node_id usable as input to expand/path. Searchable labels: Function, Method, Class, Interface, Symbol, File, Variable.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
+					"query": map[string]interface{}{
+						"type":        "string",
+						"description": "Fulltext search text (name/signature/path; single words prefix-match). Omit for pure structural listing by label.",
+					},
 					"label": map[string]interface{}{
 						"type":        "string",
-						"description": "Restrict to a node label (Function, Method, Class, Interface, Service, Module, File, Variable, APIRoute, etc.)",
-					},
-					"name_pattern": map[string]interface{}{
-						"type":        "string",
-						"description": "Case-insensitive substring match against the node's name (or path for File nodes)",
+						"description": "Restrict to one label: Function, Method, Class, Interface, Symbol, File, Variable. Required when query is omitted.",
 					},
 					"service": map[string]interface{}{
 						"type":        "string",
-						"description": "Filter to nodes owned by a specific service (e.g. codegraph/apps/cli)",
+						"description": "Filter to nodes owned by a specific service (e.g. codegraph/web/chat-ui)",
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID (default: main)",
+						"default":     "main",
 					},
 					"limit": map[string]interface{}{
 						"type":        "number",

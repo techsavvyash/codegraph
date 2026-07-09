@@ -2,20 +2,28 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strconv"
+	"sort"
 	"strings"
+
+	"github.com/context-maximiser/code-graph/internal/graph/schema"
+	"github.com/context-maximiser/code-graph/internal/search"
 )
 
-// handleFindTool is the L1 node-listing primitive. It supports filtering by
-// label, name substring, and serviceName, with simple offset-based pagination
-// via an opaque cursor. Each result carries an opaque node_id usable as input
-// to expand/path.
+// handleFindTool is the L1 node-listing primitive. It supports two modes:
+// 1. Fulltext search when query is provided (via Searcher)
+// 2. Structural listing when query is empty but label is provided (indexed scan)
+// Both support optional service and scope_id filters, plus keyset pagination.
 func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	query, _ := args["query"].(string)
 	label, _ := args["label"].(string)
-	namePattern, _ := args["name_pattern"].(string)
 	service, _ := args["service"].(string)
+	scopeID := parseScopeContextArg(args).ScopeID
+	if scopeID == "" {
+		scopeID = "main"
+	}
 
 	limit := 25
 	if l, ok := args["limit"].(float64); ok {
@@ -28,107 +36,200 @@ func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string
 		limit = 200
 	}
 
-	skip := 0
-	if cursor, ok := args["cursor"].(string); ok && cursor != "" {
-		if v, err := strconv.Atoi(cursor); err == nil && v >= 0 {
-			skip = v
+	cursor, _ := args["cursor"].(string)
+
+	// Mode 1: fulltext search (query non-empty)
+	if query != "" {
+		var labels []string
+		if label != "" {
+			labels = []string{label}
+		}
+		opts := search.Options{
+			Labels:  labels,
+			ScopeID: scopeID,
+			Service: service,
+			Limit:   limit,
+			Cursor:  cursor,
+		}
+
+		searcher := search.NewSearcher(s.client)
+		resp, err := searcher.Search(ctx, query, opts)
+		if err != nil {
+			// Check if it's an invalid label error
+			if strings.Contains(err.Error(), "invalid label") {
+				return ToolCallResponse{
+					Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: %v", err)}},
+					IsError: true,
+				}
+			}
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: search failed: %v", err)}},
+				IsError: true,
+			}
+		}
+
+		// Format fulltext results
+		out := map[string]interface{}{
+			"results": resp.Results,
+			"count":   len(resp.Results),
+		}
+		if resp.NextCursor != "" {
+			out["next_cursor"] = resp.NextCursor
+		}
+
+		body, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: encode failed: %v", err)}},
+				IsError: true,
+			}
+		}
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: string(body)}},
 		}
 	}
 
-	conditions := []string{}
-	params := map[string]any{
-		"skip":  skip,
-		"limit": limit + 1, // overfetch by 1 to detect more pages
-	}
+	// Mode 2: structural listing (query empty, label non-empty)
 	if label != "" {
-		conditions = append(conditions, "$label IN labels(n)")
-		params["label"] = label
-	}
-	if namePattern != "" {
-		conditions = append(conditions, "(toLower(coalesce(n.name,'')) CONTAINS toLower($namePattern) OR toLower(coalesce(n.path,'')) CONTAINS toLower($namePattern))")
-		params["namePattern"] = namePattern
-	}
-	if service != "" {
-		conditions = append(conditions, "n.serviceName = $service")
-		params["service"] = service
-	}
-	where := ""
-	if len(conditions) > 0 {
-		where = "WHERE " + strings.Join(conditions, " AND ")
-	}
+		// Validate label against schema
+		validLabelsMap := make(map[string]bool)
+		for _, idx := range schema.GetFulltextIndexes() {
+			validLabelsMap[idx.NodeLabel] = true
+		}
+		if !validLabelsMap[label] {
+			validLabels := make([]string, 0, len(validLabelsMap))
+			for k := range validLabelsMap {
+				validLabels = append(validLabels, k)
+			}
+			sort.Strings(validLabels)
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: invalid label %q; valid labels: %v", label, validLabels)}},
+				IsError: true,
+			}
+		}
 
-	cypher := fmt.Sprintf(`
-MATCH (n)
-%s
-RETURN elementId(n) AS node_id,
+		// Build structural listing query with keyset pagination
+		conditions := []string{
+			"(n.scopeId = $scopeId OR n.scopeId = 'main')",
+		}
+		params := map[string]any{
+			"scopeId": scopeID,
+		}
+
+		if service != "" {
+			conditions = append(conditions, "n.serviceName = $service")
+			params["service"] = service
+		}
+
+		whereClause := strings.Join(conditions, " AND ")
+
+		// Decode cursor if provided (format: base64(name\x00nodeID))
+		var cursorName, cursorNodeID string
+		if cursor != "" {
+			decoded, err := base64.StdEncoding.DecodeString(cursor)
+			if err == nil {
+				parts := strings.SplitN(string(decoded), "\x00", 2)
+				if len(parts) == 2 {
+					cursorName = parts[0]
+					cursorNodeID = parts[1]
+				}
+			}
+		}
+
+		// Base query with keyset pagination on (sortName, elementId). The sort
+		// key is coalesce(name, path): File nodes carry path, not name — keying
+		// on n.name alone would make every File tie at NULL and never paginate.
+		queryStr := fmt.Sprintf(`
+MATCH (n:%s)
+WITH n, coalesce(n.name, n.path, '') AS sortName
+WHERE %s
+`, label, whereClause)
+
+		if cursorName != "" && cursorNodeID != "" {
+			queryStr += `  AND (sortName > $cursorName OR (sortName = $cursorName AND elementId(n) > $cursorNodeId))
+`
+			params["cursorName"] = cursorName
+			params["cursorNodeId"] = cursorNodeID
+		}
+
+		queryStr += `RETURN elementId(n) AS node_id,
+       coalesce(n.nodeKey, '') AS node_key,
        labels(n)[0] AS label,
-       coalesce(n.name, n.path, '') AS name,
-       n.fqn AS qualified_name,
-       n.filePath AS file_path,
-       n.startLine AS start_line,
+       sortName AS name,
        n.signature AS signature,
+       n.filePath AS file_path,
        n.serviceName AS service
-ORDER BY label, name
-SKIP $skip LIMIT $limit
-`, where)
+ORDER BY sortName, elementId(n)
+LIMIT $limit`
 
-	records, err := s.client.ExecuteQuery(ctx, cypher, params)
-	if err != nil {
+		params["limit"] = limit + 1 // overfetch by 1 to detect more pages
+
+		records, err := s.client.ExecuteQuery(ctx, queryStr, params)
+		if err != nil {
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: structural listing failed: %v", err)}},
+				IsError: true,
+			}
+		}
+
+		type result struct {
+			NodeID    string  `json:"node_id"`
+			NodeKey   string  `json:"node_key,omitempty"`
+			Label     string  `json:"label"`
+			Name      string  `json:"name"`
+			Signature string  `json:"signature,omitempty"`
+			FilePath  string  `json:"file_path,omitempty"`
+			Service   string  `json:"service,omitempty"`
+			Score     float64 `json:"score"` // always 0 for structural listing
+		}
+
+		results := make([]result, 0, len(records))
+		for _, rec := range records {
+			m := rec.AsMap()
+			results = append(results, result{
+				NodeID:    getStringFromRecord(m, "node_id"),
+				NodeKey:   getStringFromRecord(m, "node_key"),
+				Label:     getStringFromRecord(m, "label"),
+				Name:      getStringFromRecord(m, "name"),
+				Signature: getStringFromRecord(m, "signature"),
+				FilePath:  getStringFromRecord(m, "file_path"),
+				Service:   getStringFromRecord(m, "service"),
+				Score:     0,
+			})
+		}
+
+		truncated := len(results) > limit
+		if truncated {
+			results = results[:limit]
+		}
+
+		out := map[string]interface{}{
+			"results": results,
+			"count":   len(results),
+		}
+		if truncated && len(results) > 0 {
+			// Encode next cursor as base64(name\x00nodeID)
+			lastResult := results[len(results)-1]
+			cursorStr := lastResult.Name + "\x00" + lastResult.NodeID
+			out["next_cursor"] = base64.StdEncoding.EncodeToString([]byte(cursorStr))
+		}
+
+		body, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return ToolCallResponse{
+				Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: encode failed: %v", err)}},
+				IsError: true,
+			}
+		}
 		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: query failed: %v", err)}},
-			IsError: true,
+			Content: []ToolContent{{Type: "text", Text: string(body)}},
 		}
 	}
 
-	type result struct {
-		NodeID        string `json:"node_id"`
-		Label         string `json:"label"`
-		Name          string `json:"name,omitempty"`
-		QualifiedName string `json:"qualified_name,omitempty"`
-		FilePath      string `json:"file_path,omitempty"`
-		StartLine     int    `json:"start_line,omitempty"`
-		Signature     string `json:"signature,omitempty"`
-		Service       string `json:"service,omitempty"`
-	}
-
-	results := make([]result, 0, len(records))
-	for _, rec := range records {
-		m := rec.AsMap()
-		results = append(results, result{
-			NodeID:        getStringFromRecord(m, "node_id"),
-			Label:         getStringFromRecord(m, "label"),
-			Name:          getStringFromRecord(m, "name"),
-			QualifiedName: getStringFromRecord(m, "qualified_name"),
-			FilePath:      getStringFromRecord(m, "file_path"),
-			StartLine:     getIntFromRecord(m, "start_line"),
-			Signature:     getStringFromRecord(m, "signature"),
-			Service:       getStringFromRecord(m, "service"),
-		})
-	}
-
-	truncated := len(results) > limit
-	if truncated {
-		results = results[:limit]
-	}
-
-	out := map[string]interface{}{
-		"results":   results,
-		"truncated": truncated,
-		"count":     len(results),
-	}
-	if truncated {
-		out["next_cursor"] = strconv.Itoa(skip + limit)
-	}
-
-	body, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return ToolCallResponse{
-			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("find: encode failed: %v", err)}},
-			IsError: true,
-		}
-	}
+	// Mode 3: both query and label empty — error
 	return ToolCallResponse{
-		Content: []ToolContent{{Type: "text", Text: string(body)}},
+		Content: []ToolContent{{Type: "text", Text: "find: either query or label must be provided"}},
+		IsError: true,
 	}
 }
 
