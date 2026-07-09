@@ -264,10 +264,23 @@ func (e eventEmission) withDest(destQueue string, line int) eventEmission {
 	return e
 }
 
+// switchCaseCtx captures the enclosing `switch <tag>` and the labels of the case clause an
+// assignment sits in, so a dynamic `<group> + CharDot + <tag>` RHS can be enumerated into one
+// concrete event per case-label constant.
+type switchCaseCtx struct {
+	tag    string     // switch tag identifier name (e.g. "payoutStatus")
+	labels []ast.Expr // this case clause's label expressions (const references)
+}
+
 // collectLocalEventAssigns scans a function body for `<var> = <event-name-expr>` assignments
-// (typically the cases of a status switch) whose RHS resolves to an event.
+// (typically the cases of a status switch) whose RHS resolves to an event. When an assignment's
+// RHS is only partially static because it concatenates the switch tag variable (the
+// `<group> + CharDot + payoutStatus` shape), it is enumerated against the case labels so each
+// concrete event (payout.screening, payout.compliance_hold, …) is recovered instead of a single
+// dynamic `payout.*` hub.
 func (r *EventEmissionResolver) collectLocalEventAssigns(fn *ast.FuncDecl) map[string][]eventEmission {
 	out := map[string][]eventEmission{}
+	ctxByAssign := r.mapAssignSwitchContext(fn.Body)
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		assign, ok := n.(*ast.AssignStmt)
 		if !ok {
@@ -278,13 +291,91 @@ func (r *EventEmissionResolver) collectLocalEventAssigns(fn *ast.FuncDecl) map[s
 			if !ok || i >= len(assign.Rhs) {
 				continue
 			}
-			if ev, ok := r.resolveEventExpr(assign.Rhs[i]); ok {
-				out[ident.Name] = append(out[ident.Name], ev)
-			}
+			r.recordEventAssign(ident.Name, assign.Rhs[i], ctxByAssign[assign], out)
 		}
 		return true
 	})
 	return out
+}
+
+// recordEventAssign resolves one `<var> = <rhs>` assignment into the emission map. A fully static
+// RHS is recorded directly. A dynamic RHS is first enumerated against its enclosing switch's case
+// labels (binding the switch tag to each label constant); only if that yields nothing concrete
+// does it fall back to the partial/group-hub resolution.
+func (r *EventEmissionResolver) recordEventAssign(
+	varName string, rhs ast.Expr, ctx *switchCaseCtx, out map[string][]eventEmission,
+) {
+	// Fully static RHS (explicit action constant) — record as-is.
+	if ev, ok := r.resolveEventExpr(rhs); ok && !ev.dynamic {
+		out[varName] = append(out[varName], ev)
+		return
+	}
+
+	// Case-guarded parameter: bind the switch tag to each case-label constant and keep every
+	// binding that makes the RHS fully resolve to a concrete group.action event.
+	if ctx != nil && ctx.tag != "" {
+		var enumerated []eventEmission
+		for _, label := range ctx.labels {
+			labelVal, ok := r.consts.ResolveString(label)
+			if !ok || labelVal == "" {
+				continue
+			}
+			val, static := r.consts.ResolveStringWithBindings(rhs, map[string]string{ctx.tag: labelVal})
+			group, action, dynamic, ok := splitEvent(val, static)
+			if !ok || dynamic || action == "" {
+				continue
+			}
+			enumerated = append(enumerated, eventEmission{
+				event:  makeEventName(group, action),
+				group:  group,
+				action: action,
+			})
+		}
+		if len(enumerated) > 0 {
+			out[varName] = append(out[varName], enumerated...)
+			return
+		}
+	}
+
+	// Fall back to the partial resolution (group-fallback hub such as payout.*).
+	if ev, ok := r.resolveEventExpr(rhs); ok {
+		out[varName] = append(out[varName], ev)
+	}
+}
+
+// mapAssignSwitchContext maps each assignment statement inside a value `switch` (one with a
+// simple identifier tag) to the tag + labels of the case clause it belongs to. Nested switches
+// resolve to the innermost enclosing case: because ast.Inspect visits nodes in preorder, an inner
+// switch is processed after the outer one and overwrites the shared assignment entries.
+func (r *EventEmissionResolver) mapAssignSwitchContext(body *ast.BlockStmt) map[*ast.AssignStmt]*switchCaseCtx {
+	m := map[*ast.AssignStmt]*switchCaseCtx{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		sw, ok := n.(*ast.SwitchStmt)
+		if !ok {
+			return true
+		}
+		tagIdent, ok := sw.Tag.(*ast.Ident)
+		if !ok || sw.Body == nil {
+			return true
+		}
+		for _, stmt := range sw.Body.List {
+			cc, ok := stmt.(*ast.CaseClause)
+			if !ok || len(cc.List) == 0 {
+				continue // default clause carries no labels to enumerate
+			}
+			ctx := &switchCaseCtx{tag: tagIdent.Name, labels: cc.List}
+			for _, bodyStmt := range cc.Body {
+				ast.Inspect(bodyStmt, func(bn ast.Node) bool {
+					if as, isAssign := bn.(*ast.AssignStmt); isAssign {
+						m[as] = ctx
+					}
+					return true
+				})
+			}
+		}
+		return true
+	})
+	return m
 }
 
 // resolveEventExpr resolves an expression to a partial eventEmission (group/action/event/

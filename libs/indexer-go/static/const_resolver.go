@@ -87,10 +87,19 @@ func skipForConstScan(path string) bool {
 // resolvable static prefix is still returned (e.g. `"settlement." ` for
 // `EventGroupSettlement + CharDot + <var>`) with fullyStatic=false.
 func (r *constResolver) ResolveString(expr ast.Expr) (val string, fullyStatic bool) {
-	return r.resolve(expr, map[string]bool{})
+	return r.resolve(expr, map[string]bool{}, nil)
 }
 
-func (r *constResolver) resolve(expr ast.Expr, visited map[string]bool) (string, bool) {
+// ResolveStringWithBindings is like ResolveString but treats each name in `bindings` as if it
+// were a string const with the given value. This lets the emission resolver recover the concrete
+// action of a `<group> + CharDot + <switchTag>` expression by binding the switch tag to each
+// case-label constant (e.g. binding `payoutStatus` → "screening" yields "payout.screening").
+// Bindings take precedence over collected const declarations.
+func (r *constResolver) ResolveStringWithBindings(expr ast.Expr, bindings map[string]string) (val string, fullyStatic bool) {
+	return r.resolve(expr, map[string]bool{}, bindings)
+}
+
+func (r *constResolver) resolve(expr ast.Expr, visited map[string]bool, bindings map[string]string) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
 		if e.Kind == token.STRING {
@@ -101,21 +110,21 @@ func (r *constResolver) resolve(expr ast.Expr, visited map[string]bool) (string,
 		return "", false
 
 	case *ast.Ident:
-		return r.resolveName(e.Name, visited)
+		return r.resolveName(e.Name, visited, bindings)
 
 	case *ast.SelectorExpr:
 		// pkg.Name — resolve by the selector name only.
-		return r.resolveName(e.Sel.Name, visited)
+		return r.resolveName(e.Sel.Name, visited, bindings)
 
 	case *ast.ParenExpr:
-		return r.resolve(e.X, visited)
+		return r.resolve(e.X, visited, bindings)
 
 	case *ast.BinaryExpr:
 		if e.Op != token.ADD {
 			return "", false
 		}
-		xVal, xStatic := r.resolve(e.X, visited)
-		yVal, yStatic := r.resolve(e.Y, visited)
+		xVal, xStatic := r.resolve(e.X, visited, bindings)
+		yVal, yStatic := r.resolve(e.Y, visited, bindings)
 		// Keep the resolvable prefix/suffix even when one side is dynamic so callers can
 		// still recover a group prefix like "settlement.".
 		return xVal + yVal, xStatic && yStatic
@@ -125,7 +134,10 @@ func (r *constResolver) resolve(expr ast.Expr, visited map[string]bool) (string,
 	}
 }
 
-func (r *constResolver) resolveName(name string, visited map[string]bool) (string, bool) {
+func (r *constResolver) resolveName(name string, visited map[string]bool, bindings map[string]string) (string, bool) {
+	if v, ok := bindings[name]; ok {
+		return v, true // caller-supplied binding (e.g. switch tag → case-label value)
+	}
 	if visited[name] {
 		return "", false // cycle guard
 	}
@@ -135,7 +147,7 @@ func (r *constResolver) resolveName(name string, visited map[string]bool) (strin
 	}
 	visited[name] = true
 	defer delete(visited, name)
-	return r.resolve(expr, visited)
+	return r.resolve(expr, visited, bindings)
 }
 
 // unquoteGo strips the surrounding quotes from a Go string literal token. Handles the common
