@@ -1,19 +1,23 @@
 package dblock
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-// TestAcquireIsExclusive proves a second Acquire blocks until the first
+// TestAcquireIsExclusive proves a second acquire blocks until the first
 // holder releases. flock locks attach to the open file description, so two
-// separate opens conflict even within one process.
+// separate opens conflict even within one process. Uses a private lock file:
+// on the shared one this test would sit behind entire database suites when
+// run via `go test ./...`.
 func TestAcquireIsExclusive(t *testing.T) {
-	release1 := Acquire()
+	path := filepath.Join(t.TempDir(), "test.lock")
+	release1 := acquireFile(path)
 
 	acquired2 := make(chan func(), 1)
 	go func() {
-		acquired2 <- Acquire()
+		acquired2 <- acquireFile(path)
 	}()
 
 	select {

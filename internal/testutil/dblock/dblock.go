@@ -16,7 +16,13 @@ import (
 // Acquire blocks until this process holds the exclusive cross-package
 // database test lock and returns the function that releases it.
 func Acquire() (release func()) {
-	path := filepath.Join(os.TempDir(), "codegraph-neo4j-test.lock")
+	return acquireFile(filepath.Join(os.TempDir(), "codegraph-neo4j-test.lock"))
+}
+
+// acquireFile is Acquire on an explicit lock file. Split out so the package's
+// own test can lock a private file — contending on the shared one would make
+// the test wait behind whole database suites during `go test ./...`.
+func acquireFile(path string) (release func()) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o666)
 	if err != nil {
 		panic(fmt.Sprintf("dblock: open %s: %v", path, err))
