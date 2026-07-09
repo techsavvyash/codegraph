@@ -4,11 +4,37 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query/inference"
 )
+
+// TraceCalleesSpanningTreeCypher performs a single traversal of the call graph
+// using APOC spanningTree, which enforces NODE_GLOBAL uniqueness (each node once,
+// shortest path). The length(path) yields each node's distance from the seed.
+// Label expressions enable NodeIndexSeek on the initial match; scopeId stays in WHERE.
+// Exported so the integration EXPLAIN test pins THIS query's plan, not a copy
+// that can silently drift from what production runs.
+const TraceCalleesSpanningTreeCypher = `
+MATCH (seed:Function|Method {nodeKey: $nodeKey})
+WHERE (seed.scopeId = $scopeId OR seed.scopeId = 'main')
+CALL apoc.path.spanningTree(seed, {
+  relationshipFilter: 'CALLS>',
+  labelFilter: '+Function|+Method',
+  maxLevel: $maxDepth,
+  limit: $nodeLimit
+})
+YIELD path
+WITH last(nodes(path)) AS n, length(path) AS distance
+WHERE distance > 0
+  AND (n.filePath IS NULL OR NOT n.filePath ENDS WITH '_test.go')
+  AND NOT n.nodeKey CONTAINS 'github.com/golang/go/src'
+  AND (n.scopeId = $scopeId OR n.scopeId = 'main')
+RETURN n.nodeKey AS nodeKey, n.name AS name, labels(n) AS labels,
+       n.serviceName AS serviceName, distance
+ORDER BY distance ASC, n.name ASC, n.nodeKey ASC`
 
 // FlowStep represents a single step in a flow spine.
 type FlowStep struct {
@@ -92,20 +118,17 @@ func (g *FlowSpineGenerator) withScopeAndServiceParams(params map[string]any) ma
 	return params
 }
 
+// serviceConstraintClause returns a WHERE-clause predicate for filtering nodes by
+// serviceName property. This replaces the expensive EXISTS subquery traversals.
 func serviceConstraintClause(nodeVar string) string {
 	return fmt.Sprintf(`
-                  AND (size($serviceNames) = 0 OR EXISTS {
-                        MATCH (svc:Service)-[:CONTAINS*1..3]->(%s)
-                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
-                          AND svc.name IN $serviceNames
-                  })
-                  AND ($servicePrefix = '' OR EXISTS {
-                        MATCH (svc2:Service)-[:CONTAINS*1..3]->(%s)
-                        WHERE (svc2.scopeId = $scopeId OR svc2.scopeId = 'main')
-                          AND svc2.name STARTS WITH $servicePrefix
-                  })`, nodeVar, nodeVar)
+                  AND (size($serviceNames) = 0 OR %s.serviceName IN $serviceNames)
+                  AND ($servicePrefix = '' OR %s.serviceName STARTS WITH $servicePrefix)`, nodeVar, nodeVar)
 }
 
+// filterGraphSeedsByService filters graph seeds by service name or prefix.
+// Since Function/Method nodes carry serviceName properties, we can filter directly
+// without expensive service traversal subqueries.
 func (g *FlowSpineGenerator) filterGraphSeedsByService(ctx context.Context, seeds []inference.GraphSeed) ([]inference.GraphSeed, error) {
 	if !g.hasServiceConstraints() || len(seeds) == 0 {
 		return seeds, nil
@@ -121,21 +144,15 @@ func (g *FlowSpineGenerator) filterGraphSeedsByService(ctx context.Context, seed
 		return nil, nil
 	}
 
+	// Use label expressions and direct serviceName property matching instead of
+	// traversal subqueries. Function/Method nodes set serviceName at creation.
+	// scopeId stays in WHERE to enable nodeKey index seek.
 	cypher := `
                 UNWIND $nodeKeys AS nk
-                MATCH (fn {nodeKey: nk})
-                WHERE (fn:Function OR fn:Method)
-                  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
-                  AND (size($serviceNames) = 0 OR EXISTS {
-                        MATCH (svc:Service)-[:CONTAINS*1..3]->(fn)
-                        WHERE (svc.scopeId = $scopeId OR svc.scopeId = 'main')
-                          AND svc.name IN $serviceNames
-                  })
-                  AND ($servicePrefix = '' OR EXISTS {
-                        MATCH (svc2:Service)-[:CONTAINS*1..3]->(fn)
-                        WHERE (svc2.scopeId = $scopeId OR svc2.scopeId = 'main')
-                          AND svc2.name STARTS WITH $servicePrefix
-                  })
+                MATCH (fn:Function|Method {nodeKey: nk})
+                WHERE (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+                  AND (size($serviceNames) = 0 OR fn.serviceName IN $serviceNames)
+                  AND ($servicePrefix = '' OR fn.serviceName STARTS WITH $servicePrefix)
                 RETURN DISTINCT nk AS nodeKey`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKeys": nodeKeys}))
@@ -205,7 +222,7 @@ func (g *FlowSpineGenerator) GenerateFlows(ctx context.Context, maxDepth int) ([
 			steps = append(steps, callees...)
 		}
 
-		steps = g.deduplicateSteps(steps)
+		steps = g.deduplicateSteps(steps, 1)
 		if len(steps) < 2 {
 			continue
 		}
@@ -241,15 +258,15 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 	}
 
 	// Find API endpoints and their handler functions.
-	cypher := fmt.Sprintf(`
-		MATCH (route:APIRoute)<-[:EXPOSES_API]-(handler)
+	// Use label expressions to enable NodeIndexSeek on nodeKey indexes.
+	cypher := `
+		MATCH (route:APIRoute)<-[:EXPOSES_API]-(handler:Function|Method)
 		WHERE (route.scopeId = $scopeId OR route.scopeId = 'main')
-                  AND (handler:Function OR handler:Method)
                   AND (handler.scopeId = $scopeId OR handler.scopeId = 'main')
-                  %s
+                  ` + serviceConstraintClause("handler") + `
                 RETURN route.nodeKey AS routeKey, route.method AS method, route.path AS path,
 		       handler.nodeKey AS handlerKey, handler.name AS handlerName,
-                       labels(handler) AS handlerLabels`, serviceConstraintClause("handler"))
+                       labels(handler) AS handlerLabels`
 
 	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(nil))
 	if err != nil {
@@ -300,8 +317,14 @@ func (g *FlowSpineGenerator) GenerateFromAPIEndpoints(ctx context.Context, maxDe
 			}
 		}
 
-		// Deduplicate and filter steps through the traversal budget.
-		steps = g.deduplicateSteps(steps)
+		// Deduplicate and filter steps through the traversal budget. The route
+		// (and handler, when present) are anchors: never name-blocked out of
+		// their own flow.
+		anchors := 1
+		if handlerKey != "" {
+			anchors = 2
+		}
+		steps = g.deduplicateSteps(steps, anchors)
 
 		// Persist the Flow node and HAS_STEP edges.
 		if err := g.persistFlow(ctx, flowNodeKey, flowName, "api", routeKey, maxDepth, steps); err != nil {
@@ -337,19 +360,17 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 	}
 
 	// Query candidate Function/Method nodes with caller counts and export status.
+	// Use label expressions on fn and callee for NodeIndexSeek; keep scopeId in WHERE.
 	cypher := `
-		MATCH (fn)
-		WHERE (fn:Function OR fn:Method)
-		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		MATCH (fn:Function|Method)
+		WHERE (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  AND NOT fn.nodeKey CONTAINS 'github.com/golang/go/src'
                   ` + serviceConstraintClause("fn") + `
-		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
-                WHERE (caller:Function OR caller:Method)
-                  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
-		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
-                WHERE (callee:Function OR callee:Method)
-		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
+		OPTIONAL MATCH (caller:Function|Method)-[:CALLS]->(fn)
+                WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		OPTIONAL MATCH (fn)-[:CALLS]->(callee:Function|Method)
+                WHERE (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		OPTIONAL MATCH (fn)-[:EXPOSES_API]->(route:APIRoute)
 		WHERE route.scopeId = $scopeId OR route.scopeId = 'main'
 		WITH fn,
@@ -441,8 +462,9 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 			steps = append(steps, callees...)
 		}
 
-		// Deduplicate and filter steps through the traversal budget.
-		steps = g.deduplicateSteps(steps)
+		// Deduplicate and filter steps through the traversal budget; the seed
+		// itself is an anchor.
+		steps = g.deduplicateSteps(steps, 1)
 		if len(steps) < 2 {
 			// Skip one-step entrypoint flows; they are usually generic noise.
 			continue
@@ -463,8 +485,16 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 	return results, nil
 }
 
-// traceCallees recursively follows CALLS edges from a given function nodeKey.
-// It respects the budget's MaxFanout and MaxDepth, and filters blocked names.
+// traceCallees traverses the call graph from a seed node using a single APOC
+// spanningTree query. It returns an ordered slice of FlowStep nodes reachable
+// within remainingDepth. Post-retrieval budget filtering (per-level fanout,
+// blocked names, disallowed types) is applied in Go to ensure determinism and
+// enforce work bounds. The spanningTree enforces NODE_GLOBAL uniqueness, so each
+// node appears exactly once at its shortest path distance.
+//
+// Semantic change from prior implementation: MaxFanout now caps nodes PER DISTANCE
+// LEVEL (not per parent node). This distributes the fanout budget across the
+// entire depth frontier, reducing query complexity while maintaining reasonable coverage.
 func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, remainingDepth, nextOrder int) ([]FlowStep, error) {
 	if remainingDepth <= 0 {
 		return nil, nil
@@ -475,69 +505,130 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		fanout = 10
 	}
 
-	cypher := fmt.Sprintf(`
-		MATCH (caller {nodeKey: $nodeKey})-[:CALLS]->(callee)
-		WHERE (caller.scopeId = $scopeId OR caller.scopeId = 'main')
-		  AND (callee:Function OR callee:Method)
-		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
-		  AND (callee.filePath IS NULL OR NOT callee.filePath ENDS WITH '_test.go')
-		  AND NOT callee.nodeKey CONTAINS 'github.com/golang/go/src'
-                  %s
-		RETURN callee.nodeKey AS calleeKey, callee.name AS calleeName, labels(callee) AS calleeLabels
-		ORDER BY callee.name ASC, callee.nodeKey ASC
-                LIMIT %d`, serviceConstraintClause("callee"), fanout)
+	// Set a generous node limit to ensure post-filtering has material to work with.
+	// Typically budget.MaxSteps * 4, but at least 500.
+	nodeLimit := g.budget.MaxSteps * 4
+	if nodeLimit <= 0 {
+		nodeLimit = 500
+	}
 
-	records, err := g.client.ExecuteQuery(ctx, cypher, g.withScopeAndServiceParams(map[string]any{"nodeKey": nodeKey}))
+	records, err := g.client.ExecuteQuery(ctx, TraceCalleesSpanningTreeCypher,
+		g.withScopeAndServiceParams(map[string]any{
+			"nodeKey":   nodeKey,
+			"maxDepth":  remainingDepth,
+			"nodeLimit": nodeLimit,
+		}))
 	if err != nil {
 		return nil, err
 	}
 
-	var steps []FlowStep
-	order := nextOrder
+	// Group nodes by distance level for per-level fanout enforcement.
+	type nodeAtDistance struct {
+		nodeKey     string
+		name        string
+		label       string
+		serviceName string
+		distance    int
+	}
+
+	nodesByDistance := make(map[int][]nodeAtDistance)
 	for _, r := range records {
 		m := r.AsMap()
-		calleeKey := strVal(m, "calleeKey")
-		calleeName := strVal(m, "calleeName")
-		if calleeKey == "" {
+		nodeKey := strVal(m, "nodeKey")
+		name := strVal(m, "name")
+		if nodeKey == "" || name == "" {
 			continue
 		}
 
-		calleeLabel := "Function"
-		if labels, ok := m["calleeLabels"].([]any); ok {
+		// Extract label from labels array
+		label := "Function"
+		if labels, ok := m["labels"].([]any); ok {
 			for _, l := range labels {
 				if s, ok := l.(string); ok && s == "Method" {
-					calleeLabel = "Method"
+					label = "Method"
 					break
 				}
 			}
 		}
 
-		// Apply budget filters: skip blocked names and disallowed node types.
-		if g.budget.IsNameBlocked(calleeName) {
+		serviceName := ""
+		if sn, ok := m["serviceName"].(string); ok {
+			serviceName = sn
+		}
+
+		distance := 1
+		if d, ok := m["distance"].(int64); ok {
+			distance = int(d)
+		}
+
+		// Apply budget filters: skip blocked names and disallowed types.
+		if g.budget.IsNameBlocked(name) {
 			continue
 		}
-		if !g.budget.IsNodeAllowed(calleeLabel) {
+		if !g.budget.IsNodeAllowed(label) {
 			continue
 		}
 
-		steps = append(steps, FlowStep{
-			NodeKey: calleeKey, Name: calleeName, Label: calleeLabel, Order: order,
+		// Apply service name filter if set.
+		if len(g.serviceNames) > 0 {
+			found := false
+			for _, sn := range g.serviceNames {
+				if serviceName == sn {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		if g.servicePrefix != "" && !strings.HasPrefix(serviceName, g.servicePrefix) {
+			continue
+		}
+
+		nodesByDistance[distance] = append(nodesByDistance[distance], nodeAtDistance{
+			nodeKey:     nodeKey,
+			name:        name,
+			label:       label,
+			serviceName: serviceName,
+			distance:    distance,
 		})
-		order++
+	}
 
-		// Recurse deeper.
-		deeper, err := g.traceCallees(ctx, calleeKey, remainingDepth-1, order)
-		if err != nil {
-			continue
+	// Flatten by distance, capping per level to fanout, and assign sequential Order values.
+	var steps []FlowStep
+	order := nextOrder
+
+	// Process distances in ascending order for determinism.
+	distances := make([]int, 0, len(nodesByDistance))
+	for d := range nodesByDistance {
+		distances = append(distances, d)
+	}
+	sort.Ints(distances)
+
+	for _, distance := range distances {
+		nodesAtDist := nodesByDistance[distance]
+		// Apply per-level fanout cap (already sorted by name, nodeKey from query).
+		if len(nodesAtDist) > fanout {
+			nodesAtDist = nodesAtDist[:fanout]
 		}
-		steps = append(steps, deeper...)
-		order += len(deeper)
+
+		for _, n := range nodesAtDist {
+			steps = append(steps, FlowStep{
+				NodeKey: n.nodeKey,
+				Name:    n.name,
+				Label:   n.label,
+				Order:   order,
+			})
+			order++
+		}
 	}
 
 	return steps, nil
 }
 
 // persistFlow creates/merges a Flow node and its HAS_STEP relationships.
+// Uses a single UNWIND query to batch-create all edges instead of one query per step.
 func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name, flowType, entrypointKey string, maxDepth int, steps []FlowStep) error {
 	flowProps := map[string]any{
 		"name":          name,
@@ -555,28 +646,45 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 		return fmt.Errorf("failed to create Flow node: %w", err)
 	}
 
-	// Create HAS_STEP edges to each step's node.
-	for _, step := range steps {
-		cypher := `
-			MATCH (target {nodeKey: $targetKey})
-			WHERE (target:Function OR target:Method OR target:APIRoute OR target:Service)
-			  AND (target.scopeId = $scopeId OR target.scopeId = 'main')
-			WITH target LIMIT 1
-			MATCH (flow:Flow {nodeKey: $flowKey, scopeId: $scopeId})
-			MERGE (flow)-[r:HAS_STEP {order: $order}]->(target)
-			SET r.stepName = $stepName, r.scope = $scope, r.scopeId = $scopeId`
+	if len(steps) == 0 {
+		return nil
+	}
 
-		_, err := g.client.ExecuteQuery(ctx, cypher, map[string]any{
-			"flowKey":   flowNodeKey,
-			"scopeId":   g.scopeCtx.ScopeID,
-			"scope":     g.scopeCtx.Scope,
+	// Build UNWIND list of step descriptors: {targetKey, order, stepName} maps.
+	stepList := make([]map[string]any, 0, len(steps))
+	for _, step := range steps {
+		stepList = append(stepList, map[string]any{
 			"targetKey": step.NodeKey,
 			"order":     step.Order,
 			"stepName":  step.Name,
 		})
-		if err != nil {
-			fmt.Printf("Warning: failed to create HAS_STEP for step %d (%s): %v\n", step.Order, step.Name, err)
-		}
+	}
+
+	// Batch-create all HAS_STEP edges using UNWIND + label-qualified MATCH.
+	// Target labels: Function, Method, APIRoute, Service.
+	// A nodeKey can exist under BOTH $scopeId and 'main' (PR-overlay scopes),
+	// which would match two targets and write two same-order steps; prefer the
+	// scope-exact node deterministically via ORDER BY + collect()[0].
+	cypher := `
+		UNWIND $steps AS step
+		MATCH (target:Function|Method|APIRoute|Service {nodeKey: step.targetKey})
+		WHERE (target.scopeId = $scopeId OR target.scopeId = 'main')
+		WITH step, target
+		ORDER BY CASE WHEN target.scopeId = $scopeId THEN 0 ELSE 1 END
+		WITH step, collect(target)[0] AS target
+		MATCH (flow:Flow {nodeKey: $flowKey})
+		WHERE (flow.scopeId = $scopeId OR flow.scopeId = 'main')
+		MERGE (flow)-[r:HAS_STEP {order: step.order}]->(target)
+		SET r.stepName = step.stepName, r.scope = $scope, r.scopeId = $scopeId`
+
+	_, err = g.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"flowKey": flowNodeKey,
+		"scopeId": g.scopeCtx.ScopeID,
+		"scope":   g.scopeCtx.Scope,
+		"steps":   stepList,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create HAS_STEP edges: %w", err)
 	}
 
 	_ = flowID // used by MergeNode
@@ -779,7 +887,7 @@ func (g *FlowSpineGenerator) GenerateCrossServiceFlows(ctx context.Context, maxD
 			steps = append(steps, deeper...)
 		}
 
-		steps = g.deduplicateSteps(steps)
+		steps = g.deduplicateSteps(steps, 2)
 
 		if err := g.persistFlow(ctx, flowNodeKey, flowName, "cross_service", b.callerKey, maxDepth, steps); err != nil {
 			continue
@@ -809,8 +917,10 @@ func extractLabel(m map[string]any, key string) string {
 }
 
 // deduplicateSteps converts FlowSteps to inference.FlowStepInfo, runs the
-// deduplicator with the current budget, and converts back.
-func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep) []FlowStep {
+// deduplicator with the current budget, and converts back. The first `anchors`
+// steps (the route/handler/seed the flow is about) bypass name/type blocking —
+// see inference.DeduplicateAnchored.
+func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep, anchors int) []FlowStep {
 	if g.deduplicator == nil || len(steps) == 0 {
 		return steps
 	}
@@ -825,7 +935,7 @@ func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep) []FlowStep {
 		}
 	}
 
-	deduped := g.deduplicator.Deduplicate(infos, g.budget)
+	deduped := g.deduplicator.DeduplicateAnchored(infos, g.budget, anchors)
 
 	out := make([]FlowStep, len(deduped))
 	for i, d := range deduped {

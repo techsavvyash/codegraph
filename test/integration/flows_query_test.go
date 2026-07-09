@@ -1,0 +1,381 @@
+package integration
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	graphclient "github.com/context-maximiser/code-graph/internal/graph"
+	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/query"
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+)
+
+// TestFlowSpineGenerator_GenerateFromAPIEndpoints_KnownPositive creates a small
+// call graph by hand and verifies that GenerateFromAPIEndpoints produces a flow
+// that includes all expected steps in the correct order.
+func TestFlowSpineGenerator_GenerateFromAPIEndpoints_KnownPositive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, "itest-flows-query")
+	}()
+
+	// Create a service
+	serviceName := "test-service"
+	serviceProps := map[string]interface{}{
+		"name":    serviceName,
+		"nodeKey": "svc:test-service",
+		"scopeId": "itest-flows-query",
+		"scope":   "main",
+	}
+	_, err := client.MergeNode(ctx, []string{"Service"},
+		map[string]interface{}{"nodeKey": "svc:test-service", "scopeId": "itest-flows-query"},
+		serviceProps)
+	if err != nil {
+		t.Fatalf("failed to create Service: %v", err)
+	}
+
+	// Create an API route
+	routeKey := "api:GET:/api/users"
+	routeProps := map[string]interface{}{
+		"nodeKey": routeKey,
+		"name":    "GET /api/users",
+		"method":  "GET",
+		"path":    "/api/users",
+		"scopeId": "itest-flows-query",
+		"scope":   "main",
+	}
+	_, err = client.MergeNode(ctx, []string{"APIRoute"},
+		map[string]interface{}{"nodeKey": routeKey, "scopeId": "itest-flows-query"},
+		routeProps)
+	if err != nil {
+		t.Fatalf("failed to create APIRoute: %v", err)
+	}
+
+	// Create handler function
+	handlerKey := "func:handler.go#GetUsers"
+	handlerProps := map[string]interface{}{
+		"nodeKey":     handlerKey,
+		"name":        "GetUsers",
+		"scopeId":     "itest-flows-query",
+		"scope":       "main",
+		"serviceName": serviceName,
+		"filePath":    "handler.go",
+	}
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": handlerKey, "scopeId": "itest-flows-query"},
+		handlerProps)
+	if err != nil {
+		t.Fatalf("failed to create handler Function: %v", err)
+	}
+
+	// Create function A
+	fnAKey := "func:service.go#FetchData"
+	fnAProps := map[string]interface{}{
+		"nodeKey":     fnAKey,
+		"name":        "FetchData",
+		"scopeId":     "itest-flows-query",
+		"scope":       "main",
+		"serviceName": serviceName,
+		"filePath":    "service.go",
+	}
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": fnAKey, "scopeId": "itest-flows-query"},
+		fnAProps)
+	if err != nil {
+		t.Fatalf("failed to create fnA: %v", err)
+	}
+
+	// Create function B
+	fnBKey := "func:db.go#Query"
+	fnBProps := map[string]interface{}{
+		"nodeKey":     fnBKey,
+		"name":        "Query",
+		"scopeId":     "itest-flows-query",
+		"scope":       "main",
+		"serviceName": serviceName,
+		"filePath":    "db.go",
+	}
+	_, err = client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": fnBKey, "scopeId": "itest-flows-query"},
+		fnBProps)
+	if err != nil {
+		t.Fatalf("failed to create fnB: %v", err)
+	}
+
+	// Create edges: EXPOSES_API from handler to route
+	err = client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (h:Function {nodeKey: $handlerKey, scopeId: $scopeId})
+		MATCH (r:APIRoute {nodeKey: $routeKey, scopeId: $scopeId})
+		MERGE (h)-[rel:EXPOSES_API]->(r)
+		SET rel.scope = $scope, rel.scopeId = $scopeId`, map[string]interface{}{
+		"handlerKey": handlerKey,
+		"routeKey":   routeKey,
+		"scopeId":    "itest-flows-query",
+		"scope":      "main",
+	})
+	if err != nil {
+		t.Fatalf("failed to create EXPOSES_API edge: %v", err)
+	}
+
+	// Create call chain: handler -> fnA -> fnB
+	err = client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (h:Function {nodeKey: $handlerKey, scopeId: $scopeId})
+		MATCH (fa:Function {nodeKey: $fnAKey, scopeId: $scopeId})
+		MERGE (h)-[rel:CALLS]->(fa)
+		SET rel.scope = $scope, rel.scopeId = $scopeId`, map[string]interface{}{
+		"handlerKey": handlerKey,
+		"fnAKey":     fnAKey,
+		"scopeId":    "itest-flows-query",
+		"scope":      "main",
+	})
+	if err != nil {
+		t.Fatalf("failed to create CALLS edge handler->fnA: %v", err)
+	}
+
+	err = client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (fa:Function {nodeKey: $fnAKey, scopeId: $scopeId})
+		MATCH (fb:Function {nodeKey: $fnBKey, scopeId: $scopeId})
+		MERGE (fa)-[rel:CALLS]->(fb)
+		SET rel.scope = $scope, rel.scopeId = $scopeId`, map[string]interface{}{
+		"fnAKey":  fnAKey,
+		"fnBKey":  fnBKey,
+		"scopeId": "itest-flows-query",
+		"scope":   "main",
+	})
+	if err != nil {
+		t.Fatalf("failed to create CALLS edge fnA->fnB: %v", err)
+	}
+
+	// Run flow generator
+	gen := query.NewFlowSpineGenerator(client)
+	gen.SetScope(models.ScopeContext{Scope: "main", ScopeID: "itest-flows-query"})
+
+	flows, err := gen.GenerateFromAPIEndpoints(ctx, 5)
+	if err != nil {
+		t.Fatalf("GenerateFromAPIEndpoints failed: %v", err)
+	}
+
+	// Verify at least one flow was generated
+	if len(flows) == 0 {
+		t.Fatal("expected at least one flow, got none")
+	}
+
+	// Find the flow for our API route
+	var flow *query.FlowSpineResult
+	for i := range flows {
+		if strings.Contains(flows[i].FlowName, "GET /api/users") {
+			flow = &flows[i]
+			break
+		}
+	}
+	if flow == nil {
+		t.Fatalf("expected flow for GET /api/users, got flows: %+v", flows)
+	}
+
+	// Verify steps include all expected nodes
+	stepKeys := make(map[string]bool)
+	for _, step := range flow.Steps {
+		stepKeys[step.NodeKey] = true
+	}
+
+	expectedKeys := []string{routeKey, handlerKey, fnAKey, fnBKey}
+	for _, key := range expectedKeys {
+		if !stepKeys[key] {
+			t.Errorf("expected step with nodeKey %s, got steps: %+v", key, flow.Steps)
+		}
+	}
+
+	// Verify orders are strictly sequential from 0
+	for i, step := range flow.Steps {
+		if step.Order != i {
+			t.Errorf("step %d: expected Order %d, got %d", i, i, step.Order)
+		}
+	}
+}
+
+// planHasOperator recursively searches a typed driver query plan for an
+// operator whose type contains the given name (operator types come suffixed,
+// e.g. "AllNodesScan@neo4j", so substring match is required).
+func planHasOperator(plan neo4jdriver.Plan, operatorName string) bool {
+	if plan == nil {
+		return false
+	}
+	if strings.Contains(plan.Operator(), operatorName) {
+		return true
+	}
+	for _, child := range plan.Children() {
+		if planHasOperator(child, operatorName) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFlowSpineGenerator_TraceCallees_QueryPlan_UsesNodeIndexSeek verifies that
+// the traceCallees spanningTree query uses NodeIndexSeek (not AllNodesScan) for
+// the seed match, thanks to label expressions and nodeKey indexing.
+func TestFlowSpineGenerator_TraceCallees_QueryPlan_UsesNodeIndexSeek(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, "itest-flows-explain")
+	}()
+
+	// Create minimal test nodes so the query is valid
+	scopeID := "itest-flows-explain"
+
+	seedKey := "func:test.go#TestFunc"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": seedKey, "scopeId": scopeID},
+		map[string]interface{}{
+			"nodeKey": seedKey,
+			"name":    "TestFunc",
+			"scopeId": scopeID,
+			"scope":   "main",
+		})
+	if err != nil {
+		t.Fatalf("failed to create test Function: %v", err)
+	}
+
+	// EXPLAIN the exact cypher production runs — pinning a copy here would let
+	// the two drift apart and the test would keep passing while the real query
+	// regressed.
+	explainCypher := "EXPLAIN " + query.TraceCalleesSpanningTreeCypher
+
+	_, summary, err := client.ExecuteQueryWithSummary(ctx, explainCypher, map[string]interface{}{
+		"nodeKey":   seedKey,
+		"scopeId":   scopeID,
+		"maxDepth":  3,
+		"nodeLimit": 100,
+	})
+	if err != nil {
+		t.Fatalf("EXPLAIN query failed: %v", err)
+	}
+
+	if summary == nil {
+		t.Fatal("expected ResultSummary, got nil")
+	}
+
+	plan := summary.Plan()
+	if plan == nil {
+		t.Fatal("expected query plan, got nil")
+	}
+
+	// Check that NodeIndexSeek is present (using label expressions enables this)
+	if !planHasOperator(plan, "NodeIndexSeek") {
+		t.Error("expected NodeIndexSeek in query plan, not found")
+	}
+
+	// Verify AllNodesScan is NOT present (that would indicate labelless lookup)
+	if planHasOperator(plan, "AllNodesScan") {
+		t.Error("found AllNodesScan in plan; label expressions should prevent this")
+	}
+}
+
+// TestFlowSpineGenerator_LabellessQuery_ProducesAllNodesScan is a control test
+// proving that the plan-checker works: a deliberately labelless query should
+// contain AllNodesScan.
+func TestFlowSpineGenerator_LabellessQuery_ProducesAllNodesScan(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, "itest-flows-labelless")
+	}()
+
+	scopeID := "itest-flows-labelless"
+
+	// Create a test node
+	seedKey := "func:test.go#TestFunc"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": seedKey, "scopeId": scopeID},
+		map[string]interface{}{
+			"nodeKey": seedKey,
+			"name":    "TestFunc",
+			"scopeId": scopeID,
+			"scope":   "main",
+		})
+	if err != nil {
+		t.Fatalf("failed to create test Function: %v", err)
+	}
+
+	// EXPLAIN a deliberately labelless query
+	explainCypher := `EXPLAIN
+MATCH (n {nodeKey: $nodeKey})
+WHERE n.scopeId = $scopeId
+RETURN n.nodeKey`
+
+	_, summary, err := client.ExecuteQueryWithSummary(ctx, explainCypher, map[string]interface{}{
+		"nodeKey": seedKey,
+		"scopeId": scopeID,
+	})
+	if err != nil {
+		t.Fatalf("EXPLAIN query failed: %v", err)
+	}
+
+	if summary == nil {
+		t.Fatal("expected ResultSummary, got nil")
+	}
+
+	plan := summary.Plan()
+	if plan == nil {
+		t.Fatal("expected query plan, got nil")
+	}
+
+	// This query should use AllNodesScan since there's no label expression
+	if !planHasOperator(plan, "AllNodesScan") {
+		t.Error("expected AllNodesScan in labelless query plan, not found; this proves the checker works")
+	}
+}
+
+// createTestGraphClient opens a connection to Neo4j for integration testing.
+func createTestGraphClient(t *testing.T) *graphclient.Client {
+	config := graphclient.Config{
+		URI:      "bolt://localhost:7687",
+		Username: "neo4j",
+		Password: "password123",
+		Database: "neo4j",
+	}
+
+	client, err := graphclient.NewClient(config)
+	if err != nil {
+		t.Fatalf("failed to create Neo4j client: %v", err)
+	}
+
+	return client
+}
+
+// cleanupTestData deletes all nodes and edges created under a specific scopeId.
+// Must create a new client inside the cleanup function because the test's client
+// may be closed by the time cleanup runs.
+func cleanupTestData(t *testing.T, ctx context.Context, client *graphclient.Client, scopeID string) {
+	// Create a fresh client for cleanup since the test's client may be exhausted
+	cleanupClient, err := graphclient.NewClient(graphclient.Config{
+		URI:      "bolt://localhost:7687",
+		Username: "neo4j",
+		Password: "password123",
+		Database: "neo4j",
+	})
+	if err != nil {
+		t.Logf("failed to create cleanup client: %v", err)
+		return
+	}
+	defer cleanupClient.Close(ctx)
+
+	err = cleanupClient.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (n {scopeId: $scopeId})
+		DETACH DELETE n`, map[string]interface{}{
+		"scopeId": scopeID,
+	})
+	if err != nil {
+		t.Logf("cleanup failed for scopeId %s: %v", scopeID, err)
+	}
+}

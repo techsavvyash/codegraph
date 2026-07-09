@@ -109,23 +109,36 @@ type FlowStepInfo struct {
 // Deduplicate removes duplicate steps (same nodeKey) from a flow,
 // keeping the first occurrence. Also removes steps that exceed the budget.
 func (d *FlowDeduplicator) Deduplicate(steps []FlowStepInfo, budget TraversalBudget) []FlowStepInfo {
+	return d.DeduplicateAnchored(steps, budget, 0)
+}
+
+// DeduplicateAnchored is Deduplicate with the first `anchors` steps exempt
+// from name/type blocking. Anchor steps are what the flow is ABOUT — the
+// APIRoute and its handler, or the entrypoint seed — built deliberately by
+// the generator; name patterns like "get"/"set" exist to drop noisy traversed
+// CALLEES, and applying them to anchors silently strips e.g. every
+// "GET /api/users" route and "GetUsers" handler out of its own flow.
+// Anchors are still deduplicated by nodeKey and count toward MaxSteps.
+func (d *FlowDeduplicator) DeduplicateAnchored(steps []FlowStepInfo, budget TraversalBudget, anchors int) []FlowStepInfo {
 	seen := make(map[string]bool)
 	var deduped []FlowStepInfo
 
-	for _, s := range steps {
+	for i, s := range steps {
 		// Skip duplicates
 		if seen[s.NodeKey] {
 			continue
 		}
 
-		// Skip blocked names
-		if budget.IsNameBlocked(s.Name) {
-			continue
-		}
+		if i >= anchors {
+			// Skip blocked names
+			if budget.IsNameBlocked(s.Name) {
+				continue
+			}
 
-		// Skip disallowed node types
-		if !budget.IsNodeAllowed(s.NodeType) {
-			continue
+			// Skip disallowed node types
+			if !budget.IsNodeAllowed(s.NodeType) {
+				continue
+			}
 		}
 
 		// Enforce max steps
