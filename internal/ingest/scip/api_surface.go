@@ -2,6 +2,7 @@ package static
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -39,27 +40,32 @@ func (d *APISurfaceDetector) SetScope(scope models.ScopeContext) {
 func (d *APISurfaceDetector) Detect(ctx context.Context) error {
 	fmt.Println("Running structural API surface detection...")
 
+	// The three strategies are independent: a failure in one must not stop
+	// the others, but every failure must still surface — the joined error lets
+	// the indexer record the phase as failed in its report.
+	var errs []error
+
 	// Strategy 1: Mark functions with external parameter types.
 	extCount, err := d.detectExternalParamFunctions(ctx)
 	if err != nil {
-		fmt.Printf("Warning: external-param detection failed: %v\n", err)
+		errs = append(errs, fmt.Errorf("external-param detection: %w", err))
 	}
 
 	// Strategy 2: Mark cross-package call targets.
 	crossPkgCount, err := d.detectCrossPackageTargets(ctx)
 	if err != nil {
-		fmt.Printf("Warning: cross-package detection failed: %v\n", err)
+		errs = append(errs, fmt.Errorf("cross-package detection: %w", err))
 	}
 
 	// Strategy 3: Synthesize APIRoute nodes + EXPOSES_API edges.
 	apiCount, err := d.synthesizeAPIRoutes(ctx)
 	if err != nil {
-		fmt.Printf("Warning: API route synthesis failed: %v\n", err)
+		errs = append(errs, fmt.Errorf("API route synthesis: %w", err))
 	}
 
 	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d API routes\n",
 		extCount, crossPkgCount, apiCount)
-	return nil
+	return errors.Join(errs...)
 }
 
 // detectExternalParamFunctions marks exported functions whose paramTypes

@@ -52,6 +52,9 @@ type SCIPIndexer struct {
 	// skipDependencyResolution is true; the polyglot post-pass drains it.
 	pendingImports   []*models.PackageImport
 	pendingServiceID string
+
+	// report tracks per-phase counts and failures during indexing.
+	report *IndexReport
 }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
@@ -83,6 +86,9 @@ func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repo
 // IndexProject indexes a project using SCIP
 func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) error {
 	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
+
+	// Initialize fresh report for this indexing run
+	si.report = NewIndexReport()
 
 	// Store projectPath as absolute path for consistent relative path resolution
 	absPath, err := filepath.Abs(projectPath)
@@ -121,9 +127,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(0, "")
 	}
 
-	// Debug: Print SCIP file contents
+	// Debug: Print SCIP file contents (optional, non-critical)
 	if err := parser.DebugPrintSCIPFile(); err != nil {
-		fmt.Printf("Warning: failed to debug print SCIP file: %v\n", err)
+		// Silently ignore debug print failures; these are optional diagnostic output
 	}
 
 	// Step 3: Create service node
@@ -170,8 +176,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	for _, file := range files {
 		fileID, err := si.createFileNode(ctx, file, serviceID)
 		if err != nil {
-			fmt.Printf("Warning: failed to create file node for %s: %v\n", file.Path, err)
-			continue
+			si.report.IncrementFailed("Index files", 1)
+			return fmt.Errorf("failed to create file node for %s: %w", file.Path, err)
 		}
 		fileNodes[file.Path] = fileID
 	}
@@ -207,7 +213,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 	scipRels, err := parser.ExtractRelationships()
 	if err != nil {
-		fmt.Printf("Warning: failed to extract SCIP relationships: %v\n", err)
+		// Skip, not failure: SCIP relationships are optional; index can proceed without them
+		si.report.IncrementSkipped("IMPLEMENTS relationships", 1)
 	} else {
 		implCount := 0
 		for _, r := range scipRels {
@@ -221,9 +228,12 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
 			if len(batch) > 0 {
 				if err := si.client.MergeRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
-					fmt.Printf("Warning: failed to merge IMPLEMENTS relationships: %v\n", err)
+					// Data-affecting failure — a graph missing these is silently wrong: IMPLEMENTS are structural graph edges
+					si.report.IncrementFailed("IMPLEMENTS relationships", 1)
+					return fmt.Errorf("failed to merge IMPLEMENTS relationships: %w", err)
 				} else {
 					fmt.Printf("Merged %d IMPLEMENTS relationships\n", len(batch))
+					si.report.IncrementWritten("IMPLEMENTS relationships", len(batch))
 				}
 			}
 		}
@@ -242,7 +252,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 	imports, err := parser.ExtractImports(projectPath)
 	if err != nil {
-		fmt.Printf("Warning: failed to extract imports: %v\n", err)
+		// Skip, not failure: imports are optional if extraction fails
+		si.report.IncrementSkipped("Package dependencies", 1)
 	} else {
 		fmt.Printf("Extracted %d import statements\n", len(imports))
 		if si.skipDependencyResolution {
@@ -250,7 +261,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			si.pendingServiceID = serviceID
 			fmt.Println("Deferring DEPENDS_ON resolution to polyglot post-pass")
 		} else if err := si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
-			fmt.Printf("Warning: failed to index package dependencies: %v\n", err)
+			// Enrichment only — record and continue: DEPENDS_ON edges enhance but don't corrupt the graph
+			si.report.AddWarning(fmt.Sprintf("failed to index package dependencies: %v", err))
+			si.report.IncrementFailed("Package dependencies", 1)
 		}
 	}
 	if si.timer != nil {
@@ -274,7 +287,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		cgBuilder.SetScope(si.scopeCtx)
 		cgBuilder.SetServiceName(si.serviceName)
 		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+			// Enrichment only — record and continue: call graph enhances but doesn't corrupt
+			si.report.AddWarning(fmt.Sprintf("call graph construction failed: %v", err))
+			si.report.IncrementFailed("Call graph", 1)
 		}
 	} else {
 		fmt.Println("Building call graph from SCIP references (language-agnostic)...")
@@ -289,7 +304,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		cgBuilder.SetPackageName(pkgName)
 		if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-			fmt.Printf("Warning: call graph construction failed: %v\n", err)
+			// Enrichment only — record and continue: call graph enhances but doesn't corrupt
+			si.report.AddWarning(fmt.Sprintf("call graph construction failed: %v", err))
+			si.report.IncrementFailed("Call graph", 1)
 		}
 	}
 	if si.timer != nil {
@@ -307,7 +324,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		apiDetector := NewAPISurfaceDetector(si.client, modulePath)
 		apiDetector.SetScope(si.scopeCtx)
 		if err := apiDetector.Detect(ctx); err != nil {
-			fmt.Printf("Warning: structural API surface detection failed: %v\n", err)
+			// Enrichment only — record and continue: API surface enhances but doesn't corrupt
+			si.report.AddWarning(fmt.Sprintf("structural API surface detection failed: %v", err))
+			si.report.IncrementFailed("API analysis", 1)
 		}
 	} else {
 		// Fallback: framework-pattern-based detection for non-Go languages.
@@ -315,7 +334,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
 		symAnalyzer.SetScope(si.scopeCtx)
 		if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
-			fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+			// Enrichment only — record and continue: symbol-based API enhances but doesn't corrupt
+			si.report.AddWarning(fmt.Sprintf("symbol-based API analysis failed: %v", err))
+			si.report.IncrementFailed("API analysis", 1)
 		}
 	}
 	if si.timer != nil {
@@ -327,7 +348,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	sed := NewSemanticEdgeDetector(si.client)
 	sed.SetScope(si.scopeCtx)
 	if err := sed.DetectSemanticEdges(ctx); err != nil {
-		fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
+		// Enrichment only — record and continue: semantic edges enhance but don't corrupt
+		si.report.AddWarning(fmt.Sprintf("semantic edge detection failed: %v", err))
+		si.report.IncrementFailed("Semantic edges", 1)
 	}
 
 	// Step 11: Create PullRequest node for PR overlays.
@@ -337,7 +360,9 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 		if _, err := si.createPullRequestNode(ctx, prID,
 			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName)); err != nil {
-			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
+			// Enrichment only — record and continue: PullRequest node is auxiliary
+			si.report.AddWarning(fmt.Sprintf("failed to create PullRequest node: %v", err))
+			si.report.IncrementFailed("PullRequest node", 1)
 		}
 	}
 
@@ -1025,10 +1050,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	symbolIDs, err := si.client.MergeNodesBatch(ctx, "Symbol", symbolBatch, batchSize)
 	tMergeSymbol := time.Since(t)
 	if err != nil {
-		fmt.Printf("Warning: batch merge Symbol nodes failed: %v\n", err)
-		symbolIDs = make(map[string]string)
+		// Data-affecting failure — a graph missing these is silently wrong: Symbol nodes are core to the graph
+		si.report.IncrementFailed("Index symbols (defs)", 1)
+		return nil, fmt.Errorf("batch merge Symbol nodes failed: %w", err)
 	}
 	fmt.Printf("Merged %d Symbol nodes\n", len(symbolIDs))
+	si.report.IncrementWritten("Index symbols (defs)", len(symbolIDs))
 
 	// 2. Group definitions by label, deduplicate, batch merge each group
 	labelGroups := make(map[string][]map[string]any)
@@ -1049,12 +1076,14 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		batch = dedupeByNodeKey(batch)
 		ids, err := si.client.MergeNodesBatch(ctx, lbl, batch, batchSize)
 		if err != nil {
-			fmt.Printf("Warning: batch merge %s nodes failed: %v\n", lbl, err)
-			continue
+			// Data-affecting failure — a graph missing these is silently wrong: Definition nodes (Function/Method/Class/etc) are core
+			si.report.IncrementFailed("Index symbols (defs)", 1)
+			return nil, fmt.Errorf("batch merge %s nodes failed: %w", lbl, err)
 		}
 		for nk, id := range ids {
 			defIDs[nk] = id
 		}
+		si.report.IncrementWritten("Index symbols (defs)", len(ids))
 	}
 	tMergeDefinition := time.Since(t)
 	fmt.Printf("Merged %d definition nodes across %d labels\n", len(defIDs), len(labelGroups))
@@ -1078,7 +1107,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 
 	t = time.Now()
 	if err := si.client.MergeRelsBatch(ctx, "DEFINES", definesRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch merge DEFINES rels failed: %v\n", err)
+		// Data-affecting failure — a graph missing these is silently wrong: DEFINES edges are core relationships
+		si.report.IncrementFailed("Index symbols (defs)", 1)
+		return nil, fmt.Errorf("batch merge DEFINES rels failed: %w", err)
+	}
+	if len(definesRels) > 0 {
+		si.report.IncrementWritten("Index symbols (defs)", len(definesRels))
 	}
 	tRelDefines := time.Since(t)
 
@@ -1101,7 +1135,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 
 	t = time.Now()
 	if err := si.client.MergeRelsBatch(ctx, "CONTAINS", containsRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch merge def CONTAINS rels failed: %v\n", err)
+		// Data-affecting failure — a graph missing these is silently wrong: CONTAINS edges (File -> Definition) are core structural
+		si.report.IncrementFailed("Index symbols (defs)", 1)
+		return nil, fmt.Errorf("batch merge def CONTAINS rels failed: %w", err)
+	}
+	if len(containsRels) > 0 {
+		si.report.IncrementWritten("Index symbols (defs)", len(containsRels))
 	}
 	tRelContains := time.Since(t)
 
@@ -1183,10 +1222,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	refIDs, err := si.client.MergeNodesBatch(ctx, "Reference", refBatch, batchSize)
 	tMergeRef := time.Since(t)
 	if err != nil {
-		fmt.Printf("Warning: batch merge Reference nodes failed: %v\n", err)
-		refIDs = make(map[string]string)
+		// Data-affecting failure — a graph missing these is silently wrong: Reference nodes are core to the graph
+		si.report.IncrementFailed("Index symbols (refs)", 1)
+		return nil, fmt.Errorf("batch merge Reference nodes failed: %w", err)
 	}
 	fmt.Printf("Merged %d Reference nodes\n", len(refIDs))
+	si.report.IncrementWritten("Index symbols (refs)", len(refIDs))
 
 	// 2. Batch create REFERENCES rels (refID → symbolID)
 	var referencesRels []map[string]any
@@ -1204,7 +1245,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 
 	t = time.Now()
 	if err := si.client.MergeRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch merge REFERENCES rels failed: %v\n", err)
+		// Data-affecting failure — a graph missing these is silently wrong: REFERENCES edges are core relationships
+		si.report.IncrementFailed("Index symbols (refs)", 1)
+		return nil, fmt.Errorf("batch merge REFERENCES rels failed: %w", err)
+	}
+	if len(referencesRels) > 0 {
+		si.report.IncrementWritten("Index symbols (refs)", len(referencesRels))
 	}
 	tRelReferences := time.Since(t)
 
@@ -1239,7 +1285,12 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 
 	t = time.Now()
 	if err := si.client.MergeRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch merge ref CONTAINS rels failed: %v\n", err)
+		// Data-affecting failure — a graph missing these is silently wrong: CONTAINS edges (File -> Reference) are core structural
+		si.report.IncrementFailed("Index symbols (refs)", 1)
+		return nil, fmt.Errorf("batch merge ref CONTAINS rels failed: %w", err)
+	}
+	if len(refContainsRels) > 0 {
+		si.report.IncrementWritten("Index symbols (refs)", len(refContainsRels))
 	}
 	tRelRefContains := time.Since(t)
 
@@ -1285,7 +1336,9 @@ func (si *SCIPIndexer) resolveDeferredDependencies(ctx context.Context, subs []i
 		}
 		if err := s.indexer.indexPackageDependencies(ctx,
 			s.indexer.pendingImports, s.indexer.pendingServiceID); err != nil {
-			fmt.Printf("Warning: deferred dep resolution failed for %s: %v\n", s.indexer.serviceName, err)
+			// Enrichment only — record and continue: DEPENDS_ON edges enhance but don't corrupt
+			s.indexer.report.AddWarning(fmt.Sprintf("deferred dep resolution failed for %s: %v", s.indexer.serviceName, err))
+			s.indexer.report.IncrementFailed("Package dependencies", 1)
 		}
 	}
 }
@@ -1380,9 +1433,13 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			string(models.DependsOnRel), nil, relProps)
 
 		if err != nil {
-			fmt.Printf("Warning: failed to merge DEPENDS_ON relationship to %s: %v\n", targetServiceName, err)
+			// Enrichment only — record and continue: individual DEPENDS_ON edge failure doesn't corrupt graph
+			// Continue trying to create other dependency edges
+			si.report.AddWarning(fmt.Sprintf("failed to merge DEPENDS_ON relationship to %s: %v", targetServiceName, err))
+			si.report.IncrementFailed("Package dependencies", 1)
 		} else {
 			fmt.Printf("Created DEPENDS_ON: %s -> %s (%d imports)\n", si.serviceName, targetServiceName, count)
+			si.report.IncrementWritten("Package dependencies", 1)
 			createdCount++
 		}
 	}
@@ -1444,6 +1501,12 @@ func (si *SCIPIndexer) SetScope(scope models.ScopeContext) {
 // When set, each phase of IndexProject() will be timed.
 func (si *SCIPIndexer) SetBenchmarkTimer(timer PipelineTimer) {
 	si.timer = timer
+}
+
+// Report returns the IndexReport from the most recent IndexProject run.
+// Returns nil if IndexProject has not been called or completed.
+func (si *SCIPIndexer) Report() *IndexReport {
+	return si.report
 }
 
 // createPullRequestNode creates a PullRequest node in the graph for PR-scope

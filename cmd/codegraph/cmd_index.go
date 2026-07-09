@@ -98,9 +98,22 @@ The language will be auto-detected from the project structure, or you can specif
 				}
 			}
 			fmt.Printf("Indexing project at %s using SCIP...\n", projectPath)
-			if err := scipIndexer.IndexProject(ctx, projectPath); err != nil {
+			err := scipIndexer.IndexProject(ctx, projectPath)
+
+			// Print report regardless of error status (to show partial progress)
+			if report := scipIndexer.Report(); report != nil {
+				fmt.Println("\n" + report.String())
+			}
+
+			if err != nil {
 				return fmt.Errorf("failed to index project with SCIP: %w", err)
 			}
+
+			// Check for optional enrichment failures that should still produce non-zero exit
+			if report := scipIndexer.Report(); report != nil && report.HasFailures() {
+				return fmt.Errorf("indexing completed with %d failed phase(s) — see report above", report.FailedPhaseCount())
+			}
+
 			fmt.Println("✓ Project indexed successfully using SCIP")
 		} else {
 			// Polyglot path: auto-detect all languages, install missing indexers, index each.
