@@ -48,7 +48,7 @@ func TestQueryTinyGo(t *testing.T) {
 	greetFuncSym := lookupSCIPSymbol(t, ctx, client, "/greet().")
 
 	t.Run("Search Greeter returns interface plus two implementations", func(t *testing.T) {
-		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Greeter", Limit: 20})
+		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Greeter", Limit: 20, ServiceNames: []string{"tinygo"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -162,7 +162,7 @@ func TestQueryTinyTS(t *testing.T) {
 	lsp := query.NewLSPService(client)
 
 	t.Run("Search Logger returns interface plus implementation", func(t *testing.T) {
-		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Logger", Limit: 20})
+		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Logger", Limit: 20, ServiceNames: []string{"tinyts"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -273,7 +273,7 @@ func TestQueryTinyPolyglot(t *testing.T) {
 	lsp := query.NewLSPService(client)
 
 	t.Run("Search Client returns interface plus HttpClient impl", func(t *testing.T) {
-		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Client", Limit: 20})
+		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Client", Limit: 20, ServiceNames: []string{"polyglot"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -295,7 +295,7 @@ func TestQueryTinyPolyglot(t *testing.T) {
 	})
 
 	t.Run("Search Handler returns Go Handler class", func(t *testing.T) {
-		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Handler", Limit: 20})
+		resp, err := lsp.Search(ctx, query.SearchRequest{Query: "Handler", Limit: 20, ServiceNames: []string{"polyglot"}})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -394,8 +394,14 @@ func fileOrEmpty(info *models.SymbolInfo) string {
 // suffixes like "/Greeter#" instead of the full "scip-go gomod ... " string.
 func lookupSCIPSymbol(t *testing.T, ctx context.Context, client *neo4j.Client, suffix string) string {
 	t.Helper()
-	cypher := `MATCH (s:Symbol) WHERE s.symbol ENDS WITH $suffix RETURN s.symbol AS symbol LIMIT 2`
-	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"suffix": suffix})
+	// Constrain to fixture-owned symbols: the database may hold an unrelated
+	// dev graph in the same scope, and a bare suffix like "/Client#" collides
+	// with any real codebase's Client type.
+	cypher := `MATCH (s:Symbol)
+		WHERE s.symbol ENDS WITH $suffix
+		  AND any(m IN $markers WHERE s.symbol CONTAINS m)
+		RETURN s.symbol AS symbol LIMIT 2`
+	records, err := client.ExecuteQuery(ctx, cypher, map[string]any{"suffix": suffix, "markers": fixtureModuleMarkers})
 	if err != nil {
 		t.Fatalf("lookupSCIPSymbol(%q): %v", suffix, err)
 	}

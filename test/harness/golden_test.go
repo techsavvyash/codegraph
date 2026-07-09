@@ -185,6 +185,14 @@ func dumpAndCompare(t *testing.T, ctx context.Context, client *neo4j.Client, gol
 	t.Helper()
 	snapshot, err := harness.Dump(ctx, client, harness.Options{
 		ScopeID: models.ScopeMain,
+		// The fixtures share scope "main" with whatever dev graph lives in the
+		// same database; without ownership filtering the dump would include
+		// every foreign node in the scope and the goldens would only match on
+		// an otherwise-empty database.
+		Owned: &harness.Ownership{
+			Services: fixtureServices,
+			Markers:  fixtureModuleMarkers,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Dump: %v", err)

@@ -499,6 +499,65 @@ func (qb *QueryBuilder) SearchNodes(ctx context.Context, searchTerm string, node
 	return result, nil
 }
 
+// SearchNodesInServices is SearchNodes restricted to nodes owned by the given
+// services (exact serviceName or "<name>/" sub-service prefix). On a database
+// holding several indexed projects, an unscoped substring search mixes results
+// from all of them; scoping by owner keeps searches meaningful per project.
+func (qb *QueryBuilder) SearchNodesInServices(ctx context.Context, searchTerm string, nodeTypes []string, serviceNames []string, limit int) ([]*neo4j.Record, error) {
+	var labelFilters []string
+	for _, nodeType := range nodeTypes {
+		labelFilters = append(labelFilters, fmt.Sprintf("n:%s", Ident(nodeType)))
+	}
+	labelClause := ""
+	if len(labelFilters) > 0 {
+		labelClause = "AND (" + strings.Join(labelFilters, " OR ") + ")"
+	}
+
+	// Class/Interface/Module/Symbol nodes are FQN-keyed and MERGE-shared
+	// across services, so they carry no serviceName; they are owned via a
+	// direct connection to a service-owned node instead.
+	cypher := fmt.Sprintf(`
+		MATCH (n)
+		WHERE (
+			any(svc IN $serviceNames WHERE n.serviceName = svc OR n.serviceName STARTS WITH svc + '/')
+			OR (n.serviceName IS NULL AND EXISTS {
+				MATCH (n)--(nbr)
+				WHERE any(svc IN $serviceNames WHERE nbr.serviceName = svc OR nbr.serviceName STARTS WITH svc + '/')
+			})
+		)
+		%s
+		AND (
+			toLower(n.name) CONTAINS toLower($searchTerm) OR
+			toLower(n.displayName) CONTAINS toLower($searchTerm) OR
+			toLower(n.signature) CONTAINS toLower($searchTerm) OR
+			toLower(n.symbol) CONTAINS toLower($searchTerm) OR
+			toLower(n.path) CONTAINS toLower($searchTerm)
+		)
+		RETURN n, labels(n) AS nodeLabels
+		ORDER BY
+			CASE
+				WHEN n:Function OR n:Method THEN 1
+				WHEN n:Class OR n:Interface THEN 2
+				WHEN n:Variable OR n:Parameter THEN 3
+				WHEN n:File THEN 4
+				ELSE 5
+			END,
+			n.name
+	`, labelClause)
+	if limit > 0 {
+		cypher += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	result, err := qb.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"searchTerm":   searchTerm,
+		"serviceNames": serviceNames,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search nodes in services: %w", err)
+	}
+	return result, nil
+}
+
 // SemanticSearch performs advanced search including multi-word phrases and related concepts
 func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, nodeTypes []string, limit int) ([]*neo4j.Record, error) {
 	// Split search term into individual words for better matching

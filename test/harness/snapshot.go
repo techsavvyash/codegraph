@@ -45,6 +45,39 @@ type Options struct {
 	IgnoreRelProps []string
 	// IgnoreLabels skips nodes whose labels include any of these (e.g. "GenerationDiagnostic").
 	IgnoreLabels []string
+	// Owned, when non-nil, restricts the dump to nodes the fixture owns, so a
+	// golden test produces identical output whether the database is otherwise
+	// empty or holds an unrelated dev graph in the same scope. Relationships
+	// require BOTH endpoints owned.
+	Owned *Ownership
+}
+
+// Ownership defines which nodes belong to a fixture. A node is owned when its
+// serviceName matches one of Services (exactly or as a "<svc>/" sub-service),
+// it is a Service node with such a name, its nodeKey contains one of Markers,
+// or it is directly connected to a service-owned node — the last leg claims
+// the shared, serviceName-less node classes (stdlib Symbols referenced by
+// fixture code, structural APIRoute/SDKCall keyed on bare paths) whose
+// properties are identical regardless of who else shares them.
+type Ownership struct {
+	Services []string
+	Markers  []string
+}
+
+// ownedPredicate renders the ownership WHERE fragment for node variable v.
+// Params ownedServices/ownedMarkers must be bound by the caller.
+func ownedPredicate(v string) string {
+	return fmt.Sprintf(`(
+	   (%[1]s.serviceName IS NOT NULL
+	    AND any(svc IN $ownedServices WHERE %[1]s.serviceName = svc OR %[1]s.serviceName STARTS WITH svc + '/'))
+	OR (%[1]s:Service AND any(svc IN $ownedServices WHERE %[1]s.name = svc OR %[1]s.name STARTS WITH svc + '/'))
+	OR (%[1]s.nodeKey IS NOT NULL AND any(m IN $ownedMarkers WHERE %[1]s.nodeKey CONTAINS m))
+	OR EXISTS {
+	     MATCH (%[1]s)--(nbr)
+	     WHERE nbr.serviceName IS NOT NULL
+	       AND any(svc IN $ownedServices WHERE nbr.serviceName = svc OR nbr.serviceName STARTS WITH svc + '/')
+	   }
+	)`, v)
 }
 
 // Dump queries Neo4j and returns a canonical Snapshot. Output is sorted so that two
@@ -64,9 +97,18 @@ func Dump(ctx context.Context, client *neo4j.Client, opts Options) (*Snapshot, e
 func dumpNodes(ctx context.Context, client *neo4j.Client, opts Options) ([]Node, error) {
 	cypher := "MATCH (n) "
 	params := map[string]any{}
+	var conds []string
 	if opts.ScopeID != "" {
-		cypher += "WHERE n.scopeId = $scopeId "
+		conds = append(conds, "n.scopeId = $scopeId")
 		params["scopeId"] = opts.ScopeID
+	}
+	if opts.Owned != nil {
+		conds = append(conds, ownedPredicate("n"))
+		params["ownedServices"] = opts.Owned.Services
+		params["ownedMarkers"] = opts.Owned.Markers
+	}
+	if len(conds) > 0 {
+		cypher += "WHERE " + joinConds(conds) + " "
 	}
 	cypher += "RETURN labels(n) AS labels, n.nodeKey AS nodeKey, properties(n) AS props"
 
@@ -107,9 +149,18 @@ func dumpNodes(ctx context.Context, client *neo4j.Client, opts Options) ([]Node,
 func dumpRels(ctx context.Context, client *neo4j.Client, opts Options) ([]Rel, error) {
 	cypher := "MATCH (a)-[r]->(b) "
 	params := map[string]any{}
+	var conds []string
 	if opts.ScopeID != "" {
-		cypher += "WHERE r.scopeId = $scopeId "
+		conds = append(conds, "r.scopeId = $scopeId")
 		params["scopeId"] = opts.ScopeID
+	}
+	if opts.Owned != nil {
+		conds = append(conds, ownedPredicate("a"), ownedPredicate("b"))
+		params["ownedServices"] = opts.Owned.Services
+		params["ownedMarkers"] = opts.Owned.Markers
+	}
+	if len(conds) > 0 {
+		cypher += "WHERE " + joinConds(conds) + " "
 	}
 	cypher += `RETURN type(r) AS type,
 		labels(a) AS startLabels, a.nodeKey AS startKey,
@@ -174,6 +225,17 @@ func (s *Snapshot) MarshalCanonical() ([]byte, error) {
 }
 
 // --- helpers ---
+
+func joinConds(conds []string) string {
+	out := ""
+	for i, c := range conds {
+		if i > 0 {
+			out += " AND "
+		}
+		out += c
+	}
+	return out
+}
 
 func stringSet(xs []string) map[string]struct{} {
 	if len(xs) == 0 {

@@ -242,11 +242,14 @@ func TestP2_SearchNodesScoped_MainVisibleFromPRScope(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	nodeKey := prefix + "func:pkg/main.go#Run(...)"
+	// The name must be unique in the whole database, not just this test's
+	// prefix: SearchNodesScoped matches by substring across main + PR scope,
+	// so a generic name like "Run" collides with any indexed dev graph.
+	nodeKey := prefix + "func:pkg/main.go#AuditP2MainRun(...)"
 	_, err := client.MergeNode(ctx, []string{"Function"},
 		map[string]any{"nodeKey": nodeKey, "scopeId": "main"},
 		map[string]any{
-			"name": "Run", "nodeKey": nodeKey,
+			"name": "AuditP2MainRun", "nodeKey": nodeKey,
 			"scope": "main", "scopeId": "main",
 		})
 	if err != nil {
@@ -254,7 +257,7 @@ func TestP2_SearchNodesScoped_MainVisibleFromPRScope(t *testing.T) {
 	}
 
 	qb := neo4j.NewQueryBuilder(client)
-	results, err := qb.SearchNodesScoped(ctx, "Run", []string{"Function"}, 0, "pr-99")
+	results, err := qb.SearchNodesScoped(ctx, "AuditP2MainRun", []string{"Function"}, 0, "pr-99")
 	if err != nil {
 		t.Fatalf("SearchNodesScoped failed: %v", err)
 	}

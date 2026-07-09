@@ -6,6 +6,7 @@ import (
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
+	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
@@ -124,6 +125,11 @@ type SearchRequest struct {
 	Query     string   `json:"query"`
 	NodeTypes []string `json:"nodeTypes,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
+	// ServiceNames restricts results to nodes owned by these services (exact
+	// name or "<name>/" sub-service prefix). Empty means no service filter —
+	// on a database holding several indexed projects an unscoped name search
+	// mixes results from all of them.
+	ServiceNames []string `json:"serviceNames,omitempty"`
 }
 
 // SearchResult represents a search result item
@@ -157,7 +163,13 @@ func (lsp *LSPService) Search(ctx context.Context, req SearchRequest) (*SearchRe
 		nodeTypes = []string{"Function", "Method", "Class", "Interface", "Variable"}
 	}
 
-	records, err := lsp.queryBuilder.SearchNodes(ctx, req.Query, nodeTypes, limit)
+	var records []*neo4jdriver.Record
+	var err error
+	if len(req.ServiceNames) > 0 {
+		records, err = lsp.queryBuilder.SearchNodesInServices(ctx, req.Query, nodeTypes, req.ServiceNames, limit)
+	} else {
+		records, err = lsp.queryBuilder.SearchNodes(ctx, req.Query, nodeTypes, limit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to search nodes: %w", err)
 	}
