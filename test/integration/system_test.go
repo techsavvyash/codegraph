@@ -388,16 +388,19 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 	})
 
 	s.T().Run("RetrieveFunctionBySignature", func(t *testing.T) {
-		// First, find a function with its signature
+		// Find a function with a signature FROM THIS SUITE'S OWN INDEX — an
+		// unconstrained pick can grab a node another project indexed into the
+		// shared database, whose relative filePath doesn't exist here.
 		cypher := `
 			MATCH (f:Function)
-			WHERE f.signature IS NOT NULL AND f.name IS NOT NULL
+			WHERE f.serviceName = 'itest-system' AND f.scopeId = $scope
+			  AND f.signature IS NOT NULL AND f.name IS NOT NULL
 			  AND f.filePath IS NOT NULL AND f.filePath <> '<external>'
 			RETURN f.name AS name, f.signature AS signature
 			LIMIT 1
 		`
 
-		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
+		result, err := s.client.ExecuteQuery(s.ctx, cypher, map[string]any{"scope": systemTestSuiteScopeID})
 		require.NoError(t, err)
 		require.Greater(t, len(result), 0, "Should find at least one function with signature")
 

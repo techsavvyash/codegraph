@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	schema "github.com/context-maximiser/code-graph/internal/graph/schema"
@@ -334,6 +335,24 @@ func resetGraph(t *testing.T, ctx context.Context, client *neo4j.Client) {
 	if err := schema.NewSchemaManager(client).CreateSchema(ctx); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
+	// Also sweep on the way out: start-of-test sweeps alone mean whichever
+	// test runs LAST leaves its fixture in the shared database — and the
+	// fixture-leak check lives earlier in file order, so it never saw the
+	// tail. The cleanup dials its own client because t.Cleanup fires after
+	// the test's client is closed.
+	t.Cleanup(func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		cleanupClient, err := neo4j.NewClient(neo4jTestConfig())
+		if err != nil {
+			t.Errorf("fixture cleanup: reconnect failed: %v", err)
+			return
+		}
+		defer cleanupClient.Close(cctx)
+		if err := deleteFixtureData(cctx, cleanupClient); err != nil {
+			t.Errorf("fixture cleanup failed: %v", err)
+		}
+	})
 }
 
 func compareGolden(t *testing.T, path string, got []byte) {
