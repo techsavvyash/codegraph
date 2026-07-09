@@ -138,6 +138,25 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(1, "")
 	}
 
+	// Step 3b: Delete this service's previous subgraph (within this scope)
+	// before writing anything new, so re-indexing is idempotent instead of
+	// accumulating stale nodes/edges alongside fresh ones.
+	if si.timer != nil {
+		si.timer.Start("Delete previous subgraph")
+	}
+	deleteCounts, err := si.deletePreviousSubgraph(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to delete previous subgraph for %s: %w", si.serviceName, err)
+	}
+	fmt.Printf("Deleted previous subgraph for %s: %s\n", si.serviceName, formatDeleteCounts(deleteCounts))
+	if si.timer != nil {
+		total := 0
+		for _, n := range deleteCounts {
+			total += n
+		}
+		si.timer.Stop(total, "")
+	}
+
 	// Step 4: Index files
 	if si.timer != nil {
 		si.timer.Start("Index files")
@@ -201,10 +220,10 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		if implCount > 0 {
 			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
 			if len(batch) > 0 {
-				if err := si.client.CreateRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
-					fmt.Printf("Warning: failed to create IMPLEMENTS relationships: %v\n", err)
+				if err := si.client.MergeRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
+					fmt.Printf("Warning: failed to merge IMPLEMENTS relationships: %v\n", err)
 				} else {
-					fmt.Printf("Created %d IMPLEMENTS relationships\n", len(batch))
+					fmt.Printf("Merged %d IMPLEMENTS relationships\n", len(batch))
 				}
 			}
 		}
@@ -778,8 +797,9 @@ func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, se
 		return "", err
 	}
 
-	// Link file to service
-	_, err = si.client.CreateRelationship(ctx, serviceID, fileID, "CONTAINS",
+	// Link file to service. MERGE (not CREATE): re-indexing the same service
+	// must not accumulate parallel Service-CONTAINS->File edges.
+	_, err = si.client.MergeRelationship(ctx, serviceID, fileID, "CONTAINS", nil,
 		map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID})
 	return fileID, err
 }
@@ -1057,8 +1077,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "DEFINES", definesRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create DEFINES rels failed: %v\n", err)
+	if err := si.client.MergeRelsBatch(ctx, "DEFINES", definesRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch merge DEFINES rels failed: %v\n", err)
 	}
 	tRelDefines := time.Since(t)
 
@@ -1080,8 +1100,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", containsRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create def CONTAINS rels failed: %v\n", err)
+	if err := si.client.MergeRelsBatch(ctx, "CONTAINS", containsRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch merge def CONTAINS rels failed: %v\n", err)
 	}
 	tRelContains := time.Since(t)
 
@@ -1090,8 +1110,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		if recorder, ok := si.timer.(SubPhaseRecorder); ok {
 			recorder.AddResult("  MergeNodesBatch(Symbol)", tMergeSymbol, len(symbolIDs), "")
 			recorder.AddResult("  MergeNodesBatch(Definition)", tMergeDefinition, len(defIDs), "")
-			recorder.AddResult("  CreateRelsBatch(DEFINES)", tRelDefines, len(definesRels), "")
-			recorder.AddResult("  CreateRelsBatch(CONTAINS)", tRelContains, len(containsRels), "")
+			recorder.AddResult("  MergeRelsBatch(DEFINES)", tRelDefines, len(definesRels), "")
+			recorder.AddResult("  MergeRelsBatch(CONTAINS)", tRelContains, len(containsRels), "")
 		}
 	}
 
@@ -1183,8 +1203,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create REFERENCES rels failed: %v\n", err)
+	if err := si.client.MergeRelsBatch(ctx, "REFERENCES", referencesRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch merge REFERENCES rels failed: %v\n", err)
 	}
 	tRelReferences := time.Since(t)
 
@@ -1218,8 +1238,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}
 
 	t = time.Now()
-	if err := si.client.CreateRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
-		fmt.Printf("Warning: batch create ref CONTAINS rels failed: %v\n", err)
+	if err := si.client.MergeRelsBatch(ctx, "CONTAINS", refContainsRels, batchSize); err != nil {
+		fmt.Printf("Warning: batch merge ref CONTAINS rels failed: %v\n", err)
 	}
 	tRelRefContains := time.Since(t)
 
@@ -1227,8 +1247,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 		si.timer.Stop(len(refItems), fmt.Sprintf("%d refs", len(refItems)))
 		if recorder, ok := si.timer.(SubPhaseRecorder); ok {
 			recorder.AddResult("  MergeNodesBatch(Reference)", tMergeRef, len(refIDs), "")
-			recorder.AddResult("  CreateRelsBatch(REFERENCES)", tRelReferences, len(referencesRels), "")
-			recorder.AddResult("  CreateRelsBatch(CONTAINS)", tRelRefContains, len(refContainsRels), "")
+			recorder.AddResult("  MergeRelsBatch(REFERENCES)", tRelReferences, len(referencesRels), "")
+			recorder.AddResult("  MergeRelsBatch(CONTAINS)", tRelRefContains, len(refContainsRels), "")
 		}
 	}
 
@@ -1356,11 +1376,11 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			"scopeId":      si.scopeCtx.ScopeID,
 		}
 
-		_, err = si.client.CreateRelationship(ctx, serviceID, targetServiceID,
-			string(models.DependsOnRel), relProps)
+		_, err = si.client.MergeRelationship(ctx, serviceID, targetServiceID,
+			string(models.DependsOnRel), nil, relProps)
 
 		if err != nil {
-			fmt.Printf("Warning: failed to create DEPENDS_ON relationship to %s: %v\n", targetServiceName, err)
+			fmt.Printf("Warning: failed to merge DEPENDS_ON relationship to %s: %v\n", targetServiceName, err)
 		} else {
 			fmt.Printf("Created DEPENDS_ON: %s -> %s (%d imports)\n", si.serviceName, targetServiceName, count)
 			createdCount++

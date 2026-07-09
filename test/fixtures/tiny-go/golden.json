@@ -3016,21 +3016,6 @@
       }
     },
     {
-      "type": "IMPLEMENTS",
-      "startLabels": [
-        "Method"
-      ],
-      "startKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
-      "endLabels": [
-        "Method"
-      ],
-      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
-      "props": {
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
-    {
       "type": "REFERENCES",
       "startLabels": [
         "Reference"
