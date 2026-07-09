@@ -323,6 +323,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		modulePath := readModulePath(projectPath)
 		apiDetector := NewAPISurfaceDetector(si.client, modulePath)
 		apiDetector.SetScope(si.scopeCtx)
+		apiDetector.SetServiceName(si.serviceName)
 		if err := apiDetector.Detect(ctx); err != nil {
 			// Enrichment only — record and continue: API surface enhances but doesn't corrupt
 			si.report.AddWarning(fmt.Sprintf("structural API surface detection failed: %v", err))
@@ -430,6 +431,7 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	// Index each root.
 	var indexedSubs []indexedSub
 	var errs []error
+	usedServiceNames := make(map[string]bool)
 	for _, r := range roots {
 		if _, didFail := failed[r.Language]; didFail {
 			fmt.Printf("Skipping %s (%s) — indexer unavailable\n", r.Language, relLabel(r.Path))
@@ -442,11 +444,19 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 		fmt.Printf("\n=== Indexing %s at %s ===\n", cfg.DisplayName, rel)
 
 		// Derive a unique service name: serviceName for the project root,
-		// serviceName/rel-path for every sub-module.
+		// serviceName/rel-path for every sub-module. Uniqueness must hold per
+		// (path, language), not just per path — two language roots in the same
+		// directory (e.g. go.mod and tsconfig.json both at the repo root)
+		// would otherwise share a (serviceName, scopeId) identity, and each
+		// sub-run's delete-before-write pass would wipe the other's subgraph.
 		subServiceName := si.serviceName
 		if rel != "." {
 			subServiceName = si.serviceName + "/" + filepath.ToSlash(rel)
 		}
+		if usedServiceNames[subServiceName] {
+			subServiceName = subServiceName + "#" + string(r.Language)
+		}
+		usedServiceNames[subServiceName] = true
 
 		sub := NewSCIPIndexerWithLanguage(si.client, subServiceName, si.version, si.repoURL, r.Language)
 		sub.SetScope(si.scopeCtx)

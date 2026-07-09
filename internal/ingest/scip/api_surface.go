@@ -17,6 +17,7 @@ import (
 type APISurfaceDetector struct {
 	client        *neo4j.Client
 	projectModule string // Go module path (e.g., "github.com/context-maximiser/code-graph")
+	serviceName   string // service whose surface is being detected
 	scopeCtx      models.ScopeContext
 }
 
@@ -35,9 +36,20 @@ func (d *APISurfaceDetector) SetScope(scope models.ScopeContext) {
 	d.scopeCtx = scope
 }
 
+// SetServiceName binds detection to one service. Every strategy both reads
+// and WRITES function properties (hasExternalParams, isCrossPkgTarget), so an
+// unbounded run mutates other services' nodes and synthesizes APIRoutes for
+// every service in the database each time any one of them is indexed.
+func (d *APISurfaceDetector) SetServiceName(name string) {
+	d.serviceName = name
+}
+
 // Detect runs all three structural detection strategies and creates APIRoute
 // nodes + EXPOSES_API edges for detected API surface functions.
 func (d *APISurfaceDetector) Detect(ctx context.Context) error {
+	if d.serviceName == "" {
+		return errors.New("api surface detection requires a service name — unbounded detection mutates every service in the database")
+	}
 	fmt.Println("Running structural API surface detection...")
 
 	// The three strategies are independent: a failure in one must not stop
@@ -80,6 +92,7 @@ func (d *APISurfaceDetector) detectExternalParamFunctions(ctx context.Context) (
 	cypher := `
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
+		  AND fn.serviceName = $serviceName
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND fn.paramTypes IS NOT NULL
 		  AND size(fn.paramTypes) > 0
@@ -95,6 +108,7 @@ func (d *APISurfaceDetector) detectExternalParamFunctions(ctx context.Context) (
 	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
 		"scopeId":       d.scopeCtx.ScopeID,
 		"projectModule": d.projectModule,
+		"serviceName":   d.serviceName,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("external-param detection: %w", err)
@@ -119,6 +133,8 @@ func (d *APISurfaceDetector) detectCrossPackageTargets(ctx context.Context) (int
 		MATCH (caller)-[:CALLS]->(callee)
 		WHERE (caller:Function OR caller:Method)
 		  AND (callee:Function OR callee:Method)
+		  AND callee.serviceName = $serviceName
+		  AND caller.serviceName = $serviceName
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
 		  AND coalesce(callee.isExported, false) = true
@@ -135,7 +151,8 @@ func (d *APISurfaceDetector) detectCrossPackageTargets(ctx context.Context) (int
 	`
 
 	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": d.scopeCtx.ScopeID,
+		"scopeId":     d.scopeCtx.ScopeID,
+		"serviceName": d.serviceName,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("cross-package detection: %w", err)
@@ -159,6 +176,7 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 	cypher := `
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
+		  AND fn.serviceName = $serviceName
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.isExported, false) = true
 		  AND coalesce(fn.isTestFunction, false) = false
@@ -176,7 +194,8 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 	`
 
 	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": d.scopeCtx.ScopeID,
+		"scopeId":     d.scopeCtx.ScopeID,
+		"serviceName": d.serviceName,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("API route synthesis query: %w", err)
