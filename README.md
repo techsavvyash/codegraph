@@ -24,14 +24,13 @@ CodeGraph indexes code into a queryable knowledge graph that enables:
 - Docker and Docker Compose
 - Language-specific SCIP indexer (see [Supported Languages](#supported-languages))
 
-### 1. Start Neo4j and OpenSearch
+### 1. Start Neo4j
 
 ```bash
 docker compose up -d
 ```
 
 Neo4j will be available at `bolt://localhost:7687` with credentials `neo4j / password123`.
-OpenSearch (optional, for hybrid search) runs on `localhost:9200`.
 
 ### 2. Build the CLI
 
@@ -278,7 +277,7 @@ make test-coverage      # Generate coverage report
 make benchmark          # Run benchmarks
 
 # Database
-make docker-up          # Start Neo4j + OpenSearch
+make docker-up          # Start Neo4j
 make docker-down        # Stop containers
 make docker-clean       # Clean up containers and volumes
 

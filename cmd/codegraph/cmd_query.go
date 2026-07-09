@@ -23,11 +23,14 @@ var queryCmd = &cobra.Command{
 var querySearchCmd = &cobra.Command{
 	Use:   "search [term]",
 	Short: "Search for code symbols",
-	Long:  "Search for functions, classes, variables, and other code symbols",
+	Long:  "Search for functions, classes, variables, and other code symbols using fulltext indexes with RRF fusion",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		searchTerm := args[0]
 		limit, _ := cmd.Flags().GetInt("limit")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+		service, _ := cmd.Flags().GetString("service")
+		cursor, _ := cmd.Flags().GetString("cursor")
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -35,105 +38,49 @@ var querySearchCmd = &cobra.Command{
 		}
 		defer client.Close(context.Background())
 
-		hybridSearch := search.NewHybridSearchManager(client)
-
-		// Optionally attach OpenSearch for BM25; fall back to Neo4j fulltext.
-		searchMode := "graph+fulltext (neo4j)"
-		if osStore, ok := createOpenSearchStore(); ok {
-			defer osStore.Close()
-			hybridSearch.WithTextStore(osStore)
-			searchMode = "graph+fulltext (opensearch)"
-		}
-
-		// Apply scope if provided.
-		if scopeID, _ := cmd.Flags().GetString("scope-id"); scopeID != "" {
-			hybridSearch.SetScope(scopeID)
-		}
-
-		fmt.Printf("🔍 Search mode: %s\n", searchMode)
+		searcher := search.NewSearcher(client)
 
 		ctx := context.Background()
-		response, err := hybridSearch.UnifiedSearch(ctx, searchTerm, limit)
+		response, err := searcher.Search(ctx, searchTerm, search.Options{
+			ScopeID: scopeID,
+			Service: service,
+			Limit:   limit,
+			Cursor:  cursor,
+		})
 		if err != nil {
 			return fmt.Errorf("search failed: %w", err)
 		}
 
 		// Display results using RRF-fused rendering.
-		fmt.Printf("\nSearch Results (%d total):\n", response.TotalResults)
-		fmt.Printf("Search Types: %v\n", response.SearchTypes)
-		fmt.Printf("Full-Text Results: %d | Semantic Results: %d\n",
-			response.Metadata.FullTextResults,
-			response.Metadata.SemanticResults)
+		fmt.Printf("\n🔍 Search Results for '%s':\n", searchTerm)
+		fmt.Printf("Found %d results\n", len(response.Results))
+
+		if len(response.Results) == 0 {
+			fmt.Println("No results found.")
+			return nil
+		}
 
 		fmt.Println("\nResults:")
 		fmt.Println("---------")
 
 		for i, result := range response.Results {
-			fmt.Printf("\n%d. ", i+1)
+			fmt.Printf("\n%d. **%s** (%s)\n", i+1, result.Name, result.Label)
 
-			name := ""
-			for _, field := range []string{"name", "title", "displayName", "signature", "symbol", "path"} {
-				if v, ok := result.Node[field].(string); ok && v != "" {
-					name = v
-					break
-				}
+			if result.Signature != "" {
+				fmt.Printf("   Signature: %s\n", result.Signature)
 			}
-			if name == "" {
-				if v, ok := result.Node["snippet"].(string); ok && v != "" {
-					name = v
-				} else if v, ok := result.Node["nodeKey"].(string); ok && v != "" {
-					name = v
-				} else {
-					name = "Unknown"
-				}
+			if result.FilePath != "" {
+				fmt.Printf("   File: %s\n", result.FilePath)
 			}
-			if len(name) > 80 {
-				name = name[:77] + "..."
+			if result.Service != "" {
+				fmt.Printf("   Service: %s\n", result.Service)
 			}
-			fmt.Printf("**%s**", name)
+			fmt.Printf("   RRF Score: %.6f\n", result.Score)
+		}
 
-			labels := result.Labels
-			if len(labels) == 0 {
-				if nt, ok := result.Node["nodeType"].(string); ok && nt != "" {
-					labels = []string{nt}
-				}
-			}
-			if len(labels) > 0 {
-				fmt.Printf(" (%s)", strings.Join(labels, ", "))
-			}
-			fmt.Printf("\n   RRF Score: %.5f | Source: %s | Relevance: %s\n",
-				result.CombinedScore, result.Source, result.Relevance)
-
-			var scores []string
-			if result.FullTextScore > 0 {
-				scores = append(scores, fmt.Sprintf("BM25: %.2f", result.FullTextScore))
-			}
-			if result.SemanticScore > 0 {
-				scores = append(scores, fmt.Sprintf("Semantic: %.4f", result.SemanticScore))
-			}
-			if len(scores) > 0 {
-				fmt.Printf("   Raw scores: %s\n", strings.Join(scores, " | "))
-			}
-
-			if fp, ok := result.Node["filePath"].(string); ok && fp != "" {
-				loc := fp
-				if sl, ok := result.Node["startLine"]; ok {
-					loc = fmt.Sprintf("%s:%v", fp, sl)
-				}
-				fmt.Printf("   Location: %s\n", loc)
-			}
-
-			if description, ok := result.Node["description"].(string); ok && description != "" {
-				if len(description) > 120 {
-					description = description[:117] + "..."
-				}
-				fmt.Printf("   Description: %s\n", description)
-			} else if content, ok := result.Node["content"].(string); ok && content != "" {
-				if len(content) > 120 {
-					content = content[:117] + "..."
-				}
-				fmt.Printf("   Content: %s\n", content)
-			}
+		// Show pagination info
+		if response.NextCursor != "" {
+			fmt.Printf("\nMore results available. Use --cursor '%s' to continue.\n", response.NextCursor)
 		}
 
 		return nil
@@ -293,8 +240,10 @@ func init() {
 	queryCmd.AddCommand(queryFlowsCmd)
 
 	// Query flags
-	querySearchCmd.Flags().IntP("limit", "l", 10, "Limit search results")
+	querySearchCmd.Flags().IntP("limit", "l", 20, "Limit search results")
 	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
+	querySearchCmd.Flags().String("service", "", "Optional filter by service name")
+	querySearchCmd.Flags().String("cursor", "", "Keyset pagination cursor for next page")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 

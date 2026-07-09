@@ -40,24 +40,6 @@ services:
       retries: 3
       start_period: 40s
 
-  opensearch:
-    image: opensearchproject/opensearch:2.11.0
-    container_name: code-graph-opensearch
-    environment:
-      - discovery.type=single-node
-      - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx512m
-    ports:
-      - "9200:9200"
-    volumes:
-      - opensearch_data:/usr/share/opensearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   # Optional: Add a web interface for Neo4j browser
   neo4j-browser:
     image: neo4j:5.26-community
@@ -76,7 +58,6 @@ volumes:
   neo4j_logs:
   neo4j_import:
   neo4j_plugins:
-  opensearch_data:
 
 # Development network
 networks:

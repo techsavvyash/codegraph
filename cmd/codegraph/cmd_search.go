@@ -5,248 +5,70 @@ import (
 	"fmt"
 
 	"github.com/context-maximiser/code-graph/internal/search"
-	textindex "github.com/context-maximiser/code-graph/internal/search/textindex"
 	"github.com/spf13/cobra"
 )
 
-// searchCmd manages advanced search capabilities
+// searchCmd handles search operations
 var searchCmd = &cobra.Command{
 	Use:   "search",
-	Short: "Advanced search management",
-	Long:  "Manage full-text search (BM25) and hybrid search capabilities",
-}
-
-var searchInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize search indexes",
-	Long:  "Create full-text indexes required for advanced search",
+	Short: "Search for code symbols",
+	Long:  "Search for functions, classes, variables, and other code symbols using fulltext indexes",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		searchTerm := args[0]
+		limit, _ := cmd.Flags().GetInt("limit")
+		scopeID, _ := cmd.Flags().GetString("scope-id")
+		service, _ := cmd.Flags().GetString("service")
+		cursor, _ := cmd.Flags().GetString("cursor")
+
 		client, err := createNeo4jClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Neo4j client: %w", err)
 		}
 		defer client.Close(context.Background())
 
-		ctx := context.Background()
-
-		// Always create full-text indexes in Neo4j.
-		fullTextSearch := search.NewFullTextSearchManager(client)
-		fmt.Println("🚀 Initializing full-text search indexes...")
-		if err := fullTextSearch.CreateFullTextIndexes(ctx); err != nil {
-			fmt.Printf("Warning: failed to create full-text indexes: %v\n", err)
-		}
-
-		// OpenSearch: create index and bulk-sync existing nodes.
-		if osStore, ok := createOpenSearchStore(); ok {
-			defer osStore.Close()
-			fmt.Println("🚀 Initializing OpenSearch index...")
-			if err := osStore.EnsureIndex(ctx); err != nil {
-				fmt.Printf("Warning: failed to ensure OpenSearch index: %v\n", err)
-			} else {
-				totalSynced := 0
-				batchSize := 500
-
-				// Bulk-sync Function/Method nodes.
-				fnQuery := `MATCH (n) WHERE n:Function OR n:Method
-RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.signature,'') + ' ' + coalesce(n.docstring,'') AS content, labels(n)[0] AS nodeType`
-				if rows, err := client.ExecuteQuery(ctx, fnQuery, nil); err == nil {
-					var batch []textindex.IndexDoc
-					for _, r := range rows {
-						m := r.AsMap()
-						nk, _ := m["nodeKey"].(string)
-						ct, _ := m["content"].(string)
-						nt, _ := m["nodeType"].(string)
-						if nk != "" {
-							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": nt}})
-							if len(batch) >= batchSize {
-								if e := osStore.IndexDocuments(ctx, batch); e == nil {
-									totalSynced += len(batch)
-								}
-								batch = batch[:0]
-							}
-						}
-					}
-					if len(batch) > 0 {
-						if e := osStore.IndexDocuments(ctx, batch); e == nil {
-							totalSynced += len(batch)
-						}
-					}
-				}
-
-				// Bulk-sync Symbol nodes.
-				symQuery := `MATCH (n:Symbol) RETURN n.nodeKey AS nodeKey, coalesce(n.displayName,'') + ' ' + coalesce(n.documentation,'') AS content`
-				if rows, err := client.ExecuteQuery(ctx, symQuery, nil); err == nil {
-					var batch []textindex.IndexDoc
-					for _, r := range rows {
-						m := r.AsMap()
-						nk, _ := m["nodeKey"].(string)
-						ct, _ := m["content"].(string)
-						if nk != "" {
-							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Symbol"}})
-							if len(batch) >= batchSize {
-								if e := osStore.IndexDocuments(ctx, batch); e == nil {
-									totalSynced += len(batch)
-								}
-								batch = batch[:0]
-							}
-						}
-					}
-					if len(batch) > 0 {
-						if e := osStore.IndexDocuments(ctx, batch); e == nil {
-							totalSynced += len(batch)
-						}
-					}
-				}
-
-				// Bulk-sync DocumentChunk nodes.
-				chunkQuery := `MATCH (n:DocumentChunk) RETURN n.nodeKey AS nodeKey, coalesce(n.content,'') AS content, coalesce(n.documentKey,'') AS documentKey`
-				if rows, err := client.ExecuteQuery(ctx, chunkQuery, nil); err == nil {
-					var batch []textindex.IndexDoc
-					for _, r := range rows {
-						m := r.AsMap()
-						nk, _ := m["nodeKey"].(string)
-						ct, _ := m["content"].(string)
-						dk, _ := m["documentKey"].(string)
-						if nk != "" {
-							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "DocumentChunk", "documentKey": dk}})
-							if len(batch) >= batchSize {
-								if e := osStore.IndexDocuments(ctx, batch); e == nil {
-									totalSynced += len(batch)
-								}
-								batch = batch[:0]
-							}
-						}
-					}
-					if len(batch) > 0 {
-						if e := osStore.IndexDocuments(ctx, batch); e == nil {
-							totalSynced += len(batch)
-						}
-					}
-				}
-
-				// Bulk-sync Document nodes.
-				docQuery := `MATCH (n:Document) RETURN n.nodeKey AS nodeKey, coalesce(n.title,'') AS content`
-				if rows, err := client.ExecuteQuery(ctx, docQuery, nil); err == nil {
-					var batch []textindex.IndexDoc
-					for _, r := range rows {
-						m := r.AsMap()
-						nk, _ := m["nodeKey"].(string)
-						ct, _ := m["content"].(string)
-						if nk != "" {
-							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Document"}})
-							if len(batch) >= batchSize {
-								if e := osStore.IndexDocuments(ctx, batch); e == nil {
-									totalSynced += len(batch)
-								}
-								batch = batch[:0]
-							}
-						}
-					}
-					if len(batch) > 0 {
-						if e := osStore.IndexDocuments(ctx, batch); e == nil {
-							totalSynced += len(batch)
-						}
-					}
-				}
-
-				// Bulk-sync Feature nodes.
-				featQuery := `MATCH (n:Feature) RETURN n.nodeKey AS nodeKey, coalesce(n.name,'') + ' ' + coalesce(n.description,'') AS content`
-				if rows, err := client.ExecuteQuery(ctx, featQuery, nil); err == nil {
-					var batch []textindex.IndexDoc
-					for _, r := range rows {
-						m := r.AsMap()
-						nk, _ := m["nodeKey"].(string)
-						ct, _ := m["content"].(string)
-						if nk != "" {
-							batch = append(batch, textindex.IndexDoc{NodeKey: nk, Content: ct, Metadata: map[string]string{"nodeType": "Feature"}})
-							if len(batch) >= batchSize {
-								if e := osStore.IndexDocuments(ctx, batch); e == nil {
-									totalSynced += len(batch)
-								}
-								batch = batch[:0]
-							}
-						}
-					}
-					if len(batch) > 0 {
-						if e := osStore.IndexDocuments(ctx, batch); e == nil {
-							totalSynced += len(batch)
-						}
-					}
-				}
-
-				fmt.Printf("✓ OpenSearch index '%s' ready (%d docs synced)\n", opensearchIndex, totalSynced)
-			}
-		}
-
-		fmt.Println("✅ Advanced search indexes initialized successfully")
-		return nil
-	},
-}
-
-var searchInfoCmd = &cobra.Command{
-	Use:   "info",
-	Short: "Show search capabilities and index status",
-	Long:  "Display information about available search methods and index status",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := createNeo4jClient()
-		if err != nil {
-			return fmt.Errorf("failed to create Neo4j client: %w", err)
-		}
-		defer client.Close(context.Background())
-
-		hybridSearch := search.NewHybridSearchManager(client)
-		if osStore, ok := createOpenSearchStore(); ok {
-			defer osStore.Close()
-			hybridSearch.WithTextStore(osStore)
-			fmt.Println("📋 BM25 backend: OpenSearch")
-		} else {
-			fmt.Println("📋 BM25 backend: Neo4j fulltext (OpenSearch not reachable)")
-		}
-
-		fmt.Println("🔍 CodeGraph Search Capabilities")
-		fmt.Println("=================================")
+		searcher := search.NewSearcher(client)
 
 		ctx := context.Background()
-		capabilities, err := hybridSearch.GetSearchCapabilities(ctx)
+		response, err := searcher.Search(ctx, searchTerm, search.Options{
+			ScopeID: scopeID,
+			Service: service,
+			Limit:   limit,
+			Cursor:  cursor,
+		})
 		if err != nil {
-			return fmt.Errorf("failed to get search capabilities: %w", err)
+			return fmt.Errorf("search failed: %w", err)
 		}
 
-		// Display full-text search info
-		if fullTextInfo, ok := capabilities["fullTextSearch"].(map[string]interface{}); ok {
-			fmt.Println("\n📝 Full-Text Search (BM25):")
-			if indexes, ok := fullTextInfo["fullTextIndexes"].([]map[string]interface{}); ok {
-				fmt.Printf("   Indexes: %d\n", len(indexes))
-				for _, index := range indexes {
-					if name, ok := index["name"].(string); ok {
-						fmt.Printf("   - %s", name)
-						if state, ok := index["state"].(string); ok {
-							fmt.Printf(" (%s)", state)
-						}
-						fmt.Println()
-					}
-				}
-			}
+		// Display results
+		fmt.Printf("🔍 Search Results for '%s':\n", searchTerm)
+		fmt.Printf("Found %d results\n\n", len(response.Results))
+
+		if len(response.Results) == 0 {
+			fmt.Println("No results found.")
+			return nil
 		}
 
-		// Display hybrid search info
-		if hybridInfo, ok := capabilities["hybridSearch"].(map[string]interface{}); ok {
-			fmt.Println("\n🔬 Hybrid Search:")
-			if methods, ok := hybridInfo["supportedMethods"].([]string); ok {
-				fmt.Printf("   Methods: %v\n", methods)
+		// Print each result
+		for i, result := range response.Results {
+			fmt.Printf("%d. %s (%s)\n", i+1, result.Name, result.Label)
+			if result.Signature != "" {
+				fmt.Printf("   Signature: %s\n", result.Signature)
 			}
-			if weights, ok := hybridInfo["defaultWeights"]; ok {
-				fmt.Printf("   Default Weights: %+v\n", weights)
+			if result.FilePath != "" {
+				fmt.Printf("   File: %s\n", result.FilePath)
 			}
-			if smartSearch, ok := hybridInfo["smartSearch"].(bool); ok {
-				fmt.Printf("   Smart Search: %t\n", smartSearch)
+			if result.Service != "" {
+				fmt.Printf("   Service: %s\n", result.Service)
 			}
+			fmt.Printf("   Score: %.4f\n", result.Score)
+			fmt.Println()
 		}
 
-		fmt.Println("\n✨ Available Commands:")
-		fmt.Println("   codegraph search init          # Initialize search indexes")
-		fmt.Println("   codegraph search info          # Show this information")
-		fmt.Println("   codegraph query search 'query' # Run a search")
+		// Print pagination info if available
+		if response.NextCursor != "" {
+			fmt.Printf("More results available. Use --cursor '%s' to continue.\n", response.NextCursor)
+		}
 
 		return nil
 	},
@@ -254,7 +76,8 @@ var searchInfoCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(searchCmd)
-
-	searchCmd.AddCommand(searchInitCmd)
-	searchCmd.AddCommand(searchInfoCmd)
+	searchCmd.Flags().IntP("limit", "l", 20, "Maximum number of results")
+	searchCmd.Flags().String("scope-id", "", "Scope ID for overlay-aware search (e.g., 'main', 'pr-42')")
+	searchCmd.Flags().String("service", "", "Filter by service name")
+	searchCmd.Flags().String("cursor", "", "Keyset pagination cursor for next page")
 }

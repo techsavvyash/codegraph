@@ -9,14 +9,12 @@ import (
 )
 
 var (
-	cfgFile         string
-	verbose         bool
-	neo4jURI        string
-	neo4jUser       string
-	neo4jPass       string
-	neo4jDB         string
-	opensearchURL   string
-	opensearchIndex string
+	cfgFile   string
+	verbose   bool
+	neo4jURI  string
+	neo4jUser string
+	neo4jPass string
+	neo4jDB   string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -47,8 +45,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&neo4jUser, "neo4j-user", "neo4j", "Neo4j username")
 	rootCmd.PersistentFlags().StringVar(&neo4jPass, "neo4j-password", "password123", "Neo4j password")
 	rootCmd.PersistentFlags().StringVar(&neo4jDB, "neo4j-database", "neo4j", "Neo4j database name")
-	rootCmd.PersistentFlags().StringVar(&opensearchURL, "opensearch-url", "http://localhost:9200", "OpenSearch endpoint")
-	rootCmd.PersistentFlags().StringVar(&opensearchIndex, "opensearch-index", "codegraph", "OpenSearch index name")
 
 	// Bind flags to viper
 	viper.BindPFlag("neo4j.uri", rootCmd.PersistentFlags().Lookup("neo4j-uri"))
