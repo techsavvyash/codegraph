@@ -147,20 +147,32 @@ func dumpNodes(ctx context.Context, client *neo4j.Client, opts Options) ([]Node,
 }
 
 func dumpRels(ctx context.Context, client *neo4j.Client, opts Options) ([]Rel, error) {
-	cypher := "MATCH (a)-[r]->(b) "
+	var cypher string
 	params := map[string]any{}
-	var conds []string
-	if opts.ScopeID != "" {
-		conds = append(conds, "r.scopeId = $scopeId")
-		params["scopeId"] = opts.ScopeID
-	}
 	if opts.Owned != nil {
-		conds = append(conds, ownedPredicate("a"), ownedPredicate("b"))
+		// Evaluating the ownership predicate (with its EXISTS neighbor walk)
+		// on both endpoints of every relationship in a populated dev graph
+		// times out the transaction. Collect the owned node set once — one
+		// pass over nodes, same cost as dumpNodes — then expand relationships
+		// only from those nodes and membership-test the far endpoint.
+		relCond := "b IN owned"
+		if opts.ScopeID != "" {
+			relCond += " AND r.scopeId = $scopeId"
+			params["scopeId"] = opts.ScopeID
+		}
+		cypher = "MATCH (a) WHERE " + ownedPredicate("a") + `
+			WITH collect(a) AS owned
+			UNWIND owned AS a
+			MATCH (a)-[r]->(b)
+			WHERE ` + relCond + " "
 		params["ownedServices"] = opts.Owned.Services
 		params["ownedMarkers"] = opts.Owned.Markers
-	}
-	if len(conds) > 0 {
-		cypher += "WHERE " + joinConds(conds) + " "
+	} else {
+		cypher = "MATCH (a)-[r]->(b) "
+		if opts.ScopeID != "" {
+			cypher += "WHERE r.scopeId = $scopeId "
+			params["scopeId"] = opts.ScopeID
+		}
 	}
 	cypher += `RETURN type(r) AS type,
 		labels(a) AS startLabels, a.nodeKey AS startKey,

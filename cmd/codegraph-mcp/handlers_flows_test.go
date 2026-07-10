@@ -270,7 +270,23 @@ func TestFlowsFromNameAmbiguity(t *testing.T) {
 	// Clean up any existing test data
 	_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = "itest-flows-ambig" DETACH DELETE n`, nil)
 	t.Cleanup(func() {
-		_, _ = client.ExecuteQuery(context.Background(), `MATCH (n) WHERE n.scopeId = "itest-flows-ambig" DETACH DELETE n`, nil)
+		// The test's own client is already closed when cleanups run — a
+		// swallowed error here leaves the nodes in the shared database.
+		cctx := context.Background()
+		cclient, err := neo4j.NewClient(neo4j.Config{
+			URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
+			Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+			Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
+			Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+		})
+		if err != nil {
+			t.Errorf("cleanup: connect: %v", err)
+			return
+		}
+		defer cclient.Close(cctx)
+		if _, err := cclient.ExecuteQuery(cctx, `MATCH (n) WHERE n.scopeId = "itest-flows-ambig" DETACH DELETE n`, nil); err != nil {
+			t.Errorf("cleanup failed: %v", err)
+		}
 	})
 
 	// Create two functions with the same name

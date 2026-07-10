@@ -507,6 +507,21 @@ func TestP3c_GenerateFromAPIEndpoints_ScopeFilter(t *testing.T) {
 	client, cleanup := setupTestDB(t, prefix)
 	defer cleanup()
 
+	// GenerateFromAPIEndpoints walks EVERY APIRoute in the graph, so against a
+	// populated dev database it persists Flow nodes for every service's routes
+	// at this test's pr-10 scope. The prefix cleanup can't see those (their
+	// nodeKeys derive from the routes, not the prefix) — sweep the whole scope.
+	defer func() {
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel2()
+		c2 := createTestClient(t)
+		defer c2.Close(ctx2)
+		if _, err := c2.ExecuteQuery(ctx2,
+			`MATCH (n) WHERE n.scopeId = 'pr-10' DETACH DELETE n`, nil); err != nil {
+			t.Errorf("pr-10 scope cleanup failed: %v", err)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
