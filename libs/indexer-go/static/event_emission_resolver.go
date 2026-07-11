@@ -43,21 +43,44 @@ type EventEmissionResolver struct {
 	emitters    map[string]emitterMeta     // bare funcName → emitter metadata
 	emissions   map[string][]eventEmission // "<relPath>#<funcName>" → emissions
 	projectPath string
+
+	// msgRelays are functions that forward a whole *queue.AsyncMessage parameter to a fixed
+	// downstream queue — the event service's SendToXxxConsumer fan-out helpers and any
+	// intermediate forwarders. Keyed by bare funcName.
+	msgRelays map[string]msgRelayMeta
+	// handlerEvents maps a dispatched route-handler function (bare name) to the "group.action"
+	// events it handles, derived from the "<group>ActionRoute" switch dispatch. Used to
+	// attribute the event name to a forwarded (non-re-stamped) fan-out.
+	handlerEvents map[string][]string
 }
 
-// NewEventEmissionResolver builds the resolver by parsing every non-test .go file twice:
-// Pass A classifies emitter functions, Pass B attributes events to producers.
+// NewEventEmissionResolver builds the resolver by parsing every non-test .go file:
+// Pass A classifies emitter functions, transitive relays bridge multi-hop string relays, Pass B
+// attributes producer emissions. The fan-out passes then classify whole-message relays, map
+// route handlers to their events, and attribute the event service's cross-service fan-out.
 func NewEventEmissionResolver(projectPath string, consts *constResolver) *EventEmissionResolver {
 	r := &EventEmissionResolver{
-		consts:      consts,
-		emitters:    make(map[string]emitterMeta),
-		emissions:   make(map[string][]eventEmission),
-		projectPath: projectPath,
+		consts:        consts,
+		emitters:      make(map[string]emitterMeta),
+		emissions:     make(map[string][]eventEmission),
+		projectPath:   projectPath,
+		msgRelays:     make(map[string]msgRelayMeta),
+		handlerEvents: make(map[string][]string),
 	}
 	files := r.parseFiles()
 	r.passAClassifyEmitters(files)
 	r.resolveTransitiveRelays(files)
 	r.passBAttributeEmissions(files)
+
+	// Fan-out (event service → downstream consumers) attribution.
+	r.classifyMsgRelays(files)
+	r.resolveTransitiveMsgRelays(files)
+	r.buildRouteHandlerEvents(files)
+	r.attributeFanout(files)
+	// Structural pass: write one structural (dynamic, no EventType) emission per relay
+	// function so relay helpers like SendToWebhookConsumer appear in the graph as connected
+	// to their destination service, independent of whether callers were attributed.
+	r.attributeRelayStructural(files)
 	return r
 }
 

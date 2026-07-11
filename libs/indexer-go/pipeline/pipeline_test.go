@@ -195,8 +195,8 @@ func TestPipeline_ContextCancellation(t *testing.T) {
 
 func TestDefaultStages_Count(t *testing.T) {
 	stages := DefaultStages()
-	if len(stages) != 11 {
-		t.Fatalf("expected 11 default stages, got %d", len(stages))
+	if len(stages) != 12 {
+		t.Fatalf("expected 12 default stages, got %d", len(stages))
 	}
 }
 
@@ -208,6 +208,7 @@ func TestDefaultStages_Names(t *testing.T) {
 		StageInferServiceDeps,
 		StageResolveCrossServiceHandlers,
 		StageHelperCollapse,
+		StageGenerateNodeSummaries,
 		StageGenerateFlowSpines,
 		StageGenerateBehavioralSummaries,
 		StageIngestDocuments,

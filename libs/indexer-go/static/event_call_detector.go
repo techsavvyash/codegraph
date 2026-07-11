@@ -145,6 +145,9 @@ func (d *EventCallDetector) DetectInFunction(
 	// Pass 4 — consumer side: SQS listener-entry bindings + per-event handler marking.
 	d.markListenerBindings(ctx, funcDecl)
 	d.markEventHandler(ctx, funcDecl, callerFuncID)
+	// Pass 5 — stamp concrete handler functions (not dispatch intermediaries) with
+	// handlesEventsDirectly so the resolver can write higher-confidence ROUTED_TO edges.
+	d.markHandlerEventBindings(ctx, funcDecl, callerFuncID)
 
 	return firstErr
 }
@@ -157,7 +160,7 @@ func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID,
 		return
 	}
 	for _, em := range d.emissions.EmissionsFor(filePath, funcDecl.Name.Name) {
-		ocKey := models.OutboxCallNodeKey(d.serviceName, filePath, em.transport, em.event, em.line)
+		ocKey := models.OutboxCallNodeKey(d.serviceName, filePath, em.transport, em.event, em.destService, em.line)
 		ocProps := map[string]any{
 			"nodeKey": ocKey,
 			// name is the Neo4j Browser caption: "<callerService>:<group>.<action>",
@@ -184,26 +187,31 @@ func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID,
 			"transport": em.transport,
 		})
 
-		etKey := models.EventTypeNodeKey(em.group, em.action)
-		etProps := map[string]any{
-			"nodeKey": etKey,
-			// name is the Neo4j Browser caption: the full event name "<group>.<action>"
-			// (e.g. "payout.created", or "payout.*" for a dynamic hub).
-			"name":      em.event,
-			"eventType": em.event,
-			"group":     em.group,
-			"action":    em.action,
-			"dynamic":   em.dynamic,
-			"createdAt": time.Now().UTC().Unix(),
-			"updatedAt": time.Now().UTC().Unix(),
+		// Structural relay emissions (group == "") carry no specific EventType — they just
+		// anchor the relay helper to its destination service via the OutboxCall node.
+		// Skip EventType node creation and the EMITS_EVENT edge for these.
+		if em.group != "" {
+			etKey := models.EventTypeNodeKey(em.group, em.action)
+			etProps := map[string]any{
+				"nodeKey": etKey,
+				// name is the Neo4j Browser caption: the full event name "<group>.<action>"
+				// (e.g. "payout.created", or "payout.*" for a dynamic hub).
+				"name":      em.event,
+				"eventType": em.event,
+				"group":     em.group,
+				"action":    em.action,
+				"dynamic":   em.dynamic,
+				"createdAt": time.Now().UTC().Unix(),
+				"updatedAt": time.Now().UTC().Unix(),
+			}
+			maps.Copy(etProps, d.scopeCtx.Props())
+			d.callBuffer.addEventTypeNode(etKey, etProps)
+			d.callBuffer.addEmitsEventEdge(ocKey, etKey, map[string]any{
+				"transport":   em.transport,
+				"destQueue":   em.destQueue,
+				"destService": em.destService,
+			})
 		}
-		maps.Copy(etProps, d.scopeCtx.Props())
-		d.callBuffer.addEventTypeNode(etKey, etProps)
-		d.callBuffer.addEmitsEventEdge(ocKey, etKey, map[string]any{
-			"transport":   em.transport,
-			"destQueue":   em.destQueue,
-			"destService": em.destService,
-		})
 	}
 }
 
@@ -634,6 +642,42 @@ func extractQueueStringLiteral(callExpr *ast.CallExpr) string {
 		return true
 	})
 	return found
+}
+
+// markHandlerEventBindings stamps handlesEventsDirectly on concrete handler functions that
+// directly process specific "group.action" events. The mapping is pre-computed by
+// EventEmissionResolver.buildRouteHandlerEvents: it traces <group>ActionRoute switch dispatch
+// and records the directly-called function per action case. This is distinct from
+// markEventHandler, which stamps the dispatcher itself (payoutActionRoute) — here we stamp the
+// actual business-logic target (handlePayout). The cross-service resolver uses
+// handlesEventsDirectly to write higher-confidence ROUTED_TO {tier:'action_handler'} edges.
+func (d *EventCallDetector) markHandlerEventBindings(ctx context.Context, funcDecl *ast.FuncDecl, callerFuncID string) {
+	if d.emissions == nil {
+		return
+	}
+	events := d.emissions.HandlerEventsFor(funcDecl.Name.Name)
+	if len(events) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	var groups []string
+	for _, ev := range events {
+		g, _, _, ok := splitEvent(ev, false)
+		if ok && !seen[g] {
+			seen[g] = true
+			groups = append(groups, g)
+		}
+	}
+	if _, err := d.client.ExecuteQuery(ctx, `
+		MATCH (f) WHERE elementId(f) = $funcID
+		SET f.handlesEventsDirectly = $events, f.handlesEventGroupDirectly = $groups
+	`, map[string]any{
+		"funcID": callerFuncID,
+		"events": events,
+		"groups": groups,
+	}); err != nil {
+		log.Printf("Warning: event detector: set handlesEventsDirectly on %s: %v", funcDecl.Name.Name, err)
+	}
 }
 
 // extractFirstStringLiteral returns the first string literal found anywhere in the call

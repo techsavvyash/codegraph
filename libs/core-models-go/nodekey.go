@@ -129,11 +129,14 @@ func EventTypeNodeKey(group, action string) string {
 	return "eventtype:" + group + "." + action
 }
 
-// OutboxCallNodeKey returns "outboxcall:{service}:{filePath}:{transport}:{event}:{line}".
+// OutboxCallNodeKey returns "outboxcall:{service}:{filePath}:{transport}:{event}:{destService}:{line}".
+// destService is part of the identity because a single call site can fan the same event out to
+// several destination services (e.g. the event service relaying to balance AND monitoring), and
+// each destination is a distinct physical publish → a distinct OutboxCall node.
 // Service-scoped (path-derived) so identical relative paths in different services stay
 // distinct. `event` is the semantic event name (or "dynamic"/queue name for non-Async sends).
-func OutboxCallNodeKey(service, filePath, transport, event string, line int) string {
-	return fmt.Sprintf("outboxcall:%s:%s:%s:%s:%d", service, filePath, transport, event, line)
+func OutboxCallNodeKey(service, filePath, transport, event, destService string, line int) string {
+	return fmt.Sprintf("outboxcall:%s:%s:%s:%s:%s:%d", service, filePath, transport, event, destService, line)
 }
 
 // ReferenceNodeKey returns "ref:{service}:{filePath}:{startLine}:{startColumn}".

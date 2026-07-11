@@ -682,6 +682,25 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"required": []string{"rpc_name"},
 			},
 		},
+		{
+			Name:        "codegraph_event_flow",
+			Description: "Trace the full lifecycle of an async event through the system: who emits it, which queue/service receives it, which handler processes it, and where it fans out downstream. Works with Tazapay's SQS/AsyncMessage pattern. Accepts an event name like 'settlement.failed' or just a group like 'settlement'.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"event_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Event name to trace, e.g. 'settlement.failed', 'payout.created', or just 'settlement' to show all actions in that group",
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"event_name"},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -751,6 +770,8 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleServiceDependencyMapTool(ctx, toolCall.Arguments)
 	case "codegraph_rpc_anatomy":
 		response = s.handleRPCAnatomyTool(ctx, toolCall.Arguments)
+	case "codegraph_event_flow":
+		response = s.handleEventFlowTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -3880,6 +3901,142 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 				}
 			}
 		}
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// handleEventFlowTool traces the full lifecycle of an async event:
+// producers → EventType hub → consuming service listener/handler → downstream fan-out.
+func (s *CodeGraphMCPServer) handleEventFlowTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	eventName, ok := args["event_name"].(string)
+	if !ok || eventName == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: event_name is required"}},
+			IsError: true,
+		}
+	}
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("# Async Event Flow: `%s`\n\n", eventName))
+
+	// Determine whether the input is "group.action" or just a group name.
+	isGroup := !strings.Contains(eventName, ".")
+	var etFilter string
+	if isGroup {
+		etFilter = `et.group = $eventName`
+	} else {
+		etFilter = `et.eventType = $eventName`
+	}
+
+	// --- Producers ---
+	producerQuery := fmt.Sprintf(`
+		MATCH (oc:OutboxCall)-[:EMITS_EVENT]->(et:EventType)
+		WHERE %s
+		OPTIONAL MATCH (fn)-[:CALLS_API]->(oc)
+		RETURN et.eventType AS event, oc.callerService AS callerSvc,
+		       coalesce(fn.name,'') AS fnName, coalesce(fn.filePath,'') AS filePath,
+		       oc.destService AS destSvc, coalesce(oc.destQueue,'') AS destQueue,
+		       coalesce(oc.line,0) AS emitLine
+		ORDER BY et.eventType, oc.callerService
+		LIMIT 60
+	`, etFilter)
+	producerRows, err := s.client.ExecuteQuery(ctx, producerQuery, map[string]interface{}{"eventName": eventName})
+	if err != nil {
+		output.WriteString(fmt.Sprintf("_Error querying producers: %v_\n\n", err))
+	} else if len(producerRows) == 0 {
+		output.WriteString("_No producers found. The event may not have been indexed yet._\n\n")
+	} else {
+		output.WriteString("## Producers\n\n")
+		output.WriteString("| Event | Emitting Service | Function | Line | → Destination | Queue |\n")
+		output.WriteString("|-------|-----------------|----------|------|--------------|-------|\n")
+		for _, r := range producerRows {
+			m := r.AsMap()
+			emitLine := int64(0)
+			if v, ok2 := m["emitLine"].(int64); ok2 {
+				emitLine = v
+			}
+			lineStr := ""
+			if emitLine > 0 {
+				lineStr = fmt.Sprintf("%d", emitLine)
+			}
+			output.WriteString(fmt.Sprintf("| `%s` | %s | `%s` | %s | **%s** | `%s` |\n",
+				getStringFromRecord(m, "event"),
+				getStringFromRecord(m, "callerSvc"),
+				getStringFromRecord(m, "fnName"),
+				lineStr,
+				getStringFromRecord(m, "destSvc"),
+				getStringFromRecord(m, "destQueue"),
+			))
+		}
+		output.WriteString("\n")
+	}
+
+	// --- Consumers (ROUTED_TO targets on the EventType hub) ---
+	consumerQuery := fmt.Sprintf(`
+		MATCH (et:EventType)
+		WHERE %s
+		MATCH (et)-[rr:ROUTED_TO]->(f)
+		RETURN et.eventType AS event, rr.service AS consumerSvc, rr.tier AS tier,
+		       coalesce(rr.confidence, 0.0) AS confidence,
+		       f.name AS fnName, coalesce(f.filePath,'') AS filePath
+		ORDER BY et.eventType, rr.tier DESC, rr.confidence DESC
+		LIMIT 60
+	`, etFilter)
+	consumerRows, err := s.client.ExecuteQuery(ctx, consumerQuery, map[string]interface{}{"eventName": eventName})
+	if err == nil && len(consumerRows) > 0 {
+		output.WriteString("## Consumers\n\n")
+		output.WriteString("| Event | Consuming Service | Tier | Confidence | Handler Function | File |\n")
+		output.WriteString("|-------|------------------|------|------------|-----------------|------|\n")
+		for _, r := range consumerRows {
+			m := r.AsMap()
+			conf := 0.0
+			if v, ok2 := m["confidence"].(float64); ok2 {
+				conf = v
+			}
+			output.WriteString(fmt.Sprintf("| `%s` | **%s** | %s | %.1f | `%s` | %s |\n",
+				getStringFromRecord(m, "event"),
+				getStringFromRecord(m, "consumerSvc"),
+				getStringFromRecord(m, "tier"),
+				conf,
+				getStringFromRecord(m, "fnName"),
+				getStringFromRecord(m, "filePath"),
+			))
+		}
+		output.WriteString("\n")
+	}
+
+	// --- Fan-Out: handlers in the consuming service that re-emit downstream ---
+	fanoutQuery := fmt.Sprintf(`
+		MATCH (et:EventType)
+		WHERE %s
+		MATCH (et)-[:ROUTED_TO]->(handler)
+		MATCH (handler)<-[:CONTAINS*1..5]-(relaySvc:Service)
+		MATCH (handler)-[:CALLS_API]->(oc2:OutboxCall)-[:EMITS_EVENT]->(et2:EventType)
+		RETURN et.eventType AS inboundEvent, relaySvc.name AS relayService,
+		       handler.name AS relayFn, et2.eventType AS outboundEvent,
+		       coalesce(oc2.destService,'') AS downstreamSvc
+		ORDER BY et.eventType, relaySvc.name, et2.eventType
+		LIMIT 40
+	`, etFilter)
+	fanoutRows, err := s.client.ExecuteQuery(ctx, fanoutQuery, map[string]interface{}{"eventName": eventName})
+	if err == nil && len(fanoutRows) > 0 {
+		output.WriteString("## Fan-Out (Downstream Re-Broadcasts)\n\n")
+		output.WriteString("| Inbound Event | Relay Service | Relay Function | Outbound Event | Downstream Service |\n")
+		output.WriteString("|---------------|--------------|----------------|----------------|-----------------|\n")
+		for _, r := range fanoutRows {
+			m := r.AsMap()
+			output.WriteString(fmt.Sprintf("| `%s` | %s | `%s` | `%s` | **%s** |\n",
+				getStringFromRecord(m, "inboundEvent"),
+				getStringFromRecord(m, "relayService"),
+				getStringFromRecord(m, "relayFn"),
+				getStringFromRecord(m, "outboundEvent"),
+				getStringFromRecord(m, "downstreamSvc"),
+			))
+		}
+		output.WriteString("\n")
 	}
 
 	return ToolCallResponse{

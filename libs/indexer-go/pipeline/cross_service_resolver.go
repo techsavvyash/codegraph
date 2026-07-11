@@ -68,6 +68,15 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 	}
 	log.Printf("[CrossServiceResolver] Wrote %d ROUTED_TO edges (async event listeners/handlers)", asyncCount)
 
+	// Downstream pass: bridge OutboxCall nodes into the synchronous traversal structure by
+	// writing OutboxCall→CALLS_SERVICE and OutboxCall→RESOLVES_TO edges. This lets the
+	// existing cross-service flow BFS see async hops the same way it sees gRPC/HTTP hops.
+	svcCount, resCount, err := r.linkOutboxCallsToDownstream(ctx)
+	if err != nil {
+		log.Printf("[CrossServiceResolver] OutboxCall downstream link error: %v", err)
+	}
+	log.Printf("[CrossServiceResolver] Wrote %d CALLS_SERVICE + %d RESOLVES_TO edges (OutboxCall→downstream)", svcCount, resCount)
+
 	return total, nil
 }
 
@@ -111,7 +120,7 @@ func (r *CrossServiceHandlerResolver) resolveAsyncConsumers(ctx context.Context)
 		written++
 	}
 
-	// Tier 2 — precise per-event handler (best-effort; static events only).
+	// Tier 2 — action-route dispatcher (best-effort; <group>ActionRoute functions).
 	handlerQuery := `
 		MATCH (oc:OutboxCall)-[e:EMITS_EVENT]->(et:EventType)
 		WHERE coalesce(et.dynamic, false) = false
@@ -139,7 +148,113 @@ func (r *CrossServiceHandlerResolver) resolveAsyncConsumers(ctx context.Context)
 		written++
 	}
 
+	// Tier 2b — direct action handler (highest confidence; functions stamped by
+	// buildRouteHandlerEvents — the concrete business-logic function per action, e.g.
+	// handlePayout for payout.failed rather than payoutActionRoute).
+	actionHandlerQuery := `
+		MATCH (oc:OutboxCall)-[e:EMITS_EVENT]->(et:EventType)
+		WHERE coalesce(et.dynamic, false) = false
+		WITH DISTINCT et, et.eventType AS event, e.destService AS destService
+		WHERE destService IS NOT NULL AND destService <> ''
+		MATCH (svc:Service {name: destService})-[:CONTAINS*1..5]->(f)
+		WHERE (f:Function OR f:Method)
+		  AND f.handlesEventsDirectly IS NOT NULL AND event IN f.handlesEventsDirectly
+		RETURN elementId(et) AS etId, elementId(f) AS fId, destService AS service
+	`
+	actionHandlerRows, err := r.client.ExecuteQuery(ctx, actionHandlerQuery, map[string]any{})
+	if err != nil {
+		return written, fmt.Errorf("resolveAsyncConsumers: action_handler query: %w", err)
+	}
+	for _, row := range actionHandlerRows {
+		rm := row.AsMap()
+		etId := getString(rm, "etId")
+		fId := getString(rm, "fId")
+		if etId == "" || fId == "" {
+			continue
+		}
+		if err := r.writeRoutedToEdge(ctx, etId, fId, getString(rm, "service"), "action_handler", 0.9); err != nil {
+			log.Printf("[CrossServiceResolver] ROUTED_TO(action_handler) write failed (%s → %s): %v", etId, fId, err)
+			continue
+		}
+		written++
+	}
+
 	return written, nil
+}
+
+// linkOutboxCallsToDownstream bridges async OutboxCall nodes into the synchronous traversal
+// structure used by the cross-service flow tool. It writes two edge types:
+//
+//   - OutboxCall → CALLS_SERVICE → Service  (always, when destService is known)
+//     Lets BFS treat an async emit the same as a gRPC/HTTP call: the next hop is
+//     the destService, even though no synchronous handler exists there yet.
+//
+//   - OutboxCall → RESOLVES_TO → Function  (best-effort)
+//     Uses the ROUTED_TO edges already written by resolveAsyncConsumers: prefers
+//     the tier-2 per-event handler (confidence 0.8) over the tier-1 listener entry
+//     (confidence 1.0 structurally, but less descriptive for a "handler" column).
+//     Skipped when no ROUTED_TO target exists (e.g. dynamic/unresolved events).
+//
+// Returns (callsServiceEdges, resolvesToEdges, error).
+func (r *CrossServiceHandlerResolver) linkOutboxCallsToDownstream(ctx context.Context) (int, int, error) {
+	// --- CALLS_SERVICE pass ---
+	// Enumerate distinct (OutboxCall, destService) pairs and merge the edge.
+	svcQuery := `
+		MATCH (oc:OutboxCall)
+		WHERE oc.destService IS NOT NULL AND oc.destService <> ''
+		MATCH (svc:Service {name: oc.destService})
+		MERGE (oc)-[r:CALLS_SERVICE]->(svc)
+		ON CREATE SET r.protocol = 'async', r.resolved = true
+		ON MATCH  SET r.protocol = 'async', r.resolved = true
+		RETURN count(r) AS written
+	`
+	svcRows, err := r.client.ExecuteQuery(ctx, svcQuery, map[string]any{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("linkOutboxCallsToDownstream: CALLS_SERVICE: %w", err)
+	}
+	svcCount := 0
+	if len(svcRows) > 0 {
+		if v, ok := svcRows[0].AsMap()["written"].(int64); ok {
+			svcCount = int(v)
+		}
+	}
+
+	// --- RESOLVES_TO pass ---
+	// For each OutboxCall that emits to an EventType, pick the best handler via ROUTED_TO.
+	// Preference order: action_handler (0.9, direct business logic) >
+	//                   handler        (0.8, <group>ActionRoute dispatcher) >
+	//                   entry          (1.0 structural, but least specific for display).
+	resQuery := `
+		MATCH (oc:OutboxCall)-[:EMITS_EVENT]->(et:EventType)
+		WHERE oc.destService IS NOT NULL AND oc.destService <> ''
+		  AND NOT (oc)-[:RESOLVES_TO]->()
+		OPTIONAL MATCH (et)-[ra:ROUTED_TO {tier: 'action_handler'}]->(ah)
+		WHERE ra.service = oc.destService
+		WITH oc, et, ah
+		OPTIONAL MATCH (et)-[rh:ROUTED_TO {tier: 'handler'}]->(handler)
+		WHERE rh.service = oc.destService AND ah IS NULL
+		WITH oc, et, coalesce(ah, handler) AS preferred
+		OPTIONAL MATCH (et)-[re:ROUTED_TO {tier: 'entry'}]->(entry)
+		WHERE re.service = oc.destService AND preferred IS NULL
+		WITH oc, coalesce(preferred, entry) AS best
+		WHERE best IS NOT NULL
+		MERGE (oc)-[r:RESOLVES_TO]->(best)
+		ON CREATE SET r.confidence = 0.9, r.resolutionMethod = 'async_event'
+		ON MATCH  SET r.confidence = 0.9, r.resolutionMethod = 'async_event'
+		RETURN count(r) AS written
+	`
+	resRows, err := r.client.ExecuteQuery(ctx, resQuery, map[string]any{})
+	if err != nil {
+		return svcCount, 0, fmt.Errorf("linkOutboxCallsToDownstream: RESOLVES_TO: %w", err)
+	}
+	resCount := 0
+	if len(resRows) > 0 {
+		if v, ok := resRows[0].AsMap()["written"].(int64); ok {
+			resCount = int(v)
+		}
+	}
+
+	return svcCount, resCount, nil
 }
 
 // writeRoutedToEdge merges a ROUTED_TO edge from an EventType hub to a listener/handler.
