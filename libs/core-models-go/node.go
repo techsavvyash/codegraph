@@ -20,9 +20,11 @@ const (
 	SymbolNode    NodeType = "Symbol"
 	GRPCCallNode   NodeType = "GRPCCall"
 	HTTPCallNode   NodeType = "HTTPCall"
-	OutboxCallNode NodeType = "OutboxCall"
-	EventTypeNode  NodeType = "EventType"
-	DBCallNode     NodeType = "DBCall"
+	OutboxCallNode     NodeType = "OutboxCall"
+	EventTypeNode      NodeType = "EventType"
+	DBCallNode         NodeType = "DBCall"
+	ExternalCallNode   NodeType = "ExternalCall"
+	ExternalServiceNode NodeType = "ExternalService"
 	CommentNode          NodeType = "Comment"
 	FlowNode             NodeType = "Flow"
 	ControlFlowScopeNode NodeType = "ControlFlowScope"
@@ -241,6 +243,32 @@ type EventType struct {
 	Group     string `json:"group"     neo4j:"group"`     // "settlement"
 	Action    string `json:"action"    neo4j:"action"`    // "failed" ("" for group-fallback)
 	Dynamic   bool   `json:"dynamic"   neo4j:"dynamic"`   // true when action is a runtime value
+}
+
+// ExternalCall represents a single call site to an external managed service (e.g. AWS Cognito).
+// Service-scoped (per file:line within a service), mirrors OutboxCall.
+type ExternalCall struct {
+	BaseNode
+	Provider        string `json:"provider"          neo4j:"provider"`          // "aws"
+	ExternalService string `json:"externalService"   neo4j:"externalService"`   // "cognito"
+	Operation       string `json:"operation"         neo4j:"operation"`         // underlying SDK op, e.g. "InitiateAuth"
+	Variant         string `json:"variant"           neo4j:"variant"`           // AuthFlow / "admin" / ""
+	WrapperFunc     string `json:"wrapperFunc"       neo4j:"wrapperFunc"`       // wrapper fn actually called
+	CallerService   string `json:"callerService"     neo4j:"callerService"`
+	FilePath        string `json:"filePath"          neo4j:"filePath"`
+	Line            int    `json:"line"              neo4j:"line"`
+	Name            string `json:"name"              neo4j:"name"`              // caption: "account:cognito.InitiateAuth"
+	FlowTag         string `json:"flowTag,omitempty" neo4j:"flowTag,omitempty"` // e.g. "mfa"
+}
+
+// ExternalService is the shared hub node for an external managed service provider.
+// NOT service-scoped — one node per (provider, name) shared across all services.
+type ExternalService struct {
+	BaseNode
+	Provider    string `json:"provider"    neo4j:"provider"`    // "aws"
+	Name        string `json:"name"        neo4j:"name"`        // "cognito"
+	Category    string `json:"category"    neo4j:"category"`    // "identity" | "messaging" | "email"
+	DisplayName string `json:"displayName" neo4j:"displayName"` // "AWS Cognito"
 }
 
 // DBCall represents a database query call site within a function body.
@@ -468,6 +496,14 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case DBCallNode:
 		return &DBCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ExternalCallNode:
+		return &ExternalCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case ExternalServiceNode:
+		return &ExternalService{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case CommentNode:

@@ -46,6 +46,13 @@ const (
 	// Deprecated: noise — not written during call-graph indexing; cron trigger has no value in RPC context
 	ScheduledByRel RelationshipType = "SCHEDULED_BY"
 
+	// External service relationships
+	// UsesServiceRel connects an ExternalCall site to the ExternalService hub.
+	UsesServiceRel RelationshipType = "USES_SERVICE"
+	// DependsOnExternalRel connects a Service to an ExternalService hub as an
+	// aggregated rollup (written by the cross-service resolver after all services indexed).
+	DependsOnExternalRel RelationshipType = "DEPENDS_ON_EXTERNAL"
+
 	// DB Relationships
 	CallsDBRel RelationshipType = "CALLS_DB"
 
@@ -237,6 +244,22 @@ type ResolvesToRelationship struct {
 	ResolutionMethod string  `json:"resolutionMethod" neo4j:"resolutionMethod"` // "proto_matched", "http_route_matched", "heuristic"
 }
 
+// UsesServiceRelationship connects an ExternalCall site to the ExternalService hub.
+type UsesServiceRelationship struct {
+	BaseRelationship
+	Operation   string `json:"operation"   neo4j:"operation"`
+	Variant     string `json:"variant"     neo4j:"variant"`
+	WrapperFunc string `json:"wrapperFunc" neo4j:"wrapperFunc"`
+}
+
+// DependsOnExternalRelationship connects a Service to an ExternalService hub as an
+// aggregated dependency rollup written by the cross-service resolver pass.
+type DependsOnExternalRelationship struct {
+	BaseRelationship
+	Operations []string `json:"operations" neo4j:"operations"` // distinct SDK ops used
+	CallCount  int      `json:"callCount"  neo4j:"callCount"`
+}
+
 // EmitsEventRelationship connects an OutboxCall publish site to the EventType hub it
 // broadcasts on. DestService lets a traversal jump straight to the consuming service.
 type EmitsEventRelationship struct {
@@ -302,6 +325,10 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &InTxRelationship{BaseRelationship: base}
 	case ResolvesToRel:
 		return &ResolvesToRelationship{BaseRelationship: base}
+	case UsesServiceRel:
+		return &UsesServiceRelationship{BaseRelationship: base}
+	case DependsOnExternalRel:
+		return &DependsOnExternalRelationship{BaseRelationship: base}
 	case EmitsEventRel:
 		return &EmitsEventRelationship{BaseRelationship: base}
 	case RoutedToRel:

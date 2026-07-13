@@ -77,7 +77,28 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 	}
 	log.Printf("[CrossServiceResolver] Wrote %d CALLS_SERVICE + %d RESOLVES_TO edges (OutboxCall→downstream)", svcCount, resCount)
 
+	// External pass: aggregate Service → DEPENDS_ON_EXTERNAL → ExternalService rollup edges.
+	if err := r.resolveExternalDependencies(ctx); err != nil {
+		log.Printf("[CrossServiceResolver] external dependency rollup error: %v", err)
+	}
+
 	return total, nil
+}
+
+// resolveExternalDependencies creates Service → DEPENDS_ON_EXTERNAL → ExternalService rollup
+// edges by aggregating all ExternalCall nodes that reach the hub.
+func (r *CrossServiceHandlerResolver) resolveExternalDependencies(ctx context.Context) error {
+	_, err := r.client.ExecuteQuery(ctx, `
+		MATCH (ec:ExternalCall)-[:USES_SERVICE]->(es:ExternalService)
+		MATCH (svc:Service {name: ec.callerService})
+		WITH svc, es, collect(DISTINCT ec.operation) AS ops, count(ec) AS n
+		MERGE (svc)-[rel:DEPENDS_ON_EXTERNAL]->(es)
+		SET rel.operations = ops, rel.callCount = n, rel.resolvedAt = $now
+	`, map[string]any{"now": time.Now().Unix()})
+	if err != nil {
+		return fmt.Errorf("resolveExternalDependencies: %w", err)
+	}
+	return nil
 }
 
 // resolveAsyncConsumers links each EventType hub to the concrete listener/handler functions

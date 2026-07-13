@@ -71,6 +71,18 @@ func GetConstraints() []Constraint {
 			Property:  "nodeKey",
 			Type:      "UNIQUE",
 		},
+		{
+			Name:      "externalcall_nodekey_unique",
+			NodeLabel: "ExternalCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
+			Name:      "externalservice_nodekey_unique",
+			NodeLabel: "ExternalService",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
 	}
 }
 
@@ -455,6 +467,31 @@ func GetIndexes() []Index {
 			Name:       "method_istest_idx",
 			NodeLabel:  "Method",
 			Properties: []string{"isTestFunction"},
+			Type:       "BTREE",
+		},
+		// ExternalCall / ExternalService indexes (AWS external service indexing)
+		{
+			Name:       "externalcall_nodekey_scope_idx",
+			NodeLabel:  "ExternalCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "externalcall_service_scope_idx",
+			NodeLabel:  "ExternalCall",
+			Properties: []string{"externalService", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "externalservice_nodekey_scope_idx",
+			NodeLabel:  "ExternalService",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "externalservice_name_scope_idx",
+			NodeLabel:  "ExternalService",
+			Properties: []string{"name", "scopeId"},
 			Type:       "BTREE",
 		},
 		// GRPCCall / HTTPCall / OutboxCall indexes (Phase 7 — cross-service RPC gap fix)

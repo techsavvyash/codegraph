@@ -32,30 +32,36 @@ type bufferedBothNodeKeyEdge struct {
 type callNodeBuffer struct {
 	scopeID string
 
-	grpcCalls   map[string]map[string]any // nodeKey -> set props
-	httpCalls   map[string]map[string]any
-	outboxCalls map[string]map[string]any
-	eventTypes  map[string]map[string]any // nodeKey -> set props (shared channel hubs)
-	dbCalls     map[string]map[string]any
+	grpcCalls        map[string]map[string]any // nodeKey -> set props
+	httpCalls        map[string]map[string]any
+	outboxCalls      map[string]map[string]any
+	eventTypes       map[string]map[string]any // nodeKey -> set props (shared channel hubs)
+	dbCalls          map[string]map[string]any
+	externalCalls    map[string]map[string]any // nodeKey -> set props (service-scoped)
+	externalServices map[string]map[string]any // nodeKey -> set props (shared hub)
 
-	callsAPI   map[string]bufferedNodeEdge         // fromID + toNodeKey
-	callsDB    map[string]bufferedNodeEdge         // fromID + toNodeKey
-	callsSvc   map[string]bufferedServiceEdge      // fromNodeKey + toID
-	emitsEvent map[string]bufferedBothNodeKeyEdge  // OutboxCall nodeKey → EventType nodeKey
+	callsAPI    map[string]bufferedNodeEdge        // fromID + toNodeKey
+	callsDB     map[string]bufferedNodeEdge        // fromID + toNodeKey
+	callsSvc    map[string]bufferedServiceEdge     // fromNodeKey + toID
+	emitsEvent  map[string]bufferedBothNodeKeyEdge // OutboxCall nodeKey → EventType nodeKey
+	usesService map[string]bufferedBothNodeKeyEdge // ExternalCall nodeKey → ExternalService nodeKey
 }
 
 func newCallNodeBuffer(scopeID string) *callNodeBuffer {
 	return &callNodeBuffer{
-		scopeID:     scopeID,
-		grpcCalls:   make(map[string]map[string]any),
-		httpCalls:   make(map[string]map[string]any),
-		outboxCalls: make(map[string]map[string]any),
-		eventTypes:  make(map[string]map[string]any),
-		dbCalls:     make(map[string]map[string]any),
-		callsAPI:    make(map[string]bufferedNodeEdge),
-		callsDB:     make(map[string]bufferedNodeEdge),
-		callsSvc:    make(map[string]bufferedServiceEdge),
-		emitsEvent:  make(map[string]bufferedBothNodeKeyEdge),
+		scopeID:          scopeID,
+		grpcCalls:        make(map[string]map[string]any),
+		httpCalls:        make(map[string]map[string]any),
+		outboxCalls:      make(map[string]map[string]any),
+		eventTypes:       make(map[string]map[string]any),
+		dbCalls:          make(map[string]map[string]any),
+		externalCalls:    make(map[string]map[string]any),
+		externalServices: make(map[string]map[string]any),
+		callsAPI:         make(map[string]bufferedNodeEdge),
+		callsDB:          make(map[string]bufferedNodeEdge),
+		callsSvc:         make(map[string]bufferedServiceEdge),
+		emitsEvent:       make(map[string]bufferedBothNodeKeyEdge),
+		usesService:      make(map[string]bufferedBothNodeKeyEdge),
 	}
 }
 
@@ -90,6 +96,27 @@ func (b *callNodeBuffer) addEmitsEventEdge(fromNodeKey, toNodeKey string, props 
 
 func (b *callNodeBuffer) addDBCall(nodeKey string, props map[string]any) {
 	b.addNode(b.dbCalls, nodeKey, props)
+}
+
+func (b *callNodeBuffer) addExternalCall(nodeKey string, props map[string]any) {
+	b.addNode(b.externalCalls, nodeKey, props)
+}
+
+func (b *callNodeBuffer) addExternalServiceNode(nodeKey string, props map[string]any) {
+	b.addNode(b.externalServices, nodeKey, props)
+}
+
+// addUsesServiceEdge buffers a USES_SERVICE edge from an ExternalCall node to an ExternalService hub.
+func (b *callNodeBuffer) addUsesServiceEdge(fromNodeKey, toNodeKey string, props map[string]any) {
+	if b == nil || fromNodeKey == "" || toNodeKey == "" {
+		return
+	}
+	key := fromNodeKey + "->" + toNodeKey
+	b.usesService[key] = bufferedBothNodeKeyEdge{
+		fromNodeKey: fromNodeKey,
+		toNodeKey:   toNodeKey,
+		props:       maps.Clone(props),
+	}
 }
 
 func (b *callNodeBuffer) addNode(target map[string]map[string]any, nodeKey string, props map[string]any) {
@@ -155,6 +182,15 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 	if err := b.flushNodes(ctx, client, "DBCall", b.dbCalls); err != nil {
 		return err
 	}
+	// ExternalCall and ExternalService nodes must be flushed BEFORE the CALLS_API
+	// edge flush below — flushRelsByTargetNodeKey matches the target by nodeKey, so
+	// the node must already exist when the edge MERGE runs.
+	if err := b.flushNodes(ctx, client, "ExternalCall", b.externalCalls); err != nil {
+		return err
+	}
+	if err := b.flushNodes(ctx, client, "ExternalService", b.externalServices); err != nil {
+		return err
+	}
 	if err := b.flushRelsByTargetNodeKey(ctx, client, models.CallsAPIRel, b.callsAPI); err != nil {
 		return err
 	}
@@ -165,6 +201,9 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 		return err
 	}
 	if err := b.flushRelsByBothNodeKeys(ctx, client, models.EmitsEventRel, b.emitsEvent); err != nil {
+		return err
+	}
+	if err := b.flushRelsByBothNodeKeys(ctx, client, models.UsesServiceRel, b.usesService); err != nil {
 		return err
 	}
 
@@ -307,8 +346,11 @@ func (b *callNodeBuffer) reset() {
 	b.outboxCalls = make(map[string]map[string]any)
 	b.eventTypes = make(map[string]map[string]any)
 	b.dbCalls = make(map[string]map[string]any)
+	b.externalCalls = make(map[string]map[string]any)
+	b.externalServices = make(map[string]map[string]any)
 	b.callsAPI = make(map[string]bufferedNodeEdge)
 	b.callsDB = make(map[string]bufferedNodeEdge)
 	b.callsSvc = make(map[string]bufferedServiceEdge)
 	b.emitsEvent = make(map[string]bufferedBothNodeKeyEdge)
+	b.usesService = make(map[string]bufferedBothNodeKeyEdge)
 }

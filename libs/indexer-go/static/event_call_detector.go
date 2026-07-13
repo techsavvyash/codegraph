@@ -186,6 +186,9 @@ func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID,
 			"line":      em.line,
 			"transport": em.transport,
 		})
+		if em.transport == "sqs" {
+			d.wireSQSExternalService(ocKey)
+		}
 
 		// Structural relay emissions (group == "") carry no specific EventType — they just
 		// anchor the relay helper to its destination service via the OutboxCall node.
@@ -213,6 +216,33 @@ func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID,
 			})
 		}
 	}
+}
+
+// wireSQSExternalService merges the shared aws:sqs ExternalService hub and a
+// USES_SERVICE edge from the given OutboxCall nodeKey into the call buffer.
+// Called from both writeEmissions (semantic SQS sends) and processPublishCallExpr
+// (generic SQS client sends) so that every SQS OutboxCall is also visible as an
+// external infrastructure dependency without a second competing detector.
+func (d *EventCallDetector) wireSQSExternalService(outboxCallNodeKey string) {
+	if d.callBuffer == nil {
+		return
+	}
+	esKey := models.ExternalServiceNodeKey("aws", "sqs")
+	esProps := map[string]any{
+		"nodeKey":     esKey,
+		"name":        "sqs",
+		"provider":    "aws",
+		"category":    "messaging",
+		"displayName": "AWS SQS",
+		"createdAt":   time.Now().UTC().Unix(),
+		"updatedAt":   time.Now().UTC().Unix(),
+	}
+	maps.Copy(esProps, d.scopeCtx.Props())
+	d.callBuffer.addExternalServiceNode(esKey, esProps)
+	d.callBuffer.addUsesServiceEdge(outboxCallNodeKey, esKey, map[string]any{
+		"operation":   "SendMessage",
+		"wrapperFunc": "SendSQSMsg",
+	})
 }
 
 // processTransportAssignment records SQS/Kafka/NATS constructor and composite literal
@@ -411,6 +441,9 @@ func (d *EventCallDetector) processPublishCallExpr(
 			"line":      line,
 			"transport": transport,
 		})
+		if transport == "sqs" {
+			d.wireSQSExternalService(nodeKey)
+		}
 		return nil
 	}
 

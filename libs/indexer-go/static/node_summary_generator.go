@@ -127,18 +127,20 @@ func stringFromMap(m map[string]any, key string) string {
 // write/read overlap is resolved. Writes and reads are kept apart so the overlap
 // can be subtracted once, after the whole subtree has been merged in.
 type rawEffects struct {
-	writes *orderedSet
-	reads  *orderedSet
-	calls  *orderedSet
-	events *orderedSet
+	writes   *orderedSet
+	reads    *orderedSet
+	calls    *orderedSet
+	events   *orderedSet
+	external *orderedSet
 }
 
 func newRawEffects() *rawEffects {
 	return &rawEffects{
-		writes: newOrderedSet(),
-		reads:  newOrderedSet(),
-		calls:  newOrderedSet(),
-		events: newOrderedSet(),
+		writes:   newOrderedSet(),
+		reads:    newOrderedSet(),
+		calls:    newOrderedSet(),
+		events:   newOrderedSet(),
+		external: newOrderedSet(),
 	}
 }
 
@@ -156,6 +158,7 @@ func (r *rawEffects) resolve() NodeEffects {
 		DBReads:  reads,
 		Calls:    r.calls.items,
 		Events:   r.events.items,
+		External: r.external.items,
 	}
 }
 
@@ -258,6 +261,31 @@ RETURN n.nodeKey AS nodeKey, coalesce(et.eventType, ev.eventType) AS event, ev.q
 		}
 	}
 
+	extRows, err := client.ExecuteQuery(ctx, `
+MATCH (n)-[:CALLS_API]->(ec:ExternalCall)
+WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
+RETURN n.nodeKey AS nodeKey, ec.provider AS provider, ec.externalService AS service, ec.operation AS operation`, params)
+	if err != nil {
+		return nil, fmt.Errorf("fetch external effects: %w", err)
+	}
+	for _, row := range extRows {
+		m := row.AsMap()
+		key := str(m["nodeKey"])
+		if key == "" {
+			continue
+		}
+		provider := strings.TrimSpace(str(m["provider"]))
+		svc := strings.TrimSpace(str(m["service"]))
+		op := strings.TrimSpace(str(m["operation"]))
+		if provider != "" && svc != "" {
+			label := provider + ":" + svc
+			if op != "" {
+				label += " (" + op + ")"
+			}
+			get(key).external.add(label)
+		}
+	}
+
 	return out, nil
 }
 
@@ -314,6 +342,7 @@ type NodeEffects struct {
 	DBReads   []string // tables only read (SELECT), excluding any also written
 	Calls     []string // downstream targets: "service.method" (gRPC) or "service" (HTTP)
 	Events    []string // emitted event types / topics
+	External  []string // external managed service calls: "aws:cognito (InitiateAuth)"
 }
 
 // NodeSummaryInput holds the fields needed to produce a one-line summary.
@@ -553,6 +582,7 @@ func formatEffects(e NodeEffects, dedupAgainst string) string {
 	add("writes", e.DBWrites, 3)
 	add("reads", e.DBReads, 3)
 	add("emits", e.Events, 2)
+	add("uses", e.External, 2)
 	return strings.Join(parts, ", ")
 }
 

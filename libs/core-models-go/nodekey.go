@@ -119,6 +119,19 @@ func SDKCallNodeKey(target string) string {
 	return "sdkcall:" + target
 }
 
+// ExternalCallNodeKey returns "externalcall:{service}:{filePath}:{provider}:{externalService}:{operation}:{line}".
+// Service-scoped, mirrors OutboxCallNodeKey.
+func ExternalCallNodeKey(service, filePath, provider, extService, operation string, line int) string {
+	return fmt.Sprintf("externalcall:%s:%s:%s:%s:%s:%d",
+		service, filePath, provider, extService, operation, line)
+}
+
+// ExternalServiceNodeKey returns "extsvc:{provider}:{name}".
+// NOT service-scoped (shared hub), mirrors EventTypeNodeKey.
+func ExternalServiceNodeKey(provider, name string) string {
+	return "extsvc:" + provider + ":" + name
+}
+
 // EventTypeNodeKey returns "eventtype:{group}.{action}" — the shared channel hub key.
 // It is deliberately NOT service-scoped so producers and consumers across services share
 // one node. When action is empty (group-fallback), the key is "eventtype:{group}.*".
