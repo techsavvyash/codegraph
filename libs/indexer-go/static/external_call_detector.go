@@ -11,6 +11,23 @@ import (
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 )
 
+// exprString returns a best-effort human-readable representation of an AST expression.
+// Used for the optional objectKeyExpr field — not for logic.
+func exprString(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return exprString(e.X) + "." + e.Sel.Name
+	case *ast.BasicLit:
+		return strings.Trim(e.Value, "\"")
+	case *ast.IndexExpr:
+		return exprString(e.X) + "[...]"
+	default:
+		return "?"
+	}
+}
+
 // mfaFiles and mfaFuncPrefixes identify code paths that touch MFA flows so that
 // ExternalCall nodes emitted from them are tagged flowTag="mfa".
 var mfaFiles = map[string]bool{
@@ -95,6 +112,19 @@ func (d *ExternalCallDetector) DetectInFunction(
 
 		now := time.Now().UTC().Unix()
 
+		// Best-effort bucket extraction for S3 calls.
+		var bucket, objectKeyExpr string
+		var bucketResolved bool
+		if op.BucketArgIndex >= 0 && op.BucketArgIndex < len(callExpr.Args) {
+			arg := callExpr.Args[op.BucketArgIndex]
+			if lit, isLit := arg.(*ast.BasicLit); isLit && lit.Kind == token.STRING {
+				bucket = strings.Trim(lit.Value, "\"")
+				bucketResolved = true
+			} else {
+				objectKeyExpr = exprString(arg)
+			}
+		}
+
 		ecProps := map[string]any{
 			"nodeKey":         ecKey,
 			"name":            d.serviceName + ":" + op.Service + "." + op.Operation,
@@ -106,11 +136,18 @@ func (d *ExternalCallDetector) DetectInFunction(
 			"callerService":   d.serviceName,
 			"filePath":        filePath,
 			"line":            line,
+			"bucketResolved":  bucketResolved,
 			"createdAt":       now,
 			"updatedAt":       now,
 		}
 		if flowTag != "" {
 			ecProps["flowTag"] = flowTag
+		}
+		if bucket != "" {
+			ecProps["bucket"] = bucket
+		}
+		if objectKeyExpr != "" {
+			ecProps["objectKeyExpr"] = objectKeyExpr
 		}
 		maps.Copy(ecProps, d.scopeCtx.Props())
 

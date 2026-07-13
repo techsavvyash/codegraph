@@ -249,16 +249,20 @@ type EventType struct {
 // Service-scoped (per file:line within a service), mirrors OutboxCall.
 type ExternalCall struct {
 	BaseNode
-	Provider        string `json:"provider"          neo4j:"provider"`          // "aws"
-	ExternalService string `json:"externalService"   neo4j:"externalService"`   // "cognito"
-	Operation       string `json:"operation"         neo4j:"operation"`         // underlying SDK op, e.g. "InitiateAuth"
-	Variant         string `json:"variant"           neo4j:"variant"`           // AuthFlow / "admin" / ""
-	WrapperFunc     string `json:"wrapperFunc"       neo4j:"wrapperFunc"`       // wrapper fn actually called
-	CallerService   string `json:"callerService"     neo4j:"callerService"`
-	FilePath        string `json:"filePath"          neo4j:"filePath"`
-	Line            int    `json:"line"              neo4j:"line"`
-	Name            string `json:"name"              neo4j:"name"`              // caption: "account:cognito.InitiateAuth"
-	FlowTag         string `json:"flowTag,omitempty" neo4j:"flowTag,omitempty"` // e.g. "mfa"
+	Provider        string `json:"provider"                    neo4j:"provider"`          // "aws"
+	ExternalService string `json:"externalService"             neo4j:"externalService"`   // "cognito"
+	Operation       string `json:"operation"                   neo4j:"operation"`         // underlying SDK op, e.g. "InitiateAuth"
+	Variant         string `json:"variant"                     neo4j:"variant"`           // AuthFlow / "admin" / ""
+	WrapperFunc     string `json:"wrapperFunc"                 neo4j:"wrapperFunc"`       // wrapper fn actually called
+	CallerService   string `json:"callerService"               neo4j:"callerService"`
+	FilePath        string `json:"filePath"                    neo4j:"filePath"`
+	Line            int    `json:"line"                        neo4j:"line"`
+	Name            string `json:"name"                        neo4j:"name"`              // caption: "account:cognito.InitiateAuth"
+	FlowTag         string `json:"flowTag,omitempty"           neo4j:"flowTag,omitempty"` // e.g. "mfa"
+	// S3-only bucket properties (best-effort; empty when not a static literal).
+	Bucket         string `json:"bucket,omitempty"         neo4j:"bucket,omitempty"`
+	BucketResolved bool   `json:"bucketResolved"           neo4j:"bucketResolved"`
+	ObjectKeyExpr  string `json:"objectKeyExpr,omitempty"  neo4j:"objectKeyExpr,omitempty"`
 }
 
 // ExternalService is the shared hub node for an external managed service provider.
