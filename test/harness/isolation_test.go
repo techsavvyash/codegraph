@@ -114,18 +114,24 @@ func TestCrossServiceIsolationOnSharedFilePath(t *testing.T) {
 	require.EqualValues(t, 55, late["endLine"], "decoy endLine rewritten by fixture indexing")
 	require.EqualValues(t, 900, late["startByte"], "decoy startByte rewritten by fixture indexing")
 
-	// The fixture's own greet() (src/index.ts line 3) must keep its open-ended
-	// tail estimate (startLine + 10000, pinned in tiny-ts/golden.json) instead
-	// of being clamped to decoyLateFunc's startLine - 1 = 49 by a merged
-	// declaration order.
+	// The fixture's own greet() (src/index.ts lines 3-5) must carry its exact
+	// tree-sitter range (pinned in tiny-ts/golden.json), untouched by the
+	// decoy's presence. Before RFC-010 this asserted the declaration-order
+	// tail estimate (10003) versus a merged-order clamp to decoyLateFunc's
+	// startLine - 1 = 49; ranges are exact now, but the seeded decoy functions
+	// would still corrupt this value if the file match ever lost its service
+	// bound (greet would map against the merged function list and the decoy
+	// assertions above would see their ranges overwritten with fallback stubs).
 	records, err = client.ExecuteQuery(ctx, `
 		MATCH (fn:Function {serviceName: 'tinyts', name: 'greet'})
-		RETURN fn.endLine AS endLine
+		RETURN fn.endLine AS endLine, fn.rangeSource AS rangeSource
 	`, nil)
 	require.NoError(t, err)
 	require.Len(t, records, 1, "fixture greet() not indexed")
-	require.EqualValues(t, 10003, records[0].AsMap()["endLine"],
-		"fixture function endLine clamped by decoy service's declaration order")
+	require.EqualValues(t, 5, records[0].AsMap()["endLine"],
+		"fixture function endLine corrupted by decoy service's functions")
+	require.Equal(t, "treesitter", records[0].AsMap()["rangeSource"],
+		"greet() range must come from the structure pass")
 
 	// No call edge may cross the service boundary in either direction: the
 	// decoy Reference at line 3 sits inside greet()'s range and would have

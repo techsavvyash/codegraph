@@ -160,6 +160,7 @@
         "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
         "outDegree": 0,
         "paramTypes": [],
+        "rangeSource": "go-ast",
         "receiverType": "",
         "returnType": "",
         "scope": "main",
@@ -192,6 +193,7 @@
         "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
         "outDegree": 0,
         "paramTypes": [],
+        "rangeSource": "go-ast",
         "receiverType": "",
         "returnType": "",
         "scope": "main",
@@ -225,6 +227,7 @@
           "example.com/tinygo/greeter.Greeter",
           "string"
         ],
+        "rangeSource": "go-ast",
         "receiverType": "",
         "returnType": "",
         "scope": "main",
@@ -255,6 +258,7 @@
         "nodeKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
         "outDegree": 4,
         "paramTypes": [],
+        "rangeSource": "go-ast",
         "receiverType": "",
         "returnType": "",
         "scope": "main",
@@ -308,6 +312,7 @@
         "paramTypes": [
           "string"
         ],
+        "rangeSource": "go-ast",
         "receiverType": "FormalGreeter",
         "returnType": "",
         "scope": "main",
@@ -342,6 +347,7 @@
         "paramTypes": [
           "string"
         ],
+        "rangeSource": "go-ast",
         "receiverType": "*FormalGreeter",
         "returnType": "",
         "scope": "main",
@@ -376,6 +382,7 @@
         "paramTypes": [
           "string"
         ],
+        "rangeSource": "go-ast",
         "receiverType": "EnglishGreeter",
         "returnType": "",
         "scope": "main",

@@ -66,16 +66,17 @@
       "nodeKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
       "props": {
         "docstring": "",
-        "endByte": 197,
+        "endByte": 136,
         "endColumn": 14,
-        "endLine": 10003,
+        "endLine": 5,
         "filePath": "src/index.ts",
         "inDegree": 0,
         "isExported": true,
         "isTestFunction": false,
         "name": "greet",
         "nodeKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
-        "outDegree": 2,
+        "outDegree": 1,
+        "rangeSource": "treesitter",
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
@@ -96,21 +97,22 @@
         "docstring": "",
         "endByte": 335,
         "endColumn": 28,
-        "endLine": 10013,
+        "endLine": 15,
         "filePath": "src/logger.ts",
-        "inDegree": 1,
+        "inDegree": 0,
         "isExported": true,
         "isTestFunction": false,
         "name": "createLogger",
         "nodeKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
         "outDegree": 1,
+        "rangeSource": "treesitter",
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
         "scopedKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
-        "startByte": 243,
+        "startByte": 250,
         "startColumn": 16,
         "startLine": 13
       }
@@ -141,9 +143,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
       "props": {
         "docstring": "",
-        "endByte": 156,
+        "endByte": 155,
         "endColumn": 13,
-        "endLine": 7,
+        "endLine": 6,
         "filePath": "src/logger.ts",
         "inDegree": 1,
         "isExported": true,
@@ -151,13 +153,14 @@
         "name": "\u003cconstructor\u003e",
         "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
         "outDegree": 0,
+        "rangeSource": "treesitter",
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
         "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().",
-        "startByte": 106,
+        "startByte": 108,
         "startColumn": 2,
         "startLine": 6
       }
@@ -169,9 +172,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
       "props": {
         "docstring": "",
-        "endByte": 242,
+        "endByte": 239,
         "endColumn": 5,
-        "endLine": 12,
+        "endLine": 10,
         "filePath": "src/logger.ts",
         "inDegree": 1,
         "isExported": true,
@@ -179,13 +182,14 @@
         "name": "log",
         "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
         "outDegree": 0,
+        "rangeSource": "treesitter",
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
         "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
-        "startByte": 157,
+        "startByte": 159,
         "startColumn": 2,
         "startLine": 8
       }
@@ -197,9 +201,9 @@
       "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
       "props": {
         "docstring": "",
-        "endByte": 105,
+        "endByte": 31,
         "endColumn": 5,
-        "endLine": 5,
+        "endLine": 2,
         "filePath": "src/logger.ts",
         "inDegree": 0,
         "isExported": true,
@@ -207,13 +211,14 @@
         "name": "log",
         "nodeKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
         "outDegree": 0,
+        "rangeSource": "scip-declaration",
         "returnType": "",
         "scope": "main",
         "scopeId": "main",
         "scopedKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().|main",
         "serviceName": "tinyts",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
-        "startByte": 26,
+        "startByte": 28,
         "startColumn": 2,
         "startLine": 2
       }
@@ -1059,23 +1064,6 @@
     }
   ],
   "relationships": [
-    {
-      "type": "CALLS",
-      "startLabels": [
-        "Function"
-      ],
-      "startKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
-      "endLabels": [
-        "Function"
-      ],
-      "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
-      "props": {
-        "filePath": "src/index.ts",
-        "line": 7,
-        "scope": "main",
-        "scopeId": "main"
-      }
-    },
     {
       "type": "CALLS",
       "startLabels": [

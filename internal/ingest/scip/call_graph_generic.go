@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/ingest/structure"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -59,14 +58,68 @@ func (cg *GenericCallGraphBuilder) SetScope(scope models.ScopeContext) {
 	cg.scopeCtx = scope
 }
 
-// genericFuncInfo holds a function's graph ID, line range, and (once
-// computed by computeByteRanges) the corresponding byte range.
+// genericFuncInfo holds a function's graph ID, its SCIP identifier position,
+// and — once resolved against the file's tree-sitter structure — its body
+// range. Mapped reports whether the range came from the structure pass
+// (exact) or is the declaration-line fallback stub.
 type genericFuncInfo struct {
 	ID        string
 	StartLine int
+	StartCol  int // 0-based SCIP identifier column; -1 when unknown
 	EndLine   int
 	StartByte int
 	EndByte   int
+	Mapped    bool
+}
+
+// fileStructure parses filePath (resolved against projectPath) and returns
+// its function structure, or nil when no grammar is wired for the extension,
+// the file can't be read, or the parse fails outright — callers then use the
+// declaration-line fallback.
+func (cg *GenericCallGraphBuilder) fileStructure(filePath string) *structure.FileStructure {
+	lang, ok := structure.ForFile(filePath)
+	if !ok {
+		return nil
+	}
+	content, ok := cg.readFile(filePath)
+	if !ok {
+		return nil
+	}
+	fs, err := structure.Extract(lang, content)
+	if err != nil {
+		fmt.Printf("Warning: structure parse for %s: %v\n", filePath, err)
+		return nil
+	}
+	return fs
+}
+
+// applyStructureRanges resolves each function's body range from the file's
+// tree-sitter structure via innermost-containment of its SCIP identifier
+// position (RFC-010 §4.3). Functions that don't land in any structure node —
+// nil structure, or a definition lost to a parse-error region — keep a
+// declaration-line stub (endLine == startLine, no byte range): honest about
+// what we know, never a guessed span.
+//
+// Pure function, no I/O — testable without Neo4j.
+func applyStructureRanges(funcs []genericFuncInfo, fs *structure.FileStructure) {
+	for i := range funcs {
+		funcs[i].EndLine = funcs[i].StartLine
+		funcs[i].StartByte = -1 // sentinel: "not computed" (see updateBodyRanges)
+		funcs[i].EndByte = -1
+		if fs == nil {
+			continue
+		}
+		idx, ok := fs.InnermostAt(funcs[i].StartLine, funcs[i].StartCol)
+		if !ok {
+			continue
+		}
+		fn := fs.Functions[idx]
+		funcs[i].StartLine = fn.StartLine
+		funcs[i].EndLine = fn.EndLine
+		funcs[i].StartByte = fn.StartByte
+		funcs[i].EndByte = fn.EndByte
+		funcs[i].Mapped = true
+	}
 }
 
 // BuildCallGraph infers CALLS relationships for all source files in the service.
@@ -128,40 +181,27 @@ func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, err
 	return paths, nil
 }
 
-// processFile computes function body ranges from declaration order,
-// then maps references to enclosing callers and creates CALLS edges.
+// processFile computes function body ranges from the file's tree-sitter
+// structure (RFC-010), then maps references to enclosing callers and creates
+// CALLS edges.
 func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath string) (int, error) {
-	// Step 1: Get all Function/Method nodes in this file with their declaration lines.
+	// Step 1: Get all Function/Method nodes in this file with their SCIP
+	// identifier positions.
 	funcs, err := cg.getFunctionsInFile(ctx, filePath)
 	if err != nil || len(funcs) == 0 {
 		return 0, err
 	}
 
-	// Step 2: Compute body ranges from declaration order.
-	// Sort by startLine, then set each function's endLine to (next function's startLine - 1).
-	sort.Slice(funcs, func(i, j int) bool {
-		return funcs[i].StartLine < funcs[j].StartLine
-	})
-	for i := range funcs {
-		if i+1 < len(funcs) {
-			funcs[i].EndLine = funcs[i+1].StartLine - 1
-		} else {
-			// Last function: extend to a large line number (EOF proxy).
-			funcs[i].EndLine = funcs[i].StartLine + 10000
-		}
-		// Ensure at least a 1-line range.
-		if funcs[i].EndLine <= funcs[i].StartLine {
-			funcs[i].EndLine = funcs[i].StartLine + 1
-		}
-	}
+	// Step 2: Parse the file and map each graph function to its enclosing
+	// tree-sitter function node by identifier position. Functions that don't
+	// map (no grammar for the extension, unreadable file, or a definition
+	// inside a parse-error region) fall back to the SCIP declaration line —
+	// a stub, never a guessed range.
+	fs := cg.fileStructure(filePath)
+	applyStructureRanges(funcs, fs)
 
-	// Step 2b: Compute startByte/endByte from the same line-arithmetic used by
-	// calculateByteOffsets, so non-Go source retrieval spans the estimated
-	// body instead of the identifier-only range SCIP originally provided.
-	cg.computeByteRanges(filePath, funcs)
-
-	// Step 3: Update the endLine (and byte range, when computed) in Neo4j so
-	// downstream tools have body ranges.
+	// Step 3: Write the resolved ranges to Neo4j so downstream tools have
+	// body ranges.
 	if err := cg.updateBodyRanges(ctx, funcs); err != nil {
 		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
 	}
@@ -231,7 +271,8 @@ func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, fileP
 		MATCH (f:File {path: $filePath, scopeId: $scopeId, serviceName: $serviceName})-[:CONTAINS]->(fn)
 		WHERE (fn:Function OR fn:Method)
 		  AND fn.startLine IS NOT NULL
-		RETURN elementId(fn) AS id, fn.startLine AS startLine
+		RETURN elementId(fn) AS id, fn.startLine AS startLine,
+		       coalesce(fn.startColumn, -1) AS startColumn
 		ORDER BY fn.startLine
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -252,7 +293,8 @@ func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, fileP
 			funcs = append(funcs, genericFuncInfo{
 				ID:        id,
 				StartLine: startLine,
-				EndLine:   startLine, // will be computed
+				StartCol:  int(getInt64FromMap(rm, "startColumn")),
+				EndLine:   startLine, // resolved by applyStructureRanges
 				StartByte: -1,        // sentinel: "not computed" (0 would look like a valid offset)
 				EndByte:   -1,
 			})
@@ -324,47 +366,40 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 	return refs, nil
 }
 
-// updateBodyRanges writes computed endLine (and, when successfully computed,
-// startByte/endByte) values back to Neo4j. startByte/endByte are only SET
-// when >= 0 — a failed read (missing file, unresolvable path) must not
+// updateBodyRanges writes resolved startLine/endLine (and, for
+// structure-mapped functions, startByte/endByte) back to Neo4j.
+// startByte/endByte are only SET when >= 0 — a fallback stub must not
 // clobber whatever byte offsets were already stored for the node.
+// rangeSource records provenance per RFC-005 I4: "treesitter" for exact
+// spans from the structure pass, "scip-declaration" for fallback stubs.
 func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs []genericFuncInfo) error {
 	updates := make([]map[string]any, len(funcs))
 	for i, f := range funcs {
+		rangeSource := "scip-declaration"
+		if f.Mapped {
+			rangeSource = "treesitter"
+		}
 		updates[i] = map[string]any{
-			"id":        f.ID,
-			"endLine":   f.EndLine,
-			"startByte": f.StartByte,
-			"endByte":   f.EndByte,
+			"id":          f.ID,
+			"startLine":   f.StartLine,
+			"endLine":     f.EndLine,
+			"startByte":   f.StartByte,
+			"endByte":     f.EndByte,
+			"rangeSource": rangeSource,
 		}
 	}
 	cypher := `
 		UNWIND $updates AS u
 		MATCH (fn) WHERE elementId(fn) = u.id
-		SET fn.endLine = u.endLine
+		SET fn.startLine = u.startLine,
+		    fn.endLine = u.endLine,
+		    fn.rangeSource = u.rangeSource
 		FOREACH (ignoreMe IN CASE WHEN u.startByte >= 0 THEN [1] ELSE [] END |
 			SET fn.startByte = u.startByte, fn.endByte = u.endByte
 		)
 	`
 	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})
 	return err
-}
-
-// computeByteRanges fills in StartByte/EndByte for each func's (already
-// computed) line range by summing line lengths in the file content. Leaves
-// the -1 sentinel in place (see getFunctionsInFile) if the file can't be
-// read, so callers can distinguish "not computed" from a real offset.
-func (cg *GenericCallGraphBuilder) computeByteRanges(filePath string, funcs []genericFuncInfo) {
-	content, ok := cg.readFile(filePath)
-	if !ok {
-		return
-	}
-	lines := strings.Split(string(content), "\n")
-	for i := range funcs {
-		start, end := lineRangeByteOffsets(lines, funcs[i].StartLine, funcs[i].EndLine)
-		funcs[i].StartByte = start
-		funcs[i].EndByte = end
-	}
 }
 
 // readFile resolves filePath against projectPath (when relative) and returns
@@ -389,46 +424,6 @@ func (cg *GenericCallGraphBuilder) readFile(filePath string) ([]byte, bool) {
 	}
 	cg.fileContentCache[resolved] = content
 	return content, true
-}
-
-// lineRangeByteOffsets converts a 1-based [startLine, endLine] line range
-// into a [startByte, endByte) byte range spanning the start of startLine
-// through the end of endLine's content (excluding endLine's trailing
-// newline). endLine is clamped to len(lines), so callers may pass an
-// EOF-proxy value larger than the file's actual line count (see the "last
-// function" branch in processFile). Returns (-1, -1) if startLine is out of
-// bounds. Pure function, no I/O — testable without Neo4j.
-func lineRangeByteOffsets(lines []string, startLine, endLine int) (int, int) {
-	// strings.Split leaves a trailing "" entry when content ends with a
-	// newline (the common case for source files). That entry isn't a real
-	// line and must not be counted when clamping an EOF-proxy endLine, or the
-	// clamped range would include one phantom extra "line".
-	lineCount := len(lines)
-	if lineCount > 0 && lines[lineCount-1] == "" {
-		lineCount--
-	}
-	if startLine <= 0 || startLine > lineCount {
-		return -1, -1
-	}
-	if endLine > lineCount {
-		endLine = lineCount
-	}
-	if endLine < startLine {
-		endLine = startLine
-	}
-	startByte := 0
-	for i := 0; i < startLine-1; i++ {
-		startByte += len(lines[i]) + 1
-	}
-	endByte := startByte
-	for i := startLine - 1; i < endLine; i++ {
-		endByte += len(lines[i]) + 1
-	}
-	endByte-- // drop the trailing newline counted for the last included line
-	if endByte < startByte {
-		endByte = startByte
-	}
-	return startByte, endByte
 }
 
 // genericDegreeQuery builds the Cypher and bound parameters for

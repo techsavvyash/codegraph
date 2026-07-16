@@ -171,6 +171,9 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 // function, the latter returned only the ~15-character identifier span
 // instead of the function body.
 func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, callers []callerInfo) error {
+	// rangeSource records provenance per RFC-005 I4 — these ranges come from
+	// the Go AST (exact), vs "treesitter"/"scip-declaration" in the generic
+	// builder.
 	cypher := `
 		UNWIND $updates AS u
 		MATCH (fn) WHERE elementId(fn) = u.id
@@ -179,7 +182,8 @@ func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, ca
 		    fn.startByte = u.startByte,
 		    fn.endByte = u.endByte,
 		    fn.paramTypes = u.paramTypes,
-		    fn.receiverType = u.receiverType
+		    fn.receiverType = u.receiverType,
+		    fn.rangeSource = 'go-ast'
 	`
 	updates := make([]map[string]any, len(callers))
 	for i, c := range callers {

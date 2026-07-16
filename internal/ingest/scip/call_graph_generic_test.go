@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/context-maximiser/code-graph/internal/ingest/structure"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -106,65 +107,76 @@ func TestResolveGenericCallEdgesMultipleDistinctPairs(t *testing.T) {
 	}
 }
 
-// TestLineRangeByteOffsets locks the non-Go byte-offset estimate (fix D):
-// startByte/endByte span the start of startLine through the end of endLine's
-// content, excluding the trailing newline, with endLine clamped to the
-// file's actual line count so the EOF-proxy value used for the last
-// declaration-order function in a file never runs past the file.
-func TestLineRangeByteOffsets(t *testing.T) {
-	// "line1\nline22\nline333\n" -> lines = ["line1", "line22", "line333", ""]
-	lines := []string{"line1", "line22", "line333", ""}
+// TestApplyStructureRanges locks the RFC-010 range resolution: functions map
+// to their tree-sitter node by identifier position (innermost containment),
+// and anything unmapped — nil structure or a definition lost to a parse-error
+// region — keeps a declaration-line stub with no byte range, never a guess.
+func TestApplyStructureRanges(t *testing.T) {
+	src := `function outer(): void {
+  const inner = (): void => {
+    console.log("deep");
+  };
+  inner();
+}
 
-	tests := []struct {
-		name      string
-		startLine int
-		endLine   int
-		wantStart int
-		wantEnd   int
-	}{
-		// line1: bytes [0,5); line22: [6,12); line333: [13,20)
-		{"first_line_only", 1, 1, 0, 5},
-		{"first_two_lines", 1, 2, 0, 12},
-		{"middle_line_only", 2, 2, 6, 12},
-		{"spans_all_real_lines", 1, 3, 0, 20},
-		// EOF-proxy: endLine far beyond the file must clamp to the last line.
-		{"end_line_clamped_to_eof", 2, 10000, 6, 20},
-		{"start_line_out_of_bounds", 5, 6, -1, -1},
-		{"start_line_zero", 0, 1, -1, -1},
+function last(): void {}
+`
+	lang, ok := structure.ForFile("x.ts")
+	if !ok {
+		t.Fatal("typescript grammar not wired")
+	}
+	fs, err := structure.Extract(lang, []byte(src))
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			start, end := lineRangeByteOffsets(lines, tt.startLine, tt.endLine)
-			if start != tt.wantStart || end != tt.wantEnd {
-				t.Errorf("lineRangeByteOffsets(lines, %d, %d) = (%d, %d), want (%d, %d)",
-					tt.startLine, tt.endLine, start, end, tt.wantStart, tt.wantEnd)
-			}
-		})
+	funcs := []genericFuncInfo{
+		// SCIP identifier positions (1-based line, 0-based col).
+		{ID: "outer", StartLine: 1, StartCol: 9},
+		{ID: "inner", StartLine: 2, StartCol: 8},
+		{ID: "last", StartLine: 8, StartCol: 9},
+		// A definition the parse never saw (e.g. inside an ERROR region).
+		{ID: "ghost", StartLine: 40, StartCol: 0},
+	}
+	applyStructureRanges(funcs, fs)
+
+	want := []struct {
+		id                 string
+		startLine, endLine int
+		mapped             bool
+	}{
+		{"outer", 1, 6, true},
+		// inner maps to the declarator-widened arrow, not to outer.
+		{"inner", 2, 4, true},
+		// last ends at its own brace — the old declaration-order code gave
+		// the final function startLine+10000.
+		{"last", 8, 8, true},
+		// ghost keeps a stub: endLine == startLine, no byte range.
+		{"ghost", 40, 40, false},
+	}
+	for i, w := range want {
+		f := funcs[i]
+		if f.StartLine != w.startLine || f.EndLine != w.endLine || f.Mapped != w.mapped {
+			t.Errorf("%s: got start=%d end=%d mapped=%v, want start=%d end=%d mapped=%v",
+				w.id, f.StartLine, f.EndLine, f.Mapped, w.startLine, w.endLine, w.mapped)
+		}
+		if !w.mapped && (f.StartByte != -1 || f.EndByte != -1) {
+			t.Errorf("%s: fallback stub must keep byte sentinels, got %d..%d", w.id, f.StartByte, f.EndByte)
+		}
+		if w.mapped && (f.StartByte < 0 || f.EndByte <= f.StartByte) {
+			t.Errorf("%s: mapped function missing byte range: %d..%d", w.id, f.StartByte, f.EndByte)
+		}
 	}
 }
 
-// TestLineRangeByteOffsetsMatchesContent verifies the computed range actually
-// slices out the expected substring from real file content, not just
-// plausible-looking numbers.
-func TestLineRangeByteOffsetsMatchesContent(t *testing.T) {
-	content := "func one() {}\nfunc two() {\n  return\n}\nfunc three() {}\n"
-	lines := []string{
-		"func one() {}",
-		"func two() {",
-		"  return",
-		"}",
-		"func three() {}",
-		"",
-	}
-	start, end := lineRangeByteOffsets(lines, 2, 4)
-	if start < 0 || end > len(content) || start >= end {
-		t.Fatalf("invalid range: start=%d end=%d (len=%d)", start, end, len(content))
-	}
-	got := content[start:end]
-	want := "func two() {\n  return\n}"
-	if got != want {
-		t.Errorf("content[start:end] = %q, want %q", got, want)
+// TestApplyStructureRangesNilStructure: no grammar / unreadable file — every
+// function degrades to the declaration-line stub.
+func TestApplyStructureRangesNilStructure(t *testing.T) {
+	funcs := []genericFuncInfo{{ID: "a", StartLine: 7, StartCol: 2, EndLine: 7}}
+	applyStructureRanges(funcs, nil)
+	f := funcs[0]
+	if f.Mapped || f.StartLine != 7 || f.EndLine != 7 || f.StartByte != -1 || f.EndByte != -1 {
+		t.Errorf("nil structure must yield a pure stub, got %+v", f)
 	}
 }
 
