@@ -83,10 +83,11 @@ without a per-language hand-written parser.
   RFC-005 §6.4 real. Tree-sitter re-parses a changed file in sub-millisecond time and
   supports true incremental edits; a changed file's *structure* refreshes without
   re-running anything else.
-- **A pure-Go runtime exists and was validated against this repo's fixtures and the
-  dough/clanker codebases** (`odvcencio/gotreesitter`, §4.2): `CGO_ENABLED=0` build
-  verified, grammars embedded, external scanners for TS/Python included — no CGO,
-  no FFI, no grammar-blob plumbing of our own.
+- **The runtime story is settled, not speculative** (§4.2): the tree-sitter org
+  maintains official Go bindings and per-grammar Go modules, verified correct on
+  this machine against every probe input; a pure-Go runtime was also validated
+  end-to-end against this repo's fixtures and the dough/clanker codebases as the
+  future no-CGO swap.
 
 ## 3. Non-goals (the boundary that makes this tractable)
 
@@ -151,37 +152,46 @@ The extractor is a pure function of `(language, bytes)`. It never touches Neo4j 
 mirroring how `resolveGenericCallEdges` and `lineRangeByteOffsets` are already pure
 and unit-tested today.
 
-### 4.2 Runtime delivery: pure-Go `gotreesitter`, validated 2026-07-10
+### 4.2 Runtime delivery: official bindings first, validated 2026-07
 
 The candidate runtimes, assessed empirically (probes parsed the tiny-ts fixture and
-all 389 dough-gateway + clanker `.ts` files, read-only):
+all 389 dough-gateway + clanker `.ts` files, read-only) and by support posture
+(repo-health data pulled 2026-07-16):
 
 | Approach | Build | Verified state |
 |---|---|---|
-| **`odvcencio/gotreesitter`** (pure-Go runtime, parse tables extracted from upstream `parser.c`) | pure Go, `CGO_ENABLED=0` verified | v0.37.0: 206 embedded grammars incl. Go external scanners for TS/TSX/Python; ships `ExtractDefinitionSpans`/`EnclosingDefinition` (≈ our §4.1/§4.3 API for free); incremental parsing; MIT; parity-tested vs upstream; **one confirmed parser bug, §8** |
+| **Official bindings (`tree-sitter/go-tree-sitter` + per-grammar `bindings/go`)** | CGO | maintained by the tree-sitter org, tags track core (v0.23→v0.24); grammars versioned by the org that writes them; **parsed every probe input correctly** (it was the verification oracle for the §8 bug) |
+| `odvcencio/gotreesitter` (pure-Go runtime, parse tables extracted from upstream `parser.c`) | pure Go, `CGO_ENABLED=0` verified | v0.37.0: 206 embedded grammars incl. Go external scanners for TS/TSX/Python; ships `ExtractDefinitionSpans`/`EnclosingDefinition` (≈ our §4.1/§4.3 API for free); incremental parsing; MIT — but **created 2026-02 (months old), single maintainer, and one confirmed parser bug in core TS syntax (§8)** |
+| `smacker/go-tree-sitter` (the historical community binding) | CGO | dead: last commit 2024-08, 42 open issues; its adopters (Bearer, CircleCI YAML LS, DeepSource) are stranded legacy users — do not adopt |
 | `malivvan/tree-sitter` (tree-sitter WASM on `wazero`) | pure Go | 3 commits, self-described pre-release — not viable |
-| Official CGO bindings (`tree-sitter/go-tree-sitter`) | CGO toolchain in CI, no easy cross-compile | correct (used as the verification oracle for the §8 bug) |
 
-**Decision: `gotreesitter`-first.** Keeping the pure-Go build (the whole point of
-RFC-005 §4's single-module Go layout, trivial cross-compilation, no CGO in CI) is
-worth far more than the constant-factor parse speed CGO would buy, because parsing is
-not the bottleneck — the SCIP subprocess and Neo4j writes are (measured: all 389
-dough/clanker TS files, 2.35 MB, parse + span-extract in ~6 s; `scip-typescript`
-alone takes longer on the same repos). Grammars are embedded in the library as
-compressed blobs with build-tag subsetting, which supersedes this RFC's original
-plan of hand-embedding `.wasm` files and hand-writing wazero FFI bindings.
+**Decision: official bindings first.** An earlier draft of this section picked
+`gotreesitter` by weighing the pure-Go build against *parse speed* — the wrong
+axis. The right axis is **correctness and support**: structure spans feed CALLS
+attribution, which is the product, and ten minutes of testing found a
+`gotreesitter` parser bug in bread-and-butter TypeScript (§8) — in a months-old,
+single-maintainer reimplementation with no institutional backing. Meanwhile CGO's
+actual cost to this project today is near zero: codegraph builds from source via
+`make` on dev machines and CI where a C compiler is present, and we distribute no
+prebuilt multi-platform binaries. If that ever changes, the official binding also
+offers a `purego` mode (runtime-loaded grammar `.so`s — no CGO, but shared-library
+distribution), and `gotreesitter` remains the pure-Go swap once it matures.
 
-Validation highlights (tiny-ts fixture): `greet` extracted at lines 3–5 exactly —
-the node the graph currently stores as `endLine: 10003`; nested
+The `Language` interface in §4.1 isolates the choice either way: runtimes are
+swappable behind it, decided by evidence, not speculatively. Parse cost is not the
+bottleneck regardless — the pure-Go runtime did all 389 dough/clanker TS files
+(2.35 MB) in ~6 s and CGO is faster still; `scip-typescript` alone takes longer on
+the same repos.
+
+Validation highlights (tiny-ts fixture, pure-Go probe): `greet` extracted at lines
+3–5 exactly — the node the graph currently stores as `endLine: 10003`; nested
 `class ConsoleLogger` 5–11 with `constructor` 6 and `log` 8–10 attributed to the
-class, not flat file order; `EnclosingDefinition` at the `logger.log(` call-site
-byte resolves to `greet`. That is §4.3's mechanism working end-to-end before we
-write a line of integration code.
-
-The `Language` interface in §4.1 still isolates the runtime choice: if
-`gotreesitter` stalls (single-maintainer risk) or its §8 bug class widens, the
-official CGO bindings drop in behind the same interface — decided by evidence, not
-speculatively.
+class, not flat file order; enclosing-definition lookup at the `logger.log(`
+call-site byte resolves to `greet`. That is §4.3's mechanism working end-to-end
+before we write a line of integration code. (`ExtractDefinitionSpans`/
+`EnclosingDefinition` are `gotreesitter` conveniences; over the official bindings
+the same ~50 lines are written once in `internal/ingest/structure` as a walk over
+function-like node kinds.)
 
 ### 4.3 Attribution: position → enclosing function
 
@@ -257,10 +267,11 @@ Stated plainly so it is not oversold:
 
 Ordered; each step ends green with incremental commits (RFC-006 house rules).
 
-1. `internal/ingest/structure`: `Extract` + `Language` registry over
-   `gotreesitter`, one language wired (TypeScript, our worst offender). Pure unit
-   tests on string inputs (nesting, closures, trailing non-function decls, EOF,
-   and the §8 known-bug input asserting the per-definition fallback path).
+1. `internal/ingest/structure`: `Extract` + `Language` registry over the official
+   bindings, one language wired (TypeScript, our worst offender; grammar module
+   `tree-sitter/tree-sitter-typescript/bindings/go`). Pure unit tests on string
+   inputs (nesting, closures, trailing non-function decls, EOF, and an
+   ERROR-recovery input asserting the per-definition fallback path).
 2. Wire `GenericCallGraphBuilder` to consume `FileStructure`; delete declaration-order
    inference + its tests; regenerate TS/polyglot goldens with real ranges; add the
    nested/double-call-site fixture case.
@@ -277,33 +288,32 @@ via MCP `source`/`flows`.
 
 ## 8. Risks & alternatives
 
-- **Known `gotreesitter` v0.37.0 parser bug (confirmed 2026-07-10).** Arrow
-  functions with both a typed parameter and a return-type annotation —
-  `(a: X): Y => …` — produce ERROR nodes; minimal repro
+- **`gotreesitter` v0.37.0 parser bug (confirmed 2026-07-10; why it is not our
+  primary runtime).** Arrow functions with both a typed parameter and a
+  return-type annotation — `(a: X): Y => …` — produce ERROR nodes; minimal repro
   `const g = (a: X): Y => a;`. The official CGO bindings parse the same input
   clean, so this is a `gotreesitter` runtime bug (GLR disambiguation), not an
   upstream grammar gap. Measured impact: 12 of 389 dough-gateway + clanker `.ts`
-  files (~3%) carry ERROR nodes; error recovery still preserved most definitions
-  in the inspected files (17 of ~20 in `tasks.repo.ts`), with one total loss
-  (`auth.decorators.ts`). Mitigation is the fallback policy below — affected
-  definitions degrade to the SCIP declaration line, never a wrong range — plus an
-  upstream bug report with the minimal repro. Even with the bug unfixed, ~97% of
-  files get exact ranges vs 0% today.
+  files (~3%) carried ERROR nodes; error recovery still preserved most definitions
+  (17 of ~20 in `tasks.repo.ts`), with one total loss (`auth.decorators.ts`).
+  This is the §4.2 decision's evidence: a common-syntax correctness bug found
+  within minutes of testing means the pure-Go swap waits until the library
+  matures. Reporting it upstream (with this repro) is the constructive follow-up.
 - **Grammar/language drift** (new TS syntax the pinned grammar can't parse):
   `Extract` degrades per definition — spans extracted from clean regions are kept,
   definitions inside ERROR regions fall back to the SCIP declaration line
   (`startLine == endLine`) rather than a wrong guess — strictly better than today's
   confident-but-wrong tail. Grammar versions are pinned via the library dependency
   and bumped deliberately.
-- **Parse cost on huge files**: measured at ~6 s for 389 files / 2.35 MB (§4.2) —
-  not a concern at our repo sizes; the existing `--max-file-byte-size` skip
-  philosophy bounds pathological inputs. If a grammar ever dominates a real run,
-  CGO is the escape hatch behind the same interface (§4.2) — decided by profile,
-  not preemptively.
-- **Single-maintainer dependency** (`odvcencio/gotreesitter`): mitigated by the
-  `Language` interface (§4.2's drop-in CGO fallback), MIT license (forkable), and
-  the library's parity-test suite against upstream, which makes a pinned version a
-  known quantity even if development stops.
+- **Parse cost on huge files**: measured at ~6 s for 389 files / 2.35 MB even on
+  the slower pure-Go runtime (§4.2) — not a concern at our repo sizes; the
+  existing `--max-file-byte-size` skip philosophy bounds pathological inputs.
+- **CGO in the build**: the real cost of the official bindings. Today it is
+  near-zero (source builds via `make` on dev machines/CI with a C compiler; no
+  prebuilt multi-platform distribution). If distribution needs change, the
+  documented paths out are the official bindings' `purego` shared-library mode or
+  the matured pure-Go runtime behind the same `Language` interface — a dependency
+  swap, not a redesign.
 - **Alternative — fork the SCIP indexers to emit `EnclosingRange`.** Rejected:
   unbounded upstream dependency across four indexers in three ecosystems, the exact
   trap RFC-001 called out, and it still would not give us incremental structure.
@@ -313,12 +323,11 @@ via MCP `source`/`flows`.
 
 ## 9. Open questions
 
-- ~~Grammar sourcing/build~~ — resolved by §4.2: grammars ship inside
-  `gotreesitter` as embedded blobs with build-tag subsetting; we pin the module
-  version. (Use build tags to embed only our supported languages if binary size
-  becomes a concern.)
-- File the `(a: X): Y =>` bug upstream with the §8 minimal repro — needs a
-  decision on who files it (it is an outward-facing action).
+- ~~Grammar sourcing/build~~ — resolved by §4.2: grammars are `go get`-able Go
+  modules published from each official grammar repo (`bindings/go`), versioned by
+  the tree-sitter org; we pin them like any dependency.
+- File the `(a: X): Y =>` `gotreesitter` bug upstream with the §8 minimal repro —
+  needs a decision on who files it (it is an outward-facing action).
 - Do we attribute class/interface **member** ranges (methods) via the same pass now,
   or scope this strictly to Function/Method and leave Class/Interface spans to a
   follow-up? (Leaning: include methods immediately — they are function nodes and the
