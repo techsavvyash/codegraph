@@ -272,13 +272,13 @@ func (ing *Ingestor) ingestDoc(ctx context.Context, src Source, ref DocRef, serv
 	}
 
 	// A rewritten chunk's derived state is stale: its explicit references are
-	// re-mined by Layer D, and its embedding and match markers are cleared so
-	// Layer S re-embeds and re-matches it. New chunks have none of these; the
-	// clear is a no-op for them.
+	// re-mined by Layer D (minedAt cleared), and its embedding and match
+	// markers are cleared so Layer S re-embeds and re-matches it. New chunks
+	// have none of these; the clear is a no-op for them.
 	if len(writtenIDs) > 0 {
 		if _, err := ing.client.ExecuteQuery(ctx, `
 			MATCH (c:DocumentChunk) WHERE elementId(c) IN $ids
-			REMOVE c.embedding, c.embeddingModel, c.semlinkAt, c.semlinkModel
+			REMOVE c.embedding, c.embeddingModel, c.semlinkAt, c.semlinkModel, c.minedAt
 			WITH c
 			OPTIONAL MATCH (c)-[m:MENTIONS]->()
 			DELETE m

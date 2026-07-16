@@ -129,6 +129,14 @@ func GetIndexes() []Index {
 			Type:       "BTREE",
 		},
 		{
+			// Interface was the one definition label without a name index —
+			// found when RFC-011 codespan resolution timed out scanning it.
+			Name:       "interface_name_idx",
+			NodeLabel:  "Interface",
+			Properties: []string{"name"},
+			Type:       "BTREE",
+		},
+		{
 			Name:       "function_name_idx",
 			NodeLabel:  "Function",
 			Properties: []string{"name"},

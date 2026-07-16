@@ -102,8 +102,12 @@ func (s *IngestDocsStage) Run(ctx context.Context, cfg *PipelineConfig) (int, er
 		return 0, fmt.Errorf("IngestDocs: %w", err)
 	}
 
+	unmined, err := mine.UnminedChunks(ctx, cfg.Client, cfg.ServiceName, cfg.ScopeCtx)
+	if err != nil {
+		return 0, fmt.Errorf("IngestDocs: %w", err)
+	}
 	miner := mine.NewMiner(cfg.Client, cfg.ServiceName, cfg.ScopeCtx)
-	mineReport, err := miner.MineChunks(ctx, report.Changed)
+	mineReport, err := miner.MineChunks(ctx, append(report.Changed, unmined...))
 	if err != nil {
 		return 0, fmt.Errorf("IngestDocs: mining: %w", err)
 	}

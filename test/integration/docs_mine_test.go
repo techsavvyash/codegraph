@@ -253,6 +253,23 @@ func main() {
 	_, err = miner.MineChunks(ctx, report.Changed)
 	require.NoError(t, err)
 	require.Equal(t, before, countAllMentions(t, client), "re-mining must not duplicate edges")
+
+	// --- Resumability: a completed pass stamps minedAt, so nothing is left
+	// for the failure-recovery path to pick up.
+	unmined, err := mine.UnminedChunks(ctx, client, mineService, models.DefaultScope())
+	require.NoError(t, err)
+	require.Empty(t, unmined, "mined chunks must carry minedAt")
+
+	// Clearing the marker resurfaces the chunk for recovery mining.
+	_, err = client.ExecuteQuery(ctx, `
+		MATCH (c:DocumentChunk {nodeKey: $key, scopeId: 'main'}) REMOVE c.minedAt
+	`, map[string]any{"key": chunk0})
+	require.NoError(t, err)
+	unmined, err = mine.UnminedChunks(ctx, client, mineService, models.DefaultScope())
+	require.NoError(t, err)
+	require.Len(t, unmined, 1)
+	require.Equal(t, chunk0, unmined[0].NodeKey)
+	require.Equal(t, "docs/engine.md", unmined[0].FilePath, "FilePath recovered from the owning Document")
 }
 
 func countAllMentions(t *testing.T, client *neo4j.Client) int {

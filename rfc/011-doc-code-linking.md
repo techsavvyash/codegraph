@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
+| **Status** | Implemented (2026-07-17) |
 | **Created** | 2026-07-16 |
 | **Authors** | @techsavvyash |
 | **Supersedes** | RFC-002 (Withdrawn), RFC-008 (Withdrawn) |
@@ -244,6 +244,9 @@ system:
   (conf 0.90); no in-service match but unique global match → link (conf 0.85,
   reason `cross-service`); **multiple matches → no edge** — the ambiguity is
   counted and reported (§7), never guessed;
+- cross-service bare names additionally require a strong token (mixed case,
+  underscore, or length ≥8): the precision audit's only failures were `repo`
+  and `task` globally-unique-matching unrelated services (added 2026-07-17);
 - a qualifier, when present (`Chunker.ChunkDocumentWithMeta`), must also match
   (method's parent class/receiver, or symbol suffix), else the candidate dies.
 
@@ -416,6 +419,32 @@ the populated dev graph (dirty-DB rule) — all doc queries service-scoped, fixt
 services `itest-docs-*` cleaned via the existing harness lock/cleanup machinery.
 
 ## 9. Verification & success metrics
+
+> **Results (recorded 2026-07-17, implementation complete):**
+>
+> - **Corpus:** codegraph (69 docs → 872 chunks, 461 edges) + dough-core
+>   (22 docs → 188 chunks, 400 edges), mined in ~1.7s/repo. khaata was not in
+>   the current dev graph, so dough-core replaced it as the second corpus.
+> - **Layer D precision: 48/50 = 0.96** on a seed-42 random sample of the 913
+>   docmine edges, manually audited — gate (≥0.90) passed. Both failures were
+>   short bare lowercase words (`repo`, `task`) globally-unique-matching
+>   unrelated services at 0.85; fixed post-audit with the weak-bare-name
+>   cross-service guard (§5.1 D2), which removed 52 such edges corpus-wide.
+> - **Recall sanity: 7/7** — every explicit `internal/….go` path in `rfc/*.md`
+>   that exists on disk yields a `docmine/filepath` edge from that RFC's chunks.
+> - **Idempotence:** verified — unchanged re-runs write zero nodes/edges and
+>   mine zero chunks (`minedAt` stamps; the marker also closes the
+>   failure-recovery gap where a mining error after a successful ingest would
+>   have stranded chunks unmined forever).
+> - **Layer S:** plumbing verified end-to-end on the fake provider
+>   (integration suite: geometry-controlled matching, judge gating, budget
+>   resume, idempotent re-runs, zero-LLM-call cache hits). A real-provider
+>   smoke run is deferred until a vendor is chosen (provider decision was
+>   explicitly "pluggable, decide at build time").
+> - **Walkthrough:** committed as `docs/22-doc-code-linking-walkthrough.md`
+>   (find → MENTIONS → source, real transcript).
+> - Found and fixed during dogfood: missing `interface_name_idx` (codespan
+>   resolution timed out scanning Interface nodes on the populated graph).
 
 - **Layer D precision ≥ 0.90** (RFC-006 Phase 4 gate): index `codegraph` +
   `khaata` docs, sample 50 random `docmine/*` edges, manual audit. Precision below

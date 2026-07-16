@@ -62,13 +62,62 @@ func NewMiner(client *graph.Client, serviceName string, scope models.ScopeContex
 	return &Miner{client: client, serviceName: serviceName, scope: scope}
 }
 
+// UnminedChunks returns the service's chunks that have never completed a
+// mining pass (no minedAt marker). This is the crash/failure recovery path:
+// the ingestor's hash-diff reports a chunk as changed exactly once, so a
+// mining failure after a successful ingest would otherwise strand chunks
+// unmined forever.
+func UnminedChunks(ctx context.Context, client *graph.Client, serviceName string, scope models.ScopeContext) ([]docs.ChunkRecord, error) {
+	records, err := client.ExecuteQuery(ctx, `
+		MATCH (c:DocumentChunk {serviceName: $svc, scopeId: $scope})
+		WHERE c.minedAt IS NULL
+		OPTIONAL MATCH (d:Document {nodeKey: c.documentKey, scopeId: $scope})
+		RETURN c.nodeKey AS nodeKey, elementId(c) AS id, c.documentKey AS documentKey,
+		       c.content AS content, c.headingPath AS headingPath,
+		       coalesce(d.filePath, '') AS filePath
+		ORDER BY c.nodeKey
+	`, map[string]any{"svc": serviceName, "scope": scope.ScopeID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load unmined chunks: %w", err)
+	}
+
+	var out []docs.ChunkRecord
+	for _, rec := range records {
+		m := rec.AsMap()
+		get := func(k string) string { s, _ := m[k].(string); return s }
+		out = append(out, docs.ChunkRecord{
+			NodeKey:     get("nodeKey"),
+			ElementID:   get("id"),
+			DocumentKey: get("documentKey"),
+			FilePath:    get("filePath"),
+			Content:     get("content"),
+			HeadingPath: get("headingPath"),
+		})
+	}
+	return out, nil
+}
+
 // MineChunks extracts, validates, and links the given chunks (typically the
-// Changed set of an ingest run). Idempotent: edges MERGE on (chunk, target).
+// Changed set of an ingest run plus any UnminedChunks). Idempotent: edges
+// MERGE on (chunk, target); chunks are stamped minedAt only after their
+// edges are written, so a failed run re-mines on the next attempt.
 func (m *Miner) MineChunks(ctx context.Context, chunks []docs.ChunkRecord) (*Report, error) {
 	report := &Report{ByStrategy: map[string]int{}}
 	if len(chunks) == 0 {
 		return report, nil
 	}
+
+	// Dedup inputs by chunk (Changed ∪ Unmined can overlap on a fresh run).
+	seen := make(map[string]bool, len(chunks))
+	deduped := chunks[:0]
+	for _, ch := range chunks {
+		if ch.ElementID == "" || seen[ch.ElementID] {
+			continue
+		}
+		seen[ch.ElementID] = true
+		deduped = append(deduped, ch)
+	}
+	chunks = deduped
 
 	// Phase A: extract everything first so lookups batch across chunks.
 	type chunkCands struct {
@@ -100,6 +149,19 @@ func (m *Miner) MineChunks(ctx context.Context, chunks []docs.ChunkRecord) (*Rep
 	// Phase E: provenanced edge writes.
 	if err := m.writeLinks(ctx, links, report); err != nil {
 		return nil, err
+	}
+
+	// Phase F: stamp the pass. Zero-edge chunks are stamped too — "mined and
+	// found nothing" must not look like "never mined".
+	ids := make([]string, 0, len(chunks))
+	for _, ch := range chunks {
+		ids = append(ids, ch.ElementID)
+	}
+	if _, err := m.client.ExecuteQuery(ctx, `
+		MATCH (c:DocumentChunk) WHERE elementId(c) IN $ids
+		SET c.minedAt = $now
+	`, map[string]any{"ids": ids, "now": time.Now().UTC().Format(time.RFC3339)}); err != nil {
+		return nil, fmt.Errorf("failed to stamp minedAt: %w", err)
 	}
 
 	return report, nil
@@ -242,6 +304,14 @@ func decideName(c Candidate, tbl *lookupTables) decision {
 		return decision{kill: "nomatch"}
 	}
 
+	// Cross-service linking needs a stronger signal than a short bare
+	// lowercase word: the precision audit's only failures were `repo` and
+	// `task` globally-unique-matching unrelated services. Mixed case,
+	// qualifiers, or length carry intent; "task" does not.
+	if c.Qualifier == "" && isWeakBareName(c.Name) {
+		return decision{kill: "nomatch"}
+	}
+
 	if len(refs) == 1 {
 		return decision{link: &link{
 			target:     refs[0],
@@ -262,6 +332,16 @@ func filterByQualifier(refs []NodeRef, qualifier string) []NodeRef {
 		}
 	}
 	return out
+}
+
+// isWeakBareName reports whether an unqualified identifier is too generic to
+// justify a cross-service link: all-lowercase and short. `failNow` (mixed
+// case) and `reconciliation_loop` (underscore, length) pass; `task` does not.
+func isWeakBareName(name string) bool {
+	if len(name) >= 8 || strings.ContainsRune(name, '_') {
+		return false
+	}
+	return name == strings.ToLower(name)
 }
 
 // containsToken reports whether needle occurs in haystack at identifier

@@ -130,6 +130,30 @@ func TestDecideName(t *testing.T) {
 			wantStrat:  "docmine/codespan",
 		},
 		{
+			// Audit-driven guard: `repo`/`task`-class words globally matching
+			// unrelated services were the only precision failures.
+			name:     "weak bare lowercase name never links cross-service",
+			cand:     Candidate{Kind: CodespanCandidate, Name: "taskx", Raw: "taskx"},
+			refs:     map[string][]NodeRef{"taskx": {{Label: "Function", NodeKey: "func:other:t.ts#taskx", ElementID: "el-w"}}},
+			wantKill: "nomatch",
+		},
+		{
+			name:       "weak bare name still links in-service",
+			cand:       Candidate{Kind: CodespanCandidate, Name: "taskx", Raw: "taskx"},
+			refs:       map[string][]NodeRef{"taskx": {{Label: "Function", NodeKey: "func:svc:t.go#taskx", ElementID: "el-w2", InService: true}}},
+			wantConf:   confCodespanLocal,
+			wantTarget: "func:svc:t.go#taskx",
+			wantStrat:  "docmine/codespan",
+		},
+		{
+			name:       "mixed-case bare name may cross services",
+			cand:       Candidate{Kind: CodespanCandidate, Name: "failNow", Raw: "failNow"},
+			refs:       map[string][]NodeRef{"failNow": {{Label: "Method", NodeKey: "method:other:t.ts#failNow", ElementID: "el-fn"}}},
+			wantConf:   confCodespanGlobal,
+			wantTarget: "method:other:t.ts#failNow",
+			wantStrat:  "docmine/codespan",
+		},
+		{
 			name:     "codespan multiple in-service killed ambiguous",
 			cand:     Candidate{Kind: CodespanCandidate, Name: "NewChunker", Raw: "NewChunker"},
 			refs:     map[string][]NodeRef{"NewChunker": {fnLocal, {Label: "Function", NodeKey: "func:svc:c.go#NewChunker", ElementID: "el-2", InService: true}}},

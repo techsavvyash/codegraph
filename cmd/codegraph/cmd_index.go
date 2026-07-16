@@ -181,9 +181,14 @@ Requires an llm provider in ~/.codegraph.yaml (see llm/semlink sections).`,
 			}
 		}
 
-		// 2. Layer D mining over the changed chunks.
+		// 2. Layer D mining: changed chunks plus any chunks a previous failed
+		// run left unmined (hash-diff reports each chunk as changed only once).
+		unmined, err := mine.UnminedChunks(ctx, client, serviceName, scope)
+		if err != nil {
+			return fmt.Errorf("failed to load unmined chunks: %w", err)
+		}
 		miner := mine.NewMiner(client, serviceName, scope)
-		mineReport, err := miner.MineChunks(ctx, report.Changed)
+		mineReport, err := miner.MineChunks(ctx, append(report.Changed, unmined...))
 		if err != nil {
 			return fmt.Errorf("deterministic mining failed: %w", err)
 		}
