@@ -36,13 +36,13 @@ type Result struct {
 	NodeID    string  `json:"node_id"` // elementId
 	NodeKey   string  `json:"node_key"`
 	Label     string  `json:"label"`
-	Name      string  `json:"name"`      // primary name (varies by label: name, path, displayName, etc.)
-	Signature string  `json:"signature"` // for Function/Method; empty for others
-	FilePath  string  `json:"file_path"` // for File; empty for others
-	Service   string  `json:"service"`   // serviceName from node
+	Name      string  `json:"name"`                 // primary name (varies by label: name, path, displayName, etc.)
+	Signature string  `json:"signature"`            // for Function/Method; empty for others
+	FilePath  string  `json:"file_path"`            // for File; empty for others
+	Service   string  `json:"service"`              // serviceName from node
 	StartLine int     `json:"start_line,omitempty"` // 1-based; 0 when the node has no location
 	EndLine   int     `json:"end_line,omitempty"`   // 1-based inclusive; exact for rangeSource=treesitter/go-ast nodes
-	Score     float64 `json:"score"`     // fused RRF score
+	Score     float64 `json:"score"`                // fused RRF score
 }
 
 // Response contains the results and pagination cursor.
