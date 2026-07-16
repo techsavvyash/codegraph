@@ -1,4 +1,4 @@
-package docsparked
+package docs
 
 import (
 	"crypto/sha256"
@@ -67,14 +67,65 @@ func TestChunkDocumentWithMeta_HeadingTracking(t *testing.T) {
 	c := NewChunker(1000)
 	content := "# Main Title\n\nIntro text.\n\n## Section One\n\nSection one content.\n\n## Section Two\n\nSection two content."
 
+	// H1/H2 paragraphs open a new chunk (RFC-011 §4), so this document yields
+	// one chunk per section despite the large word budget.
 	chunks := c.ChunkDocumentWithMeta(content)
-	if len(chunks) != 1 {
-		t.Fatalf("expected 1 chunk (large chunkSize), got %d", len(chunks))
+	if len(chunks) != 3 {
+		t.Fatalf("expected 3 section-aligned chunks, got %d", len(chunks))
 	}
 
-	// The heading path should contain the deepest heading encountered.
 	if !strings.Contains(chunks[0].HeadingPath, "Main Title") {
-		t.Errorf("expected heading path to contain 'Main Title', got %q", chunks[0].HeadingPath)
+		t.Errorf("expected first heading path to contain 'Main Title', got %q", chunks[0].HeadingPath)
+	}
+	if chunks[1].HeadingPath != "Main Title > Section One" {
+		t.Errorf("expected 'Main Title > Section One', got %q", chunks[1].HeadingPath)
+	}
+	if chunks[2].HeadingPath != "Main Title > Section Two" {
+		t.Errorf("expected 'Main Title > Section Two', got %q", chunks[2].HeadingPath)
+	}
+	if !strings.Contains(chunks[2].Content, "Section two content.") {
+		t.Errorf("section chunk should carry its body, got %q", chunks[2].Content)
+	}
+}
+
+// TestChunkDocumentWithMeta_SectionFlushKeepsOutgoingPath pins the ordering
+// contract: the chunk being closed by a new H2 keeps the OLD section's path.
+func TestChunkDocumentWithMeta_SectionFlushKeepsOutgoingPath(t *testing.T) {
+	c := NewChunker(1000)
+	content := "## Alpha\n\nAlpha body.\n\n## Beta\n\nBeta body."
+
+	chunks := c.ChunkDocumentWithMeta(content)
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(chunks))
+	}
+	if chunks[0].HeadingPath != "Alpha" {
+		t.Errorf("outgoing chunk path should be 'Alpha', got %q", chunks[0].HeadingPath)
+	}
+	if !strings.Contains(chunks[0].Content, "Alpha body.") || strings.Contains(chunks[0].Content, "Beta") {
+		t.Errorf("outgoing chunk content wrong: %q", chunks[0].Content)
+	}
+	if chunks[1].HeadingPath != "Beta" {
+		t.Errorf("incoming chunk path should be 'Beta', got %q", chunks[1].HeadingPath)
+	}
+}
+
+// TestOpeningHeadingLevel covers the boundary-detection helper directly.
+func TestOpeningHeadingLevel(t *testing.T) {
+	cases := []struct {
+		para string
+		want int
+	}{
+		{"# Title", 1},
+		{"## Section\nbody line", 2},
+		{"### Deep", 3},
+		{"plain paragraph", 0},
+		{"body first\n## heading not first", 0},
+		{"#nospace", 0},
+	}
+	for _, tc := range cases {
+		if got := openingHeadingLevel(tc.para); got != tc.want {
+			t.Errorf("openingHeadingLevel(%q) = %d, want %d", tc.para, got, tc.want)
+		}
 	}
 }
 

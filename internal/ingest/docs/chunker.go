@@ -1,9 +1,8 @@
-// Package docsparked holds document-ingestion primitives that survived the
-// RFC-006 Phase 0c demolition of the doc-linking subsystem. They have no
-// consumers today; they are parked here for Phase 4 (RFC-006), which rebuilds
-// document ingestion on top of the trimmed graph. Nothing else may import
-// this package until then.
-package docsparked
+// Package docs implements in-repo markdown ingestion for RFC-011: document
+// discovery (Source), deterministic chunking with hash-based incremental
+// sync (Chunker), and graph writes (Ingestor). It was parked as docsparked
+// after the RFC-006 Phase 0c demolition and un-parked for RFC-011.
+package docs
 
 import (
 	"crypto/sha256"
@@ -36,13 +35,18 @@ func NewChunker(chunkSize int) *Chunker {
 	return &Chunker{chunkSize: chunkSize}
 }
 
+var headingRe = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+)$`)
+
 // ChunkDocumentWithMeta breaks a document into chunks with heading paths,
 // byte offsets, and text hashes. Chunk boundaries and hashes are deterministic
 // across runs so callers can diff TextHash against a prior run to detect
 // unchanged chunks (hash chunk-sync).
+//
+// A chunk is flushed when the word budget is exceeded OR when a paragraph
+// opens with an H1/H2 heading (RFC-011 §4): major sections get their own
+// chunks, and each chunk's HeadingPath reflects the section it belongs to
+// rather than blending across a section boundary.
 func (c *Chunker) ChunkDocumentWithMeta(content string) []ChunkMeta {
-	headingRe := regexp.MustCompile(`(?m)^(#{1,6})\s+(.+)$`)
-
 	// Split into paragraphs (double newline separated).
 	paragraphs := strings.Split(content, "\n\n")
 
@@ -84,6 +88,15 @@ func (c *Chunker) ChunkDocumentWithMeta(content string) []ChunkMeta {
 			continue
 		}
 
+		// Section boundary: a paragraph opening with an H1/H2 heading closes
+		// the current chunk. This must happen BEFORE the heading stack below
+		// is updated, so the outgoing chunk keeps the section path it was
+		// written under.
+		if lvl := openingHeadingLevel(paragraph); lvl >= 1 && lvl <= 2 && currentText.Len() > 0 {
+			flushChunk()
+			chunkStart = bytePos
+		}
+
 		// Check if this paragraph is/contains a heading and update the stack.
 		for _, line := range strings.Split(paragraph, "\n") {
 			if m := headingRe.FindStringSubmatch(line); m != nil {
@@ -119,6 +132,20 @@ func (c *Chunker) ChunkDocumentWithMeta(content string) []ChunkMeta {
 
 	flushChunk()
 	return chunks
+}
+
+// openingHeadingLevel returns the heading level (1-6) if the paragraph's first
+// line is a markdown ATX heading, or 0 otherwise.
+func openingHeadingLevel(paragraph string) int {
+	firstLine := paragraph
+	if idx := strings.IndexByte(paragraph, '\n'); idx >= 0 {
+		firstLine = paragraph[:idx]
+	}
+	m := headingRe.FindStringSubmatch(firstLine)
+	if m == nil {
+		return 0
+	}
+	return len(m[1])
 }
 
 // buildHeadingPath joins non-empty heading levels with " > ".
