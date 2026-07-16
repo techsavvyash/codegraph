@@ -366,7 +366,7 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 
 	s.T().Run("RetrieveExistingFunction", func(t *testing.T) {
 		// Get a known function from our codebase
-		sourceCode, err := queryBuilder.GetFunctionSourceCode(s.ctx, "SetSCIPBinary")
+		sourceCode, err := queryBuilder.GetFunctionSourceCode(s.ctx, "SetSCIPBinary", "itest-system")
 		require.NoError(t, err)
 
 		// Verify the source code contains expected content
@@ -382,7 +382,7 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 
 	s.T().Run("RetrieveNonExistentFunction", func(t *testing.T) {
 		// Try to get a function that doesn't exist
-		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "NonExistentFunction12345")
+		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "NonExistentFunction12345", "")
 		assert.Error(t, err, "Should return error for non-existent function")
 		assert.Contains(t, err.Error(), "function not found", "Error should indicate function not found")
 	})
@@ -408,8 +408,12 @@ func (s *SystemTestSuite) TestSourceCodeRetrieval() {
 		functionName := record["name"].(string)
 		signature := record["signature"].(string)
 
-		// Retrieve source code by signature
-		sourceCode, err := queryBuilder.GetFunctionSourceCodeBySignature(s.ctx, signature)
+		// Retrieve source code by signature, bounded to this suite's own
+		// service: the suite indexes this very repo, so its signatures are
+		// byte-identical to any dev-graph index of it — an unbounded lookup
+		// picks between the two nondeterministically and can return byte
+		// offsets that are stale for the current working tree.
+		sourceCode, err := queryBuilder.GetFunctionSourceCodeBySignature(s.ctx, signature, "itest-system")
 		require.NoError(t, err)
 
 		// Verify the retrieved code contains the function name
@@ -423,17 +427,21 @@ func (s *SystemTestSuite) TestByteOffsetAccuracy() {
 	queryBuilder := neo4j.NewQueryBuilder(s.client)
 
 	s.T().Run("VerifyByteOffsetAccuracy", func(t *testing.T) {
-		// Get a function with its location metadata
+		// Get a function with its location metadata FROM THIS SUITE'S OWN
+		// INDEX — an unbounded pick can grab another service's node from the
+		// shared database, whose service-relative filePath doesn't resolve
+		// here (or whose byte offsets are stale for the file on disk).
 		cypher := `
 			MATCH (f:Function)
-			WHERE f.filePath IS NOT NULL AND f.startByte IS NOT NULL 
+			WHERE f.serviceName = 'itest-system' AND f.scopeId = $scope
+				AND f.filePath IS NOT NULL AND f.startByte IS NOT NULL
 				AND f.endByte IS NOT NULL AND f.name IS NOT NULL
 			RETURN f.name AS name, f.filePath AS filePath,
 				   f.startByte AS startByte, f.endByte AS endByte
 			LIMIT 1
 		`
 
-		result, err := s.client.ExecuteQuery(s.ctx, cypher, nil)
+		result, err := s.client.ExecuteQuery(s.ctx, cypher, map[string]any{"scope": systemTestSuiteScopeID})
 		require.NoError(t, err)
 		require.Greater(t, len(result), 0, "Should find function with location metadata")
 
@@ -465,7 +473,7 @@ func (s *SystemTestSuite) TestByteOffsetAccuracy() {
 			directExtraction := string(content[startByte:endByte])
 
 			// Get source code via our API
-			apiExtraction, err := queryBuilder.GetFunctionSourceCode(s.ctx, functionName)
+			apiExtraction, err := queryBuilder.GetFunctionSourceCode(s.ctx, functionName, "itest-system")
 			require.NoError(t, err)
 
 			// They should match
@@ -484,12 +492,12 @@ func (s *SystemTestSuite) TestSourceCodeRetrievalEdgeCases() {
 	queryBuilder := neo4j.NewQueryBuilder(s.client)
 
 	s.T().Run("HandleEmptyFunctionName", func(t *testing.T) {
-		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "")
+		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "", "")
 		assert.Error(t, err, "Should handle empty function name gracefully")
 	})
 
 	s.T().Run("HandleSpecialCharactersInFunctionName", func(t *testing.T) {
-		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "func@#$%")
+		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "func@#$%", "")
 		assert.Error(t, err, "Should handle special characters gracefully")
 	})
 
@@ -497,7 +505,7 @@ func (s *SystemTestSuite) TestSourceCodeRetrievalEdgeCases() {
 		// Find a function and test the line-based fallback
 		// This would require manipulating the data to test the fallback path
 		// For now, just ensure the API doesn't crash with various inputs
-		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "calculateByteOffsets")
+		_, err := queryBuilder.GetFunctionSourceCode(s.ctx, "calculateByteOffsets", "itest-system")
 		// This should either succeed or fail gracefully
 		if err != nil {
 			assert.Contains(t, err.Error(), "not found", "Should provide meaningful error message")

@@ -94,6 +94,7 @@ var querySourceCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		functionName := args[0]
+		serviceName, _ := cmd.Flags().GetString("service")
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -104,7 +105,7 @@ var querySourceCmd = &cobra.Command{
 		queryBuilder := neo4j.NewQueryBuilder(client)
 
 		ctx := context.Background()
-		sourceCode, err := queryBuilder.GetFunctionSourceCode(ctx, functionName)
+		sourceCode, err := queryBuilder.GetFunctionSourceCode(ctx, functionName, serviceName)
 		if err != nil {
 			return fmt.Errorf("failed to get source code: %w", err)
 		}
@@ -244,6 +245,7 @@ func init() {
 	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
 	querySearchCmd.Flags().String("service", "", "Optional filter by service name")
 	querySearchCmd.Flags().String("cursor", "", "Keyset pagination cursor for next page")
+	querySourceCmd.Flags().String("service", "", "Optional filter by service name (names repeat across services)")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 

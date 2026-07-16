@@ -652,19 +652,26 @@ func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, n
 	return result, nil
 }
 
-// GetFunctionSourceCode retrieves the exact source code for a function or method
-func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName string) (string, error) {
+// GetFunctionSourceCode retrieves the exact source code for a function or
+// method. serviceName optionally bounds the match to one service — names
+// repeat across services (and across a dev index and a test index of the
+// same repo), and an unbounded pick can return byte offsets that are stale
+// for the file on disk. Empty serviceName matches any service
+// (deterministically, via ORDER BY).
+func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName, serviceName string) (string, error) {
 	// Find the function/method node with location metadata
 	cypher := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method) AND f.name = $functionName
+		  AND ($serviceName = '' OR f.serviceName = $serviceName)
 		RETURN f.filePath AS filePath, f.startByte AS startByte, f.endByte AS endByte,
 			   f.startLine AS startLine, f.endLine AS endLine,
 			   f.name AS name, f.signature AS signature
+		ORDER BY f.serviceName, f.filePath, f.startLine
 		LIMIT 1
 	`
 
-	params := map[string]any{"functionName": functionName}
+	params := map[string]any{"functionName": functionName, "serviceName": serviceName}
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to find function: %w", err)
@@ -731,19 +738,28 @@ func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName 
 	return "", fmt.Errorf("unable to extract source code for function: %s", functionName)
 }
 
-// GetFunctionSourceCodeBySignature retrieves source code using the function signature for disambiguation
-func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, signature string) (string, error) {
+// GetFunctionSourceCodeBySignature retrieves source code using the function
+// signature for disambiguation. serviceName bounds the lookup to one service's
+// nodes: SCIP signatures are only unique per service — the same project
+// indexed under two service names (e.g. a test-suite index alongside a dev
+// index of this repo) carries byte-identical signatures, and an unbounded
+// LIMIT 1 picks between them nondeterministically, returning byte offsets
+// that may be stale for the file on disk. Empty serviceName matches any
+// service (deterministically, via ORDER BY).
+func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, signature, serviceName string) (string, error) {
 	// Find the function/method node with location metadata using signature
 	cypher := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method) AND f.signature = $signature
+		  AND ($serviceName = '' OR f.serviceName = $serviceName)
 		RETURN f.filePath AS filePath, f.startByte AS startByte, f.endByte AS endByte,
 			   f.startLine AS startLine, f.endLine AS endLine,
 			   f.name AS name, f.signature AS signature
+		ORDER BY f.serviceName, f.filePath, f.startLine
 		LIMIT 1
 	`
 
-	params := map[string]any{"signature": signature}
+	params := map[string]any{"signature": signature, "serviceName": serviceName}
 	result, err := qb.client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to find function: %w", err)
