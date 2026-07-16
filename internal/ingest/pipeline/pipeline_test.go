@@ -195,8 +195,8 @@ func TestPipeline_ContextCancellation(t *testing.T) {
 
 func TestDefaultStages_Count(t *testing.T) {
 	stages := DefaultStages()
-	if len(stages) != 4 {
-		t.Fatalf("expected 4 default stages, got %d", len(stages))
+	if len(stages) != 6 {
+		t.Fatalf("expected 6 default stages, got %d", len(stages))
 	}
 }
 
@@ -207,6 +207,8 @@ func TestDefaultStages_Names(t *testing.T) {
 		StageComputeGraphMetrics,
 		StageInferServiceDeps,
 		StageGenerateFlowSpines,
+		StageIngestDocs,
+		StageLinkDocsSemantic,
 	}
 
 	if len(stages) != len(expectedNames) {
@@ -247,14 +249,14 @@ func TestDefaultStages_OptionalFlags(t *testing.T) {
 
 func TestDefaultTiers_Count(t *testing.T) {
 	tiers := DefaultTiers()
-	if len(tiers) != 3 {
-		t.Fatalf("expected 3 tiers, got %d", len(tiers))
+	if len(tiers) != 4 {
+		t.Fatalf("expected 4 tiers, got %d", len(tiers))
 	}
 }
 
 func TestDefaultTiers_StageDistribution(t *testing.T) {
 	tiers := DefaultTiers()
-	expected := []int{1, 1, 2} // IngestCode | Metrics | (Deps,Flows)
+	expected := []int{1, 1, 3, 1} // IngestCode | Metrics | (Deps,Flows,Docs) | Semantic
 	if len(tiers) != len(expected) {
 		t.Fatalf("expected %d tiers, got %d", len(expected), len(tiers))
 	}

@@ -6,7 +6,11 @@ import (
 	"log"
 
 	gds "github.com/context-maximiser/code-graph/internal/graph/gds"
+	"github.com/context-maximiser/code-graph/internal/ingest/docs"
+	"github.com/context-maximiser/code-graph/internal/ingest/docs/mine"
 	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
+	"github.com/context-maximiser/code-graph/internal/llm"
 	"github.com/context-maximiser/code-graph/internal/query"
 )
 
@@ -74,6 +78,71 @@ func (s *GenerateFlowSpinesStage) Run(ctx context.Context, cfg *PipelineConfig) 
 		return 0, fmt.Errorf("GenerateFlowSpines: %w", err)
 	}
 	return len(results), nil
+}
+
+// --- Stage: IngestDocs (RFC-011) ---
+
+type IngestDocsStage struct{}
+
+func (s *IngestDocsStage) Name() StageName { return StageIngestDocs }
+func (s *IngestDocsStage) Optional() bool  { return true }
+
+// Run ingests in-repo markdown and mines deterministic MENTIONS edges. A
+// guarded no-op unless cfg.Docs is set, so default pipeline behavior is
+// unchanged.
+func (s *IngestDocsStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	if !cfg.Docs {
+		log.Printf("[IngestDocs] docs ingestion not enabled (--with-docs), skipping")
+		return 0, nil
+	}
+
+	ing := docs.NewIngestor(cfg.Client, cfg.ServiceName, cfg.ScopeCtx)
+	report, err := ing.Run(ctx, &docs.RepoMarkdownSource{Root: cfg.ProjectPath})
+	if err != nil {
+		return 0, fmt.Errorf("IngestDocs: %w", err)
+	}
+
+	miner := mine.NewMiner(cfg.Client, cfg.ServiceName, cfg.ScopeCtx)
+	mineReport, err := miner.MineChunks(ctx, report.Changed)
+	if err != nil {
+		return 0, fmt.Errorf("IngestDocs: mining: %w", err)
+	}
+	log.Printf("[IngestDocs] %d docs (new %d, changed %d), %d chunks written, %d MENTIONS edges",
+		report.DocsNew+report.DocsChanged+report.DocsUnchanged,
+		report.DocsNew, report.DocsChanged, report.ChunksWritten, mineReport.EdgesWritten)
+	return report.ChunksWritten + mineReport.EdgesWritten, nil
+}
+
+// --- Stage: LinkDocsSemantic (RFC-011 Layer S) ---
+
+type LinkDocsSemanticStage struct{}
+
+func (s *LinkDocsSemanticStage) Name() StageName { return StageLinkDocsSemantic }
+func (s *LinkDocsSemanticStage) Optional() bool  { return true }
+
+// Run executes the semantic layer. A guarded no-op unless cfg.Docs is set and
+// an LLM provider is configured (cfg.LLM).
+func (s *LinkDocsSemanticStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
+	if !cfg.Docs || !cfg.LLM.Enabled() {
+		log.Printf("[LinkDocsSemantic] semantic linking not enabled (needs --with-docs + llm config), skipping")
+		return 0, nil
+	}
+
+	completer, embedder, err := llm.New(cfg.LLM)
+	if err != nil {
+		return 0, fmt.Errorf("LinkDocsSemantic: %w", err)
+	}
+	runner, err := semlink.NewRunner(cfg.Client, cfg.ServiceName, cfg.ScopeCtx, completer, embedder, cfg.ProjectPath, cfg.Semlink)
+	if err != nil {
+		return 0, fmt.Errorf("LinkDocsSemantic: %w", err)
+	}
+	report, err := runner.Run(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("LinkDocsSemantic: %w", err)
+	}
+	log.Printf("[LinkDocsSemantic] %d summaries, %d embeddings, %d edges, %d LLM calls (budget-skipped %d)",
+		report.SummariesWritten, report.EmbeddingsWritten, report.EdgesWritten, report.LLMCalls, report.SkippedBudget)
+	return report.EdgesWritten, nil
 }
 
 // --- Stage: ComputeGraphMetrics ---

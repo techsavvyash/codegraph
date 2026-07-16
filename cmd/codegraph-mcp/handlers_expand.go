@@ -265,16 +265,27 @@ ORDER BY distance, label, name`,
 			`MATCH (a)-[r]->(b)
 			 WHERE elementId(a) IN $ids AND elementId(b) IN $ids
 			   AND type(r) IN $relTypes
-			 RETURN elementId(a) AS from, elementId(b) AS to, type(r) AS type`,
+			 RETURN elementId(a) AS from, elementId(b) AS to, type(r) AS type,
+			        coalesce(r.strategy, '') AS strategy,
+			        coalesce(r.confidence, -1.0) AS confidence`,
 			map[string]any{"ids": ids, "relTypes": relTypes})
 		if err == nil {
 			for _, rec := range edgeRecords {
 				m := rec.AsMap()
-				edges = append(edges, expandEdge{
+				e := expandEdge{
 					From: getStringFromRecord(m, "from"),
 					To:   getStringFromRecord(m, "to"),
 					Type: getStringFromRecord(m, "type"),
-				})
+				}
+				// Only provenanced (inferred) edges carry these; structural
+				// facts stay clean.
+				if strategy := getStringFromRecord(m, "strategy"); strategy != "" {
+					e.Strategy = strategy
+					if conf, ok := m["confidence"].(float64); ok && conf >= 0 {
+						e.Confidence = conf
+					}
+				}
+				edges = append(edges, e)
 			}
 		}
 	}
@@ -374,10 +385,19 @@ func renderExpandMermaid(nodes []expandNode, edges []expandEdge) string {
 		if !ok1 || !ok2 {
 			continue
 		}
-		fmt.Fprintf(&b, "  %s -->|%s| %s\n", from, e.Type, to)
+		fmt.Fprintf(&b, "  %s -->|%s| %s\n", from, edgeLabel(e), to)
 	}
 	b.WriteString("```\n")
 	return b.String()
+}
+
+// edgeLabel renders the edge type, annotated with provenance for inferred
+// edges: "MENTIONS (docmine/codespan 0.90)".
+func edgeLabel(e expandEdge) string {
+	if e.Strategy == "" {
+		return e.Type
+	}
+	return fmt.Sprintf("%s (%s %.2f)", e.Type, e.Strategy, e.Confidence)
 }
 
 func renderExpandText(nodes []expandNode, edges []expandEdge, truncated bool) string {

@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query"
 	"github.com/joho/godotenv"
@@ -66,11 +68,46 @@ type CodeGraphMCPServer struct {
 	client          *neo4j.Client
 	queryBuilder    *neo4j.QueryBuilder
 	workspaceRoot   string
+	embedder        llm.Embedder // nil unless CODEGRAPH_EMBED_* env is set; gates find's semantic mode
 	schemaCacheMu   sync.Mutex
 	schemaCache     map[string]any
 	schemaCacheTime time.Time
 	schemaCacheTTL  time.Duration
 	now             func() time.Time
+}
+
+// embedderFromEnv builds the semantic-search embedder from environment
+// variables (the MCP server is env-configured, unlike the viper-based CLI):
+// CODEGRAPH_EMBED_BASE_URL, CODEGRAPH_EMBED_MODEL, CODEGRAPH_EMBED_DIMENSIONS,
+// and optionally CODEGRAPH_EMBED_API_KEY. Returns nil when unconfigured —
+// semantic find then reports a clear configuration error.
+func embedderFromEnv() llm.Embedder {
+	baseURL := os.Getenv("CODEGRAPH_EMBED_BASE_URL")
+	model := os.Getenv("CODEGRAPH_EMBED_MODEL")
+	if baseURL == "" || model == "" {
+		return nil
+	}
+	dims, err := strconv.Atoi(os.Getenv("CODEGRAPH_EMBED_DIMENSIONS"))
+	if err != nil || dims <= 0 {
+		log.Printf("Warning: CODEGRAPH_EMBED_DIMENSIONS missing/invalid; semantic search disabled")
+		return nil
+	}
+	keyEnv := ""
+	if os.Getenv("CODEGRAPH_EMBED_API_KEY") != "" {
+		keyEnv = "CODEGRAPH_EMBED_API_KEY"
+	}
+	_, embedder, err := llm.New(llm.Config{
+		Provider: "openai-compat",
+		Embedding: llm.EndpointConfig{
+			BaseURL: baseURL, Model: model, Dimensions: dims, APIKeyEnv: keyEnv,
+		},
+	})
+	if err != nil {
+		log.Printf("Warning: embedding provider misconfigured (%v); semantic search disabled", err)
+		return nil
+	}
+	log.Printf("Semantic search enabled: %s (%d dims)", model, dims)
+	return embedder
 }
 
 func main() {
@@ -103,6 +140,7 @@ func main() {
 		client:         client,
 		queryBuilder:   neo4j.NewQueryBuilder(client),
 		workspaceRoot:  workspaceRoot,
+		embedder:       embedderFromEnv(),
 		schemaCache:    make(map[string]any),
 		schemaCacheTTL: 300 * time.Second,
 		now:            time.Now,
@@ -377,7 +415,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_find",
-			Description: "Find nodes in the code graph. With `query`: relevance-ranked fulltext search (RRF fusion across per-label indexes, exact-name matches first). With only `label`: structural listing ordered by name. Both paginate via next_cursor. Each result carries a node_id usable as input to expand/path. Searchable labels: Function, Method, Class, Interface, Symbol, File, Variable.",
+			Description: "Find nodes in the code graph. With `query`: relevance-ranked fulltext search (RRF fusion across per-label indexes, exact-name matches first). With only `label`: structural listing ordered by name. Both paginate via next_cursor. Each result carries a node_id usable as input to expand/path. Searchable labels: Function, Method, Class, Interface, Symbol, File, Variable, Document, DocumentChunk. Set `semantic: true` to additionally rank by embedding similarity over doc chunks and code summaries (requires an embedding provider on the server).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -406,6 +444,11 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 					"cursor": map[string]interface{}{
 						"type":        "string",
 						"description": "Opaque pagination cursor returned by a previous call's next_cursor",
+					},
+					"semantic": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Fuse in a vector-similarity ranking over document chunks and code summaries (RFC-011). Errors if the server has no embedding provider configured.",
+						"default":     false,
 					},
 				},
 			},

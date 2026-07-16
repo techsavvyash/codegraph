@@ -44,15 +44,20 @@ func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string
 		if label != "" {
 			labels = []string{label}
 		}
+		semantic, _ := args["semantic"].(bool)
 		opts := search.Options{
-			Labels:  labels,
-			ScopeID: scopeID,
-			Service: service,
-			Limit:   limit,
-			Cursor:  cursor,
+			Labels:   labels,
+			ScopeID:  scopeID,
+			Service:  service,
+			Limit:    limit,
+			Cursor:   cursor,
+			Semantic: semantic,
 		}
 
 		searcher := search.NewSearcher(s.client)
+		if s.embedder != nil {
+			searcher.SetEmbedder(s.embedder)
+		}
 		resp, err := searcher.Search(ctx, query, opts)
 		if err != nil {
 			// Check if it's an invalid label error
@@ -259,4 +264,8 @@ type expandEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Type string `json:"type"`
+	// Provenance (RFC-011 I4): present on inferred edges (e.g. MENTIONS) so
+	// surfaces can distinguish them from structural facts.
+	Strategy   string  `json:"strategy,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }

@@ -14,13 +14,24 @@ import (
 
 // Searcher performs fulltext search using Neo4j FULLTEXT indexes with RRF fusion.
 type Searcher struct {
-	client *neo4j.Client
+	client   *neo4j.Client
+	embedder Embedder
+}
+
+// Embedder is the subset of llm.Embedder that semantic search needs (declared
+// locally so internal/search does not depend on internal/llm).
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
 // NewSearcher creates a new Searcher instance.
 func NewSearcher(client *neo4j.Client) *Searcher {
 	return &Searcher{client: client}
 }
+
+// SetEmbedder enables semantic search (Options.Semantic). Without one,
+// semantic requests return a configuration error.
+func (s *Searcher) SetEmbedder(e Embedder) { s.embedder = e }
 
 // Options configures a search request.
 type Options struct {
@@ -29,6 +40,9 @@ type Options struct {
 	Service string   // Optional: filter by serviceName
 	Limit   int      // Max results per label; fused limit is min(Limit, maxCursor)
 	Cursor  string   // Keyset pagination cursor (base64-encoded "score:nodeID")
+	// Semantic adds a vector-kNN ranked list (doc chunks + code summaries,
+	// RFC-011) to the RRF fusion. Requires SetEmbedder.
+	Semantic bool
 }
 
 // Result represents a single search result.
@@ -127,6 +141,21 @@ func (s *Searcher) Search(ctx context.Context, query string, opts Options) (*Res
 			continue
 		}
 		allResults[label] = results
+	}
+
+	// Semantic mode: one additional RRF list ranked by vector similarity
+	// (doc chunks + code summaries in the same embedding space, RFC-011 §7).
+	// Unlike a per-index failure, a missing embedder is a configuration error
+	// the caller asked about explicitly — fail loudly, not silently weaker.
+	if opts.Semantic {
+		if s.embedder == nil {
+			return nil, fmt.Errorf("semantic search requires an embedding provider (configure llm.embedding)")
+		}
+		semResults, err := s.querySemantic(ctx, query, opts.ScopeID, opts.Service, opts.Limit)
+		if err != nil {
+			return nil, fmt.Errorf("semantic search failed: %w", err)
+		}
+		allResults["__semantic__"] = semResults
 	}
 
 	// RRF fusion: accumulate scores across labels and deduplicate by nodeID
@@ -259,6 +288,10 @@ func (s *Searcher) queryIndex(ctx context.Context, indexName string, label strin
 		nameExpr = "COALESCE(node.displayName, node.name, '')"
 	case "File":
 		nameExpr = "node.path"
+	case "Document":
+		nameExpr = "COALESCE(node.title, node.sourceUrl, '')"
+	case "DocumentChunk":
+		nameExpr = "COALESCE(node.headingPath, node.nodeKey, '')"
 	}
 
 	query := fmt.Sprintf(`
@@ -326,6 +359,105 @@ LIMIT $limit
 	}
 
 	return results, nil
+}
+
+// querySemantic embeds the query and ranks nodes across all RFC-011 vector
+// indexes (doc chunks + code summaries) by raw cosine similarity, returning
+// one list for RRF fusion. Vector indexes that don't exist yet (no Layer S
+// run) fail per-index and are skipped, mirroring fulltext behavior.
+func (s *Searcher) querySemantic(ctx context.Context, query, scopeID, service string, limit int) ([]indexResult, error) {
+	vecs, err := s.embedder.Embed(ctx, []string{query})
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed query: %w", err)
+	}
+	if len(vecs) != 1 {
+		return nil, fmt.Errorf("embedder returned %d vectors for 1 input", len(vecs))
+	}
+	vector := make([]float64, len(vecs[0]))
+	for i, x := range vecs[0] {
+		vector[i] = float64(x)
+	}
+
+	k := limit * 2
+	if k < 20 {
+		k = 20
+	}
+
+	whereClause := "(node.scopeId = $scopeId OR node.scopeId = 'main')"
+	params := map[string]any{"scopeId": scopeID, "k": k, "vector": vector}
+	if service != "" {
+		whereClause += " AND node.serviceName = $service"
+		params["service"] = service
+	}
+
+	var all []indexResult
+	for _, idx := range schema.GetVectorIndexes() {
+		params["index"] = idx.Name
+		rows, err := s.client.ExecuteQuery(ctx, fmt.Sprintf(`
+CALL db.index.vector.queryNodes($index, $k, $vector) YIELD node, score
+WHERE %s
+RETURN elementId(node) AS nodeID,
+       COALESCE(node.nodeKey, '') AS nodeKey,
+       labels(node)[0] AS label,
+       COALESCE(node.name, node.path, node.headingPath, node.title, '') AS name,
+       COALESCE(node.signature, '') AS signature,
+       COALESCE(node.serviceName, '') AS serviceName,
+       COALESCE(node.startLine, 0) AS startLine,
+       COALESCE(node.endLine, 0) AS endLine,
+       score
+ORDER BY score DESC
+`, whereClause), params)
+		if err != nil {
+			// Index may not exist before the first Layer S run — skip like a
+			// failed fulltext index rather than failing the whole search.
+			fmt.Printf("Warning: vector query %s failed: %v\n", idx.Name, err)
+			continue
+		}
+		for _, row := range rows {
+			m := row.AsMap()
+			nodeID, _ := m["nodeID"].(string)
+			if nodeID == "" {
+				continue
+			}
+			score, _ := m["score"].(float64)
+			label, _ := m["label"].(string)
+			name, _ := m["name"].(string)
+			filePath := ""
+			if label == "File" {
+				filePath = name
+			}
+			all = append(all, indexResult{
+				Label:     label,
+				NodeID:    nodeID,
+				NodeKey:   str(m, "nodeKey"),
+				Name:      name,
+				Signature: str(m, "signature"),
+				FilePath:  filePath,
+				Service:   str(m, "serviceName"),
+				StartLine: intFromRecord(m, "startLine"),
+				EndLine:   intFromRecord(m, "endLine"),
+				Score:     2*score - 1, // Neo4j reports (cos+1)/2; keep raw cosine
+			})
+		}
+	}
+
+	// One globally ranked list: RRF consumes rank order, so the cross-index
+	// merge must be sorted before fusion.
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Score != all[j].Score {
+			return all[i].Score > all[j].Score
+		}
+		return all[i].NodeID < all[j].NodeID
+	})
+	if len(all) > k {
+		all = all[:k]
+	}
+	return all, nil
+}
+
+func str(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
 }
 
 // intFromRecord reads an integer column from a Neo4j record map (the driver

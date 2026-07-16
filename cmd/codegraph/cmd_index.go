@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/context-maximiser/code-graph/internal/ingest/docs"
+	"github.com/context-maximiser/code-graph/internal/ingest/docs/mine"
 	"github.com/context-maximiser/code-graph/internal/ingest/pipeline"
 	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
+	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/spf13/cobra"
 )
@@ -127,6 +131,98 @@ The language will be auto-detected from the project structure, or you can specif
 	},
 }
 
+// indexDocsCmd ingests in-repo markdown and links it to code (RFC-011).
+var indexDocsCmd = &cobra.Command{
+	Use:   "docs [path]",
+	Short: "Index in-repo markdown and link it to code",
+	Long: `Ingest a repository's markdown files as Document/DocumentChunk nodes with
+hash-diff incremental sync, then mine explicit code references (file paths,
+backtick identifiers, fenced-code tokens) into validated MENTIONS edges.
+
+With --semantic, additionally run the semantic layer: LLM code summaries,
+embeddings in Neo4j vector indexes, and judge-validated semantic MENTIONS.
+Requires an llm provider in ~/.codegraph.yaml (see llm/semlink sections).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectPath := "."
+		if len(args) > 0 {
+			projectPath = args[0]
+		}
+
+		serviceName, _ := cmd.Flags().GetString("service")
+		if serviceName == "" {
+			return fmt.Errorf("--service is required: documents attach to a service, and a default would mislink the corpus")
+		}
+		semantic, _ := cmd.Flags().GetBool("semantic")
+
+		client, err := createNeo4jClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Neo4j client: %w", err)
+		}
+		defer client.Close(context.Background())
+
+		ctx := context.Background()
+		scope := models.DefaultScope() // docs ingestion is main-scope in v1 (RFC-011 §4)
+
+		// 1. Ingest + hash-diff sync.
+		ing := docs.NewIngestor(client, serviceName, scope)
+		src := &docs.RepoMarkdownSource{Root: projectPath}
+		report, err := ing.Run(ctx, src)
+		if err != nil {
+			return fmt.Errorf("docs ingestion failed: %w", err)
+		}
+		fmt.Printf("Docs: %d new, %d changed, %d unchanged, %d removed | chunks: %d written, %d unchanged, %d removed\n",
+			report.DocsNew, report.DocsChanged, report.DocsUnchanged, report.DocsRemoved,
+			report.ChunksWritten, report.ChunksUnchanged, report.ChunksRemoved)
+		if report.DocsSkippedTooLarge > 0 || report.DocsFailed > 0 {
+			fmt.Printf("Skipped: %d too large, %d failed\n", report.DocsSkippedTooLarge, report.DocsFailed)
+			for _, f := range report.Failures {
+				fmt.Printf("  ! %s\n", f)
+			}
+		}
+
+		// 2. Layer D mining over the changed chunks.
+		miner := mine.NewMiner(client, serviceName, scope)
+		mineReport, err := miner.MineChunks(ctx, report.Changed)
+		if err != nil {
+			return fmt.Errorf("deterministic mining failed: %w", err)
+		}
+		fmt.Printf("Mined %d chunk(s): %d edge(s)", mineReport.ChunksMined, mineReport.EdgesWritten)
+		for strategy, n := range mineReport.ByStrategy {
+			fmt.Printf(" | %s: %d", strategy, n)
+		}
+		fmt.Println()
+		fmt.Printf("Killed: %d ambiguous, %d no-match, %d qualifier-mismatch; fence-capped: %d\n",
+			mineReport.KilledAmbiguous, mineReport.KilledNoMatch, mineReport.KilledQualifier, mineReport.FenceCapped)
+
+		// 3. Layer S (optional).
+		if semantic {
+			completer, embedder, err := llm.New(llmConfigFromViper())
+			if err != nil {
+				return fmt.Errorf("--semantic: %w", err)
+			}
+			runner, err := semlink.NewRunner(client, serviceName, scope, completer, embedder, projectPath, semlinkOptionsFromViper())
+			if err != nil {
+				return fmt.Errorf("--semantic: %w", err)
+			}
+			semReport, err := runner.Run(ctx)
+			if err != nil {
+				return fmt.Errorf("semantic linking failed: %w", err)
+			}
+			fmt.Printf("Semantic: %d summaries written (%d cached), %d embeddings, %d chunks matched, %d edges (judge: +%d/-%d), %d LLM calls",
+				semReport.SummariesWritten, semReport.SummariesUpToDate, semReport.EmbeddingsWritten,
+				semReport.ChunksMatched, semReport.EdgesWritten, semReport.JudgeAccepted, semReport.JudgeRejected, semReport.LLMCalls)
+			if semReport.SkippedBudget > 0 {
+				fmt.Printf(" | budget-skipped: %d (re-run to resume)", semReport.SkippedBudget)
+			}
+			fmt.Println()
+		}
+
+		fmt.Println("✓ Docs indexed")
+		return nil
+	},
+}
+
 // indexPipelineCmd runs the full 7-stage enrichment pipeline.
 var indexPipelineCmd = &cobra.Command{
 	Use:   "pipeline [path]",
@@ -184,6 +280,12 @@ var indexPipelineCmd = &cobra.Command{
 			RepoURL:     repoURL,
 			TenantID:    tenantID,
 			Repo:        repo,
+		}
+
+		if withDocs, _ := cmd.Flags().GetBool("with-docs"); withDocs {
+			cfg.Docs = true
+			cfg.LLM = llmConfigFromViper() // zero config keeps LinkDocsSemantic a no-op
+			cfg.Semlink = semlinkOptionsFromViper()
 		}
 
 		parallel, _ := cmd.Flags().GetBool("parallel")
@@ -374,9 +476,14 @@ func init() {
 	rootCmd.AddCommand(indexCmd)
 
 	indexCmd.AddCommand(indexSCIPCmd)
+	indexCmd.AddCommand(indexDocsCmd)
 	indexCmd.AddCommand(indexPipelineCmd)
 	indexCmd.AddCommand(indexTombstoneCmd)
 	indexCmd.AddCommand(indexReplayCmd)
+
+	// Flags for docs command
+	indexDocsCmd.Flags().StringP("service", "s", "", "Service name the docs belong to (required)")
+	indexDocsCmd.Flags().Bool("semantic", false, "Also run the semantic layer (requires llm config)")
 
 	// Flags for SCIP command
 	indexSCIPCmd.Flags().StringP("service", "s", "", "Service name")
@@ -396,6 +503,7 @@ func init() {
 	indexPipelineCmd.Flags().String("tenant-id", "", "Tenant ID for multi-tenant namespacing")
 	indexPipelineCmd.Flags().String("repo", "", "Repository identifier for repo-level isolation")
 	indexPipelineCmd.Flags().Bool("parallel", false, "Run independent pipeline stages in parallel tiers")
+	indexPipelineCmd.Flags().Bool("with-docs", false, "Also ingest in-repo markdown + mine doc-code links (semantic layer runs too when llm is configured)")
 
 	// Flags for replay command
 	indexReplayCmd.Flags().String("stages", "", "Comma-separated stage names to replay (required)")

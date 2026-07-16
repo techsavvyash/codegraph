@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query"
 	inference "github.com/context-maximiser/code-graph/internal/query/inference"
@@ -31,6 +32,7 @@ var querySearchCmd = &cobra.Command{
 		scopeID, _ := cmd.Flags().GetString("scope-id")
 		service, _ := cmd.Flags().GetString("service")
 		cursor, _ := cmd.Flags().GetString("cursor")
+		semantic, _ := cmd.Flags().GetBool("semantic")
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -39,13 +41,24 @@ var querySearchCmd = &cobra.Command{
 		defer client.Close(context.Background())
 
 		searcher := search.NewSearcher(client)
+		if semantic {
+			_, embedder, err := llm.New(llmConfigFromViper())
+			if err != nil {
+				return fmt.Errorf("--semantic: %w", err)
+			}
+			if embedder == nil {
+				return fmt.Errorf("--semantic requires an embedding endpoint (llm.embedding in ~/.codegraph.yaml)")
+			}
+			searcher.SetEmbedder(embedder)
+		}
 
 		ctx := context.Background()
 		response, err := searcher.Search(ctx, searchTerm, search.Options{
-			ScopeID: scopeID,
-			Service: service,
-			Limit:   limit,
-			Cursor:  cursor,
+			ScopeID:  scopeID,
+			Service:  service,
+			Limit:    limit,
+			Cursor:   cursor,
+			Semantic: semantic,
 		})
 		if err != nil {
 			return fmt.Errorf("search failed: %w", err)
@@ -245,6 +258,7 @@ func init() {
 	querySearchCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware search (e.g., pr-42)")
 	querySearchCmd.Flags().String("service", "", "Optional filter by service name")
 	querySearchCmd.Flags().String("cursor", "", "Keyset pagination cursor for next page")
+	querySearchCmd.Flags().Bool("semantic", false, "Fuse in vector-similarity ranking over doc chunks and code summaries (requires llm.embedding config)")
 	querySourceCmd.Flags().String("service", "", "Optional filter by service name (names repeat across services)")
 	queryDepsCmd.Flags().String("service", "", "Service name to query dependencies for")
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")

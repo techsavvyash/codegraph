@@ -8,6 +8,8 @@ import (
 	"time"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
+	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -19,6 +21,8 @@ const (
 	StageComputeGraphMetrics StageName = "ComputeGraphMetrics"
 	StageInferServiceDeps    StageName = "InferServiceDependencies"
 	StageGenerateFlowSpines  StageName = "GenerateFlowSpines"
+	StageIngestDocs          StageName = "IngestDocs"
+	StageLinkDocsSemantic    StageName = "LinkDocsSemantic"
 )
 
 // StageResult captures the outcome of a single stage.
@@ -60,6 +64,11 @@ type PipelineConfig struct {
 	TenantID    string        // Multi-tenant namespace (optional).
 	Repo        string        // Repository identifier (optional).
 	Timer       PipelineTimer // Optional phase timer for benchmarking.
+
+	// RFC-011 docs stages (both no-ops unless enabled).
+	Docs    bool            // Enables IngestDocs (markdown ingest + Layer D mining).
+	LLM     llm.Config      // Provider for LinkDocsSemantic; zero value disables it.
+	Semlink semlink.Options // Semantic layer tuning (zero value = RFC defaults).
 }
 
 // Pipeline orchestrates the code-indexing pipeline.
@@ -72,13 +81,17 @@ func New(stages ...Stage) *Pipeline {
 	return &Pipeline{stages: stages}
 }
 
-// DefaultStages returns the 4 stages in canonical order.
+// DefaultStages returns the stages in canonical order. The docs stages are
+// guarded no-ops unless the config enables them, so their presence here does
+// not change default pipeline behavior — it makes them replayable.
 func DefaultStages() []Stage {
 	return []Stage{
 		&IngestCodeStage{},
 		&ComputeGraphMetricsStage{},
 		&InferServiceDepsStage{},
 		&GenerateFlowSpinesStage{},
+		&IngestDocsStage{},
+		&LinkDocsSemanticStage{},
 	}
 }
 
@@ -136,12 +149,15 @@ type StageTier struct {
 // DefaultTiers returns the default parallel execution tiers.
 // Tier 0: IngestCode (required, must run first)
 // Tier 1: ComputeGraphMetrics (depends on ingested call graph)
-// Tier 2: InferServiceDeps, GenerateFlowSpines (independent)
+// Tier 2: InferServiceDeps, GenerateFlowSpines, IngestDocs (independent;
+// Layer D mining needs code nodes, which tier 0 provides)
+// Tier 3: LinkDocsSemantic (needs docs chunks AND code summaries' targets)
 func DefaultTiers() []StageTier {
 	return []StageTier{
 		{Stages: []Stage{&IngestCodeStage{}}},
 		{Stages: []Stage{&ComputeGraphMetricsStage{}}},
-		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}}},
+		{Stages: []Stage{&InferServiceDepsStage{}, &GenerateFlowSpinesStage{}, &IngestDocsStage{}}},
+		{Stages: []Stage{&LinkDocsSemanticStage{}}},
 	}
 }
 

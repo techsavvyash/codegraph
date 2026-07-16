@@ -53,6 +53,15 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 		return errorResponse("source: must provide node_id or symbol_name")
 	}
 
+	// Documents and chunks store their content in the graph (RFC-011 §3.1),
+	// so doc sources never touch the filesystem — the cwd-relative path
+	// limitation of code sources does not apply here.
+	if nodeID != "" {
+		if resp, handled := s.docSource(ctx, nodeID); handled {
+			return resp
+		}
+	}
+
 	var cypher string
 	params := map[string]any{}
 	if nodeID != "" {
@@ -179,4 +188,64 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 		filePath, startLine, endLine, lang, src)
 
 	return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}
+}
+
+// docSource serves source for Document/DocumentChunk node IDs. Returns
+// handled=false when the id is not a doc node (the code path takes over).
+func (s *CodeGraphMCPServer) docSource(ctx context.Context, nodeID string) (ToolCallResponse, bool) {
+	records, err := s.client.ExecuteQuery(ctx, `
+		MATCH (n) WHERE elementId(n) = $id AND (n:Document OR n:DocumentChunk)
+		RETURN labels(n)[0] AS label, n.nodeKey AS nodeKey,
+		       coalesce(n.title, '') AS title,
+		       coalesce(n.sourceUrl, '') AS sourceUrl,
+		       coalesce(n.headingPath, '') AS headingPath,
+		       coalesce(n.content, '') AS content,
+		       coalesce(n.documentKey, '') AS documentKey,
+		       coalesce(n.serviceName, '') AS service
+	`, map[string]any{"id": nodeID})
+	if err != nil || len(records) == 0 {
+		return ToolCallResponse{}, false
+	}
+
+	m := records[0].AsMap()
+	label := getStringFromRecord(m, "label")
+	service := getStringFromRecord(m, "service")
+
+	var b strings.Builder
+	switch label {
+	case "DocumentChunk":
+		fmt.Fprintf(&b, "**%s**", getStringFromRecord(m, "nodeKey"))
+		if hp := getStringFromRecord(m, "headingPath"); hp != "" {
+			fmt.Fprintf(&b, "  \nsection: %s", hp)
+		}
+		if service != "" {
+			fmt.Fprintf(&b, "  \nservice: `%s`", service)
+		}
+		fmt.Fprintf(&b, "\n\n```markdown\n%s\n```\n", getStringFromRecord(m, "content"))
+	case "Document":
+		// Document content lives on its chunks; reassemble in order.
+		chunkRecords, err := s.client.ExecuteQuery(ctx, `
+			MATCH (d)-[:HAS_CHUNK]->(c:DocumentChunk) WHERE elementId(d) = $id
+			RETURN c.content AS content ORDER BY c.chunkIndex
+		`, map[string]any{"id": nodeID})
+		if err != nil {
+			return errorResponse(fmt.Sprintf("source: failed to load document chunks: %v", err)), true
+		}
+		parts := make([]string, 0, len(chunkRecords))
+		for _, rec := range chunkRecords {
+			parts = append(parts, getStringFromRecord(rec.AsMap(), "content"))
+		}
+		fmt.Fprintf(&b, "**%s**", getStringFromRecord(m, "title"))
+		if su := getStringFromRecord(m, "sourceUrl"); su != "" {
+			fmt.Fprintf(&b, "  \n%s", su)
+		}
+		if service != "" {
+			fmt.Fprintf(&b, "  \nservice: `%s`", service)
+		}
+		fmt.Fprintf(&b, "\n\n```markdown\n%s\n```\n", strings.Join(parts, "\n\n"))
+	default:
+		return ToolCallResponse{}, false
+	}
+
+	return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: b.String()}}}, true
 }
