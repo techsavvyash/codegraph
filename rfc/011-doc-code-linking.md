@@ -143,7 +143,8 @@ every edge auditable after the fact.
   scopedKey constraint machinery; `Document(serviceName)`,
   `DocumentChunk(documentKey)`, `DocumentChunk(serviceName)`.
 - Fulltext: `document_fulltext` on `Document(title, sourceUrl)`;
-  `chunk_fulltext` on `DocumentChunk(content, headingPath)`. The `find`/search
+  `documentchunk_fulltext` on `DocumentChunk(content, headingPath)` (the
+  `{label}_fulltext` naming convention is test-enforced). The `find`/search
   label allowlists derive from fulltext index definitions
   (`GetFulltextIndexes()`), so both labels become findable with **zero handler
   changes**.

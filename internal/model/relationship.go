@@ -29,6 +29,7 @@ const (
 	// Documentation Relationships
 	DescribesRel RelationshipType = "DESCRIBES"
 	MentionsRel  RelationshipType = "MENTIONS"
+	HasChunkRel  RelationshipType = "HAS_CHUNK"
 
 	// Async / Message Queue Relationships
 	ConsumesFromRel RelationshipType = "CONSUMES_FROM"

@@ -79,15 +79,17 @@ func TestGetConstraintsNamingConvention(t *testing.T) {
 func TestGetFulltextIndexes(t *testing.T) {
 	indexes := GetFulltextIndexes()
 
-	// Expected indexes for hot labels: 7 total
+	// Expected indexes: 7 hot code labels + 2 docs labels (RFC-011)
 	expectedIndexes := map[string][]string{
-		"function_fulltext":  {"name", "signature"},
-		"method_fulltext":    {"name", "signature"},
-		"class_fulltext":     {"name"},
-		"interface_fulltext": {"name"},
-		"symbol_fulltext":    {"name", "displayName"},
-		"file_fulltext":      {"path"},
-		"variable_fulltext":  {"name"},
+		"function_fulltext":      {"name", "signature"},
+		"method_fulltext":        {"name", "signature"},
+		"class_fulltext":         {"name"},
+		"interface_fulltext":     {"name"},
+		"symbol_fulltext":        {"name", "displayName"},
+		"file_fulltext":          {"path"},
+		"variable_fulltext":      {"name"},
+		"document_fulltext":      {"title", "sourceUrl"},
+		"documentchunk_fulltext": {"content", "headingPath"},
 	}
 
 	// Verify we have exactly the expected indexes
@@ -139,6 +141,80 @@ func TestGetFulltextIndexesNamingConvention(t *testing.T) {
 		expectedName := strings.ToLower(idx.NodeLabel) + "_fulltext"
 		if idx.Name != expectedName {
 			t.Errorf("index name %q does not follow {label}_fulltext pattern (expected %q)", idx.Name, expectedName)
+		}
+	}
+}
+
+// TestGetVectorIndexes verifies the RFC-011 Layer S vector index set: chunk
+// embeddings plus one code-summary index per summarizable label.
+func TestGetVectorIndexes(t *testing.T) {
+	indexes := GetVectorIndexes()
+
+	expected := map[string]string{
+		"chunk_embedding":             "DocumentChunk",
+		"function_summary_embedding":  "Function",
+		"method_summary_embedding":    "Method",
+		"class_summary_embedding":     "Class",
+		"interface_summary_embedding": "Interface",
+		"file_summary_embedding":      "File",
+	}
+
+	if len(indexes) != len(expected) {
+		t.Errorf("GetVectorIndexes returned %d indexes, want %d", len(indexes), len(expected))
+	}
+
+	for _, idx := range indexes {
+		wantLabel, ok := expected[idx.Name]
+		if !ok {
+			t.Errorf("unexpected vector index: %s", idx.Name)
+			continue
+		}
+		if idx.NodeLabel != wantLabel {
+			t.Errorf("vector index %s targets label %q, want %q", idx.Name, idx.NodeLabel, wantLabel)
+		}
+		if idx.Property != "embedding" {
+			t.Errorf("vector index %s targets property %q, want embedding", idx.Name, idx.Property)
+		}
+	}
+}
+
+// TestVectorIndexDDL pins the exact Neo4j 5 statement shape, including the
+// backtick-quoted option keys and the parameterized dimension.
+func TestVectorIndexDDL(t *testing.T) {
+	idx := VectorIndex{Name: "chunk_embedding", NodeLabel: "DocumentChunk", Property: "embedding"}
+	got := vectorIndexDDL(idx, 1536)
+	want := "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (n:DocumentChunk) ON n.embedding " +
+		"OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}"
+	if got != want {
+		t.Errorf("vectorIndexDDL mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestDocsRangeIndexes verifies the RFC-011 serviceName range indexes exist in
+// the master index list (scoped doc queries must not scan).
+func TestDocsRangeIndexes(t *testing.T) {
+	byName := make(map[string]Index)
+	for _, idx := range GetIndexes() {
+		byName[idx.Name] = idx
+	}
+
+	for name, want := range map[string]struct {
+		label string
+		props []string
+	}{
+		"document_service_idx": {"Document", []string{"serviceName"}},
+		"docchunk_service_idx": {"DocumentChunk", []string{"serviceName"}},
+	} {
+		idx, ok := byName[name]
+		if !ok {
+			t.Errorf("missing range index %s", name)
+			continue
+		}
+		if idx.NodeLabel != want.label {
+			t.Errorf("index %s targets label %q, want %q", name, idx.NodeLabel, want.label)
+		}
+		if len(idx.Properties) != len(want.props) || idx.Properties[0] != want.props[0] {
+			t.Errorf("index %s properties %v, want %v", name, idx.Properties, want.props)
 		}
 	}
 }

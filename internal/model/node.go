@@ -182,25 +182,37 @@ type Comment struct {
 	IsDocstring bool   `json:"isDocstring" neo4j:"isDocstring"`
 }
 
-// Document represents technical or business documents
+// Document represents technical or business documents.
+// Content lives on the document's DocumentChunk nodes (RFC-011); the Content
+// field is retained for compatibility but left empty by the docs ingestor.
 type Document struct {
 	BaseNode
-	Title     string `json:"title" neo4j:"title"`
-	Type      string `json:"type" neo4j:"type"`
-	SourceURL string `json:"sourceUrl" neo4j:"sourceUrl"`
-	Content   string `json:"content" neo4j:"content"`
+	Title         string `json:"title" neo4j:"title"`
+	Type          string `json:"type" neo4j:"type"`
+	SourceURL     string `json:"sourceUrl" neo4j:"sourceUrl"`
+	Content       string `json:"content" neo4j:"content"`
+	ServiceName   string `json:"serviceName" neo4j:"serviceName"`
+	FilePath      string `json:"filePath" neo4j:"filePath"`
+	ContentHash   string `json:"contentHash" neo4j:"contentHash"`
+	ChunkCount    int    `json:"chunkCount" neo4j:"chunkCount"`
+	LastIndexedAt string `json:"lastIndexedAt" neo4j:"lastIndexedAt"`
 }
 
-// DocumentChunk represents a chunk of a document for granular linking and incremental updates
+// DocumentChunk represents a chunk of a document for granular linking and incremental updates.
+// The `embedding` vector property (RFC-011 Layer S) is deliberately not modeled
+// here: it is written via db.create.setNodeVectorProperty by the semlink
+// pipeline, never through generic node serialization.
 type DocumentChunk struct {
 	BaseNode
-	DocumentKey string `json:"documentKey" neo4j:"documentKey"`
-	ChunkIndex  int    `json:"chunkIndex" neo4j:"chunkIndex"`
-	HeadingPath string `json:"headingPath" neo4j:"headingPath"`
-	Content     string `json:"content" neo4j:"content"`
-	TextHash    string `json:"textHash" neo4j:"textHash"`
-	StartOffset int    `json:"startOffset" neo4j:"startOffset"`
-	EndOffset   int    `json:"endOffset" neo4j:"endOffset"`
+	DocumentKey    string `json:"documentKey" neo4j:"documentKey"`
+	ChunkIndex     int    `json:"chunkIndex" neo4j:"chunkIndex"`
+	HeadingPath    string `json:"headingPath" neo4j:"headingPath"`
+	Content        string `json:"content" neo4j:"content"`
+	TextHash       string `json:"textHash" neo4j:"textHash"`
+	StartOffset    int    `json:"startOffset" neo4j:"startOffset"`
+	EndOffset      int    `json:"endOffset" neo4j:"endOffset"`
+	ServiceName    string `json:"serviceName" neo4j:"serviceName"`
+	EmbeddingModel string `json:"embeddingModel,omitempty" neo4j:"embeddingModel,omitempty"`
 }
 
 // Flow represents a first-class execution flow (e.g., an API request path, consumer pipeline).

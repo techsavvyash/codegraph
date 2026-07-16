@@ -436,6 +436,19 @@ func GetIndexes() []Index {
 			Properties: []string{"textHash"},
 			Type:       "BTREE",
 		},
+		// Docs ingestion indexes (RFC-011)
+		{
+			Name:       "document_service_idx",
+			NodeLabel:  "Document",
+			Properties: []string{"serviceName"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "docchunk_service_idx",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"serviceName"},
+			Type:       "BTREE",
+		},
 		// Flow indexes (Task 9)
 		{
 			Name:       "flow_nodekey_idx",
@@ -670,7 +683,78 @@ func GetFulltextIndexes() []FulltextIndex {
 			NodeLabel:  "Variable",
 			Properties: []string{"name"},
 		},
+		// RFC-011: docs become findable via the same index-derived allowlists.
+		{
+			Name:       "document_fulltext",
+			NodeLabel:  "Document",
+			Properties: []string{"title", "sourceUrl"},
+		},
+		{
+			Name:       "documentchunk_fulltext",
+			NodeLabel:  "DocumentChunk",
+			Properties: []string{"content", "headingPath"},
+		},
 	}
+}
+
+// VectorIndex represents a Neo4j native vector index (RFC-011 Layer S).
+type VectorIndex struct {
+	Name      string
+	NodeLabel string
+	Property  string
+}
+
+// GetVectorIndexes returns the vector index definitions for semantic linking:
+// one per label (Neo4j vector indexes are single-label). DocumentChunk holds
+// chunk-text embeddings; the code labels hold code-summary embeddings.
+func GetVectorIndexes() []VectorIndex {
+	return []VectorIndex{
+		{Name: "chunk_embedding", NodeLabel: "DocumentChunk", Property: "embedding"},
+		{Name: "function_summary_embedding", NodeLabel: "Function", Property: "embedding"},
+		{Name: "method_summary_embedding", NodeLabel: "Method", Property: "embedding"},
+		{Name: "class_summary_embedding", NodeLabel: "Class", Property: "embedding"},
+		{Name: "interface_summary_embedding", NodeLabel: "Interface", Property: "embedding"},
+		{Name: "file_summary_embedding", NodeLabel: "File", Property: "embedding"},
+	}
+}
+
+// vectorIndexDDL renders the Neo4j 5 CREATE VECTOR INDEX statement for idx.
+// Dimensions are provider-dependent and therefore a parameter: embeddings from
+// different models are not comparable, so switching models means
+// DropVectorIndexes + CreateVectorIndexes with the new dimension.
+func vectorIndexDDL(idx VectorIndex, dimensions int) string {
+	return fmt.Sprintf(
+		"CREATE VECTOR INDEX %s IF NOT EXISTS FOR (n:%s) ON n.%s "+
+			"OPTIONS {indexConfig: {`vector.dimensions`: %d, `vector.similarity_function`: 'cosine'}}",
+		neo4j.Ident(idx.Name), neo4j.Ident(idx.NodeLabel), neo4j.Ident(idx.Property), dimensions,
+	)
+}
+
+// CreateVectorIndexes creates all vector indexes with the given dimensions.
+// Not part of CreateSchema: vector indexes exist only when an embedding
+// provider is configured, and their dimension comes from that provider.
+func (sm *SchemaManager) CreateVectorIndexes(ctx context.Context, dimensions int) error {
+	if dimensions <= 0 {
+		return fmt.Errorf("vector index dimensions must be positive, got %d", dimensions)
+	}
+	for _, idx := range GetVectorIndexes() {
+		if _, err := sm.client.ExecuteQuery(ctx, vectorIndexDDL(idx, dimensions), nil); err != nil {
+			return fmt.Errorf("failed to create vector index %s: %w", idx.Name, err)
+		}
+	}
+	return nil
+}
+
+// DropVectorIndexes drops all vector indexes (used when the embedding model,
+// and therefore the vector dimension, changes).
+func (sm *SchemaManager) DropVectorIndexes(ctx context.Context) error {
+	for _, idx := range GetVectorIndexes() {
+		cypher := fmt.Sprintf("DROP INDEX %s IF EXISTS", neo4j.Ident(idx.Name))
+		if _, err := sm.client.ExecuteQuery(ctx, cypher, nil); err != nil {
+			return fmt.Errorf("failed to drop vector index %s: %w", idx.Name, err)
+		}
+	}
+	return nil
 }
 
 // CreateSchema creates all constraints and indexes for the code graph
