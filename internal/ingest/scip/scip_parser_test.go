@@ -607,7 +607,7 @@ func loadFixtureParser(t *testing.T) *SCIPParser {
 func TestExtractSymbols_Fixture(t *testing.T) {
 	parser := loadFixtureParser(t)
 
-	symbols, err := parser.ExtractSymbols()
+	symbols, err := parser.ExtractSymbols("")
 	if err != nil {
 		t.Fatalf("ExtractSymbols failed: %v", err)
 	}
@@ -723,7 +723,7 @@ func TestGetServiceInfo_Fixture(t *testing.T) {
 
 func TestExtractSymbols_NoIndexLoaded(t *testing.T) {
 	parser := NewSCIPParser()
-	_, err := parser.ExtractSymbols()
+	_, err := parser.ExtractSymbols("")
 	if err == nil {
 		t.Error("expected error when no index loaded")
 	}

@@ -191,7 +191,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	if si.timer != nil {
 		si.timer.Start("Extract symbols")
 	}
-	symbolDefs, err := parser.ExtractSymbols()
+	symbolDefs, err := parser.ExtractSymbols(si.projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to extract symbols: %w", err)
 	}

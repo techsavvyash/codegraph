@@ -59,7 +59,7 @@ func TestInspectFixture(t *testing.T) {
 		fmt.Printf("  %s (lang=%s)\n", d.Path, d.Language)
 	}
 
-	syms, err := parser.ExtractSymbols()
+	syms, err := parser.ExtractSymbols("")
 	if err != nil {
 		t.Fatalf("extract symbols: %v", err)
 	}

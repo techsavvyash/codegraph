@@ -213,6 +213,22 @@ The mechanism that replaces declaration-order inference:
 This is a containment test against a real tree, not an ordering guess — the class of
 bug in §2.2 disappears rather than shrinks.
 
+**Kind promotion (found during implementation, 2026-07-16).** Declarator widening
+turned out to matter one layer earlier than attribution. scip-typescript emits
+`export const f = (…) => …` as a bare **term** symbol (`f.`, `Kind=UnspecifiedKind`)
+— verified against the tiny-ts fixture — and class-property arrows as fields
+(`C#f.`). Descriptor-based classification therefore labels them `Variable`, they
+never become `Function`/`Method` nodes, and no CALLS edge can start or end at them:
+before this RFC, every const-bound arrow in a TS codebase was invisible to the call
+graph. SCIP carries no signal to fix this; the parse tree does. `ExtractSymbols` now
+runs a promotion pass (`promoteDeclaratorBoundFunctions`): a Variable/Field symbol
+whose definition occurrence sits inside a declarator-widened function node bound to
+the **same name** promotes to Function/Method before node creation. Name equality is
+the safety condition — a plain `const x = createLogger()` sits in no function node,
+and a const holding an object of arrows sits outside the pair-widened arrows inside
+it. Interface properties with function *types* never match (a `function_type` is not
+a function node in any wired grammar).
+
 ### 4.4 Integration with the call-graph builders
 
 - `GenericCallGraphBuilder` (`call_graph_generic.go`): its `computeByteRanges` /

@@ -61,6 +61,24 @@
     },
     {
       "labels": [
+        "File"
+      ],
+      "nodeKey": "file:tinyts:src/nested.ts",
+      "props": {
+        "absolutePath": "src/nested.ts",
+        "hash": "77eee79953e465029114048c671996e1da574004caddedf559b6196d1fc59213",
+        "language": "TypeScript",
+        "lineCount": 0,
+        "nodeKey": "file:tinyts:src/nested.ts",
+        "path": "src/nested.ts",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "file:tinyts:src/nested.ts|main",
+        "serviceName": "tinyts"
+      }
+    },
+    {
+      "labels": [
         "Function"
       ],
       "nodeKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
@@ -99,7 +117,7 @@
         "endColumn": 28,
         "endLine": 15,
         "filePath": "src/logger.ts",
-        "inDegree": 0,
+        "inDegree": 1,
         "isExported": true,
         "isTestFunction": false,
         "name": "createLogger",
@@ -115,6 +133,64 @@
         "startByte": 250,
         "startColumn": 16,
         "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "docstring": "",
+        "endByte": 792,
+        "endColumn": 19,
+        "endLine": 16,
+        "filePath": "src/nested.ts",
+        "inDegree": 1,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "logOne",
+        "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+        "outDegree": 2,
+        "rangeSource": "treesitter",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+        "startByte": 695,
+        "startColumn": 13,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+      "props": {
+        "docstring": "",
+        "endByte": 975,
+        "endColumn": 26,
+        "endLine": 24,
+        "filePath": "src/nested.ts",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "processAll",
+        "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+        "outDegree": 1,
+        "rangeSource": "treesitter",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+        "startByte": 802,
+        "startColumn": 16,
+        "startLine": 18
       }
     },
     {
@@ -176,7 +252,7 @@
         "endColumn": 5,
         "endLine": 10,
         "filePath": "src/logger.ts",
-        "inDegree": 1,
+        "inDegree": 2,
         "isExported": true,
         "isTestFunction": false,
         "name": "log",
@@ -257,6 +333,25 @@
         "scopeId": "main",
         "scopedKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/|main",
         "signature": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+        "startColumn": 0,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+      "props": {
+        "endColumn": 0,
+        "endLine": 1,
+        "filePath": "src/nested.ts",
+        "name": "nested.ts",
+        "nodeKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/|main",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
         "startColumn": 0,
         "startLine": 1
       }
@@ -605,6 +700,158 @@
     },
     {
       "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:14:17",
+      "props": {
+        "context": "",
+        "endColumn": 29,
+        "endLine": 14,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:14:17",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:14:17|main",
+        "serviceName": "tinyts",
+        "startColumn": 17,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:15:9",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 15,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:15:9",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:15:9|main",
+        "serviceName": "tinyts",
+        "startColumn": 9,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:1:29",
+      "props": {
+        "context": "",
+        "endColumn": 39,
+        "endLine": 1,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:1:29",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:1:29|main",
+        "serviceName": "tinyts",
+        "startColumn": 29,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:1:9",
+      "props": {
+        "context": "",
+        "endColumn": 21,
+        "endLine": 1,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:1:9",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:1:9|main",
+        "serviceName": "tinyts",
+        "startColumn": 9,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:20:4",
+      "props": {
+        "context": "",
+        "endColumn": 10,
+        "endLine": 20,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:20:4",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:20:4|main",
+        "serviceName": "tinyts",
+        "startColumn": 4,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:21:16",
+      "props": {
+        "context": "",
+        "endColumn": 27,
+        "endLine": 21,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:21:16",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:21:16|main",
+        "serviceName": "tinyts",
+        "startColumn": 16,
+        "startLine": 21
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:21:4",
+      "props": {
+        "context": "",
+        "endColumn": 10,
+        "endLine": 21,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:21:4",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:21:4|main",
+        "serviceName": "tinyts",
+        "startColumn": 4,
+        "startLine": 21
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinyts:src/nested.ts:23:8",
+      "props": {
+        "context": "",
+        "endColumn": 13,
+        "endLine": 23,
+        "filePath": "src/nested.ts",
+        "nodeKey": "ref:tinyts:src/nested.ts:23:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinyts:src/nested.ts:23:8|main",
+        "serviceName": "tinyts",
+        "startColumn": 8,
+        "startLine": 23
+      }
+    },
+    {
+      "labels": [
         "Service"
       ],
       "nodeKey": "svc:tinyts",
@@ -880,6 +1127,70 @@
       "labels": [
         "Symbol"
       ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+      "props": {
+        "displayName": "nested.ts",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/|main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "displayName": "logOne",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.|main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+      "props": {
+        "displayName": "processAll",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().|main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)",
+      "props": {
+        "displayName": "items",
+        "documentation": "",
+        "kind": "Variable",
+        "nodeKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)|main",
+        "symbol": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
       "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/Console#log().",
       "props": {
         "displayName": "log",
@@ -906,6 +1217,22 @@
         "scopeId": "main",
         "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console.|main",
         "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.dom.d.ts`/console."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#toUpperCase().",
+      "props": {
+        "displayName": "toUpperCase",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#toUpperCase().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#toUpperCase().|main",
+        "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#toUpperCase()."
       }
     },
     {
@@ -1061,6 +1388,28 @@
         "startLine": 6,
         "type": ""
       }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinyts:src/nested.ts#items:18",
+      "props": {
+        "endColumn": 32,
+        "endLine": 18,
+        "filePath": "src/nested.ts",
+        "isConstant": false,
+        "name": "items",
+        "nodeKey": "var:tinyts:src/nested.ts#items:18",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinyts:src/nested.ts#items:18|main",
+        "serviceName": "tinyts",
+        "signature": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)",
+        "startColumn": 27,
+        "startLine": 18,
+        "type": ""
+      }
     }
   ],
   "relationships": [
@@ -1094,6 +1443,57 @@
       "props": {
         "filePath": "src/logger.ts",
         "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "filePath": "src/nested.ts",
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#log().",
+      "props": {
+        "filePath": "src/nested.ts",
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "filePath": "src/nested.ts",
+        "line": 20,
         "scope": "main",
         "scopeId": "main"
       }
@@ -1611,6 +2011,186 @@
     {
       "type": "CONTAINS",
       "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:14:17",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:15:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:1:29",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:1:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:20:4",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:21:16",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:21:4",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinyts:src/nested.ts:23:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:tinyts:src/nested.ts#items:18",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
         "Service"
       ],
       "startKey": "svc:tinyts",
@@ -1633,6 +2213,21 @@
         "File"
       ],
       "endKey": "file:tinyts:src/logger.ts",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinyts",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:tinyts:src/nested.ts",
       "props": {
         "scope": "main",
         "scopeId": "main"
@@ -1680,6 +2275,38 @@
         "Symbol"
       ],
       "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().",
       "props": {
         "isExported": true,
         "scope": "main",
@@ -1776,6 +2403,22 @@
         "Symbol"
       ],
       "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/",
       "props": {
         "isExported": true,
         "scope": "main",
@@ -1888,6 +2531,22 @@
         "Symbol"
       ],
       "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/ConsoleLogger#`\u003cconstructor\u003e`().(prefix)",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:tinyts:src/nested.ts#items:18",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)",
       "props": {
         "isExported": true,
         "scope": "main",
@@ -2244,6 +2903,150 @@
         "column": 4,
         "isDefinition": false,
         "line": 9,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:14:17",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "column": 17,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:15:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:1:29",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/",
+      "props": {
+        "column": 29,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:1:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:20:4",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "column": 4,
+        "isDefinition": false,
+        "line": 20,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:21:16",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#toUpperCase().",
+      "props": {
+        "column": 16,
+        "isDefinition": false,
+        "line": 21,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:21:4",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
+      "props": {
+        "column": 4,
+        "isDefinition": false,
+        "line": 21,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinyts:src/nested.ts:23:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/processAll().(items)",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 23,
         "scope": "main",
         "scopeId": "main"
       }

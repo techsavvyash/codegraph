@@ -47,8 +47,11 @@ func (sp *SCIPParser) GetMetadata() *scip.Metadata {
 	return sp.index.Metadata
 }
 
-// ExtractSymbols extracts all symbol information from the SCIP index
-func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
+// ExtractSymbols extracts all symbol information from the SCIP index.
+// projectPath is the root used to resolve document paths when refining
+// descriptor-based kinds against each file's parse tree (see
+// promoteDeclaratorBoundFunctions); pass "" to skip that refinement.
+func (sp *SCIPParser) ExtractSymbols(projectPath string) ([]*models.SymbolDefinition, error) {
 	if sp.index == nil {
 		return nil, fmt.Errorf("no SCIP index loaded")
 	}
@@ -174,6 +177,8 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 	for _, symbolDef := range symbolMap {
 		symbolDefs = append(symbolDefs, symbolDef)
 	}
+
+	promoteDeclaratorBoundFunctions(symbolDefs, projectPath)
 
 	return symbolDefs, nil
 }
