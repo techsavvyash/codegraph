@@ -161,7 +161,9 @@ WHERE %s
        sortName AS name,
        n.signature AS signature,
        n.filePath AS file_path,
-       n.serviceName AS service
+       n.serviceName AS service,
+       coalesce(n.startLine, 0) AS start_line,
+       coalesce(n.endLine, 0) AS end_line
 ORDER BY sortName, elementId(n)
 LIMIT $limit`
 
@@ -183,6 +185,8 @@ LIMIT $limit`
 			Signature string  `json:"signature,omitempty"`
 			FilePath  string  `json:"file_path,omitempty"`
 			Service   string  `json:"service,omitempty"`
+			StartLine int     `json:"start_line,omitempty"`
+			EndLine   int     `json:"end_line,omitempty"`
 			Score     float64 `json:"score"` // always 0 for structural listing
 		}
 
@@ -197,6 +201,8 @@ LIMIT $limit`
 				Signature: getStringFromRecord(m, "signature"),
 				FilePath:  getStringFromRecord(m, "file_path"),
 				Service:   getStringFromRecord(m, "service"),
+				StartLine: getIntFromRecord(m, "start_line"),
+				EndLine:   getIntFromRecord(m, "end_line"),
 				Score:     0,
 			})
 		}
@@ -243,6 +249,7 @@ type expandNode struct {
 	QualifiedName string `json:"qualified_name,omitempty"`
 	FilePath      string `json:"file_path,omitempty"`
 	StartLine     int    `json:"start_line,omitempty"`
+	EndLine       int    `json:"end_line,omitempty"`
 	Signature     string `json:"signature,omitempty"`
 	Service       string `json:"service,omitempty"`
 	Distance      int    `json:"distance"`

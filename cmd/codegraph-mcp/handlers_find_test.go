@@ -66,7 +66,9 @@ func setupFindTestDB(t *testing.T) (*CodeGraphMCPServer, func()) {
 			scopeId: 'itest-find-mcp',
 			nodeKey: 'itest-find-mcp/FindMcpExact',
 			serviceName: 'find-mcp-svc',
-			signature: 'func FindMcpExact() error'
+			signature: 'func FindMcpExact() error',
+			startLine: 10,
+			endLine: 20
 		})
 		CREATE (d:Class {
 			name: 'FindMcpClass',
@@ -161,6 +163,51 @@ func TestFindResponseStructure(t *testing.T) {
 			assert.Contains(t, rm, "label", "each result should have 'label'")
 			assert.Contains(t, rm, "name", "each result should have 'name'")
 		}
+	}
+}
+
+// TestFindReturnsLineAnchors verifies both find modes surface the node's
+// body-range anchors (RFC-010): FindMcpExact is seeded with startLine 10 /
+// endLine 20 and must return them in structural listing and fulltext search;
+// nodes without location (FindMcpAlphaOne) must omit the fields entirely.
+func TestFindReturnsLineAnchors(t *testing.T) {
+	server, cleanup := setupFindTestDB(t)
+	if server == nil {
+		t.Skip("Neo4j not available")
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	for mode, args := range map[string]map[string]interface{}{
+		"structural": {"label": "Function", "service": "find-mcp-svc", "scope_id": "itest-find-mcp"},
+		"fulltext":   {"query": "FindMcpExact", "service": "find-mcp-svc", "scope_id": "itest-find-mcp"},
+	} {
+		response := server.handleFindTool(ctx, args)
+		require.False(t, response.IsError, "%s: find should succeed", mode)
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &result), "%s: valid JSON", mode)
+		results, ok := result["results"].([]interface{})
+		require.True(t, ok, "%s: results array", mode)
+
+		foundExact := false
+		for _, r := range results {
+			rm, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch rm["name"] {
+			case "FindMcpExact":
+				foundExact = true
+				assert.EqualValues(t, 10, rm["start_line"], "%s: FindMcpExact start_line", mode)
+				assert.EqualValues(t, 20, rm["end_line"], "%s: FindMcpExact end_line", mode)
+			case "FindMcpAlphaOne":
+				assert.NotContains(t, rm, "start_line", "%s: node without location must omit start_line", mode)
+				assert.NotContains(t, rm, "end_line", "%s: node without location must omit end_line", mode)
+			}
+		}
+		require.True(t, foundExact, "%s: FindMcpExact must be in results", mode)
 	}
 }
 

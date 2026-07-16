@@ -40,6 +40,8 @@ type Result struct {
 	Signature string  `json:"signature"` // for Function/Method; empty for others
 	FilePath  string  `json:"file_path"` // for File; empty for others
 	Service   string  `json:"service"`   // serviceName from node
+	StartLine int     `json:"start_line,omitempty"` // 1-based; 0 when the node has no location
+	EndLine   int     `json:"end_line,omitempty"`   // 1-based inclusive; exact for rangeSource=treesitter/go-ast nodes
 	Score     float64 `json:"score"`     // fused RRF score
 }
 
@@ -58,6 +60,8 @@ type indexResult struct {
 	Signature string
 	FilePath  string
 	Service   string
+	StartLine int
+	EndLine   int
 	Score     float64
 }
 
@@ -149,6 +153,8 @@ func (s *Searcher) Search(ctx context.Context, query string, opts Options) (*Res
 						Signature: res.Signature,
 						FilePath:  res.FilePath,
 						Service:   res.Service,
+						StartLine: res.StartLine,
+						EndLine:   res.EndLine,
 						Score:     0,
 					},
 					labelRanks: make(map[string]int),
@@ -263,6 +269,8 @@ RETURN elementId(node) AS nodeID,
        COALESCE(%s, '') AS name,
        %s AS signature,
        COALESCE(node.serviceName, '') AS serviceName,
+       COALESCE(node.startLine, 0) AS startLine,
+       COALESCE(node.endLine, 0) AS endLine,
        score
 ORDER BY score DESC
 LIMIT $limit
@@ -310,12 +318,23 @@ LIMIT $limit
 				Signature: signature,
 				FilePath:  filePath,
 				Service:   serviceName,
+				StartLine: intFromRecord(m, "startLine"),
+				EndLine:   intFromRecord(m, "endLine"),
 				Score:     score,
 			})
 		}
 	}
 
 	return results, nil
+}
+
+// intFromRecord reads an integer column from a Neo4j record map (the driver
+// returns int64; anything absent or non-integer yields 0).
+func intFromRecord(m map[string]any, key string) int {
+	if v, ok := m[key].(int64); ok {
+		return int(v)
+	}
+	return 0
 }
 
 // rrfScoreSingle returns the RRF contribution for a single rank (1-indexed).

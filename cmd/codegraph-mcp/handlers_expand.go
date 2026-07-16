@@ -19,6 +19,7 @@ func (s *CodeGraphMCPServer) resolveNodeID(ctx context.Context, nodeIDArg, name,
 			        n.fqn AS qualified_name,
 			        n.filePath AS file_path,
 			        n.startLine AS start_line,
+			        n.endLine AS end_line,
 			        n.signature AS signature,
 			        n.serviceName AS service_name`,
 			map[string]any{"id": nodeIDArg})
@@ -54,6 +55,7 @@ RETURN elementId(n) AS node_id, n.nodeKey AS node_key, labels(n)[0] AS label,
        n.fqn AS qualified_name,
        n.filePath AS file_path,
        n.startLine AS start_line,
+       n.endLine AS end_line,
        n.signature AS signature,
        n.serviceName AS service_name
 LIMIT 10`
@@ -195,6 +197,7 @@ RETURN elementId(n) AS node_id,
        n.fqn AS qualified_name,
        n.filePath AS file_path,
        n.startLine AS start_line,
+       n.endLine AS end_line,
        n.signature AS signature,
        n.serviceName AS service,
        distance
@@ -214,6 +217,7 @@ ORDER BY distance, label, name`,
 		QualifiedName: getStringFromRecord(nodeRecord, "qualified_name"),
 		FilePath:      getStringFromRecord(nodeRecord, "file_path"),
 		StartLine:     getIntFromRecord(nodeRecord, "start_line"),
+		EndLine:       getIntFromRecord(nodeRecord, "end_line"),
 		Signature:     getStringFromRecord(nodeRecord, "signature"),
 		Service:       getStringFromRecord(nodeRecord, "service_name"),
 		Distance:      0,
@@ -236,6 +240,7 @@ ORDER BY distance, label, name`,
 			QualifiedName: getStringFromRecord(m, "qualified_name"),
 			FilePath:      getStringFromRecord(m, "file_path"),
 			StartLine:     getIntFromRecord(m, "start_line"),
+			EndLine:       getIntFromRecord(m, "end_line"),
 			Signature:     getStringFromRecord(m, "signature"),
 			Service:       getStringFromRecord(m, "service"),
 			Distance:      getIntFromRecord(m, "distance"),
@@ -294,6 +299,19 @@ ORDER BY distance, label, name`,
 		}
 		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
 	}
+}
+
+// lineRangeSuffix renders ":start-end" (or ":start" for single-line /
+// unknown-end ranges, "" when no location at all) for file references in
+// text output.
+func lineRangeSuffix(startLine, endLine int) string {
+	if startLine <= 0 {
+		return ""
+	}
+	if endLine > startLine {
+		return fmt.Sprintf(":%d-%d", startLine, endLine)
+	}
+	return fmt.Sprintf(":%d", startLine)
 }
 
 // isPlainIdent reports whether s is a plain identifier ([A-Za-z_][A-Za-z0-9_]*),
@@ -367,10 +385,7 @@ func renderExpandText(nodes []expandNode, edges []expandEdge, truncated bool) st
 	if len(nodes) > 0 {
 		fmt.Fprintf(&b, "Start: %s %s\n", nodes[0].Label, nodes[0].Name)
 		if nodes[0].FilePath != "" {
-			fmt.Fprintf(&b, "  %s", nodes[0].FilePath)
-			if nodes[0].StartLine > 0 {
-				fmt.Fprintf(&b, ":%d", nodes[0].StartLine)
-			}
+			fmt.Fprintf(&b, "  %s%s", nodes[0].FilePath, lineRangeSuffix(nodes[0].StartLine, nodes[0].EndLine))
 			b.WriteString("\n")
 		}
 	}
@@ -397,11 +412,7 @@ func renderExpandText(nodes []expandNode, edges []expandEdge, truncated bool) st
 		for _, n := range group {
 			fmt.Fprintf(&b, "  - %s %s", n.Label, n.Name)
 			if n.FilePath != "" {
-				fmt.Fprintf(&b, " (%s", n.FilePath)
-				if n.StartLine > 0 {
-					fmt.Fprintf(&b, ":%d", n.StartLine)
-				}
-				b.WriteString(")")
+				fmt.Fprintf(&b, " (%s%s)", n.FilePath, lineRangeSuffix(n.StartLine, n.EndLine))
 			}
 			b.WriteString("\n")
 		}

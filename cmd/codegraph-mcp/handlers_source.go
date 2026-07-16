@@ -59,6 +59,9 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 		cypher = `MATCH (f) WHERE elementId(f) = $id AND (f:Function OR f:Method)
 		          RETURN f.name AS name, f.filePath AS filePath,
 		                 f.startLine AS startLine, f.endLine AS endLine,
+		                 coalesce(f.startByte, -1) AS startByte,
+		                 coalesce(f.endByte, -1) AS endByte,
+		                 coalesce(f.rangeSource, '') AS rangeSource,
 		                 f.signature AS signature, f.serviceName AS service
 		          LIMIT 1`
 		params["id"] = nodeID
@@ -66,6 +69,9 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 		cypher = `MATCH (f) WHERE (f:Function OR f:Method) AND f.name = $name
 		          RETURN f.name AS name, f.filePath AS filePath,
 		                 f.startLine AS startLine, f.endLine AS endLine,
+		                 coalesce(f.startByte, -1) AS startByte,
+		                 coalesce(f.endByte, -1) AS endByte,
+		                 coalesce(f.rangeSource, '') AS rangeSource,
 		                 f.signature AS signature, f.serviceName AS service
 		          ORDER BY f.filePath
 		          LIMIT 5`
@@ -102,6 +108,9 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 	filePath := getStringFromRecord(m, "filePath")
 	startLine := getIntFromRecord(m, "startLine")
 	endLine := getIntFromRecord(m, "endLine")
+	startByte := getIntFromRecord(m, "startByte")
+	endByte := getIntFromRecord(m, "endByte")
+	rangeSource := getStringFromRecord(m, "rangeSource")
 	signature := getStringFromRecord(m, "signature")
 	service := getStringFromRecord(m, "service")
 
@@ -114,14 +123,25 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 		return errorResponse(fmt.Sprintf("source: failed to read %s: %v", filePath, readErr))
 	}
 
-	lines := strings.Split(string(data), "\n")
-	if startLine < 1 {
-		startLine = 1
+	// Byte-exact extraction when the span came from a parse tree (RFC-010):
+	// treesitter and go-ast ranges cover the full function node, so the byte
+	// slice IS the body. Anything else — scip-declaration stubs (whose bytes
+	// are just the identifier) or pre-provenance nodes — falls back to
+	// whole-line extraction over [startLine, endLine].
+	var src string
+	if (rangeSource == "treesitter" || rangeSource == "go-ast") &&
+		startByte >= 0 && startByte < endByte && endByte <= len(data) {
+		src = string(data[startByte:endByte])
+	} else {
+		lines := strings.Split(string(data), "\n")
+		if startLine < 1 {
+			startLine = 1
+		}
+		if endLine < startLine || endLine > len(lines) {
+			endLine = len(lines)
+		}
+		src = strings.Join(lines[startLine-1:endLine], "\n")
 	}
-	if endLine < startLine || endLine > len(lines) {
-		endLine = len(lines)
-	}
-	src := strings.Join(lines[startLine-1:endLine], "\n")
 
 	lang := "text"
 	switch strings.ToLower(filepath.Ext(filePath)) {
@@ -144,6 +164,16 @@ func (s *CodeGraphMCPServer) handleSourceToolV2(ctx context.Context, args map[st
 	}
 	if service != "" {
 		fmt.Fprintf(&b, "  \nservice: `%s`", service)
+	}
+	switch rangeSource {
+	case "scip-declaration":
+		// Callers must know this is not the body: the graph only has the
+		// declaration line for this node (no grammar / interface method /
+		// parse-error region).
+		b.WriteString("  \nrange: scip-declaration (declaration line only; body span unavailable)")
+	case "":
+	default:
+		fmt.Fprintf(&b, "  \nrange: %s", rangeSource)
 	}
 	fmt.Fprintf(&b, "  \n%s:%d-%d\n\n```%s\n%s\n```\n",
 		filePath, startLine, endLine, lang, src)

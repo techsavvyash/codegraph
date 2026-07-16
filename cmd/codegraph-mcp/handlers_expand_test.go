@@ -39,7 +39,7 @@ func setupExpandTestDB(t *testing.T) (*CodeGraphMCPServer, map[string]string, fu
 	// Create diamond graph
 	createQuery := `
 		CREATE (a:itest_Function {name: 'funcA', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcA', serviceName: 'svc1'})
-		CREATE (b:itest_Function {name: 'funcB', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcB', serviceName: 'svc1'})
+		CREATE (b:itest_Function {name: 'funcB', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcB', serviceName: 'svc1', filePath: 'src/b.ts', startLine: 5, endLine: 25})
 		CREATE (c:itest_Function {name: 'funcC', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcC', serviceName: 'svc2'})
 		CREATE (d:itest_Function {name: 'funcD', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcD', serviceName: 'svc2'})
 		CREATE (e:itest_Function {name: 'funcE', scopeId: 'itest-expand', nodeKey: 'itest-expand/funcE', serviceName: 'svc3'})
@@ -137,6 +137,24 @@ func TestExpandViaAPOC(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, dCount, "funcD should appear exactly once (NODE_GLOBAL uniqueness)")
+
+	// funcB carries body-range anchors (RFC-010): both line bounds must
+	// surface so callers can slice files without a second lookup. funcD has
+	// no location and must omit them (omitempty).
+	for _, n := range nodes {
+		nm, ok := n.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch nm["node_id"] {
+		case nodeIDs["funcB"]:
+			assert.EqualValues(t, 5, nm["start_line"], "funcB start_line")
+			assert.EqualValues(t, 25, nm["end_line"], "funcB end_line")
+		case nodeIDs["funcD"]:
+			assert.NotContains(t, nm, "start_line", "funcD has no location; start_line must be omitted")
+			assert.NotContains(t, nm, "end_line", "funcD has no location; end_line must be omitted")
+		}
+	}
 }
 
 // TestExpandDirectionIn verifies direction filtering.

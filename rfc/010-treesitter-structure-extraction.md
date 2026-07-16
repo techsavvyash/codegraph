@@ -348,5 +348,10 @@ via MCP `source`/`flows`.
   or scope this strictly to Function/Method and leave Class/Interface spans to a
   follow-up? (Leaning: include methods immediately — they are function nodes and the
   same containment query covers them.)
-- Should `find`/`expand` byte anchors switch to tree-sitter ranges in the same change,
-  or after ranges are proven on goldens? (Leaning: after — one variable at a time.)
+- ~~Should `find`/`expand` byte anchors switch to tree-sitter ranges in the same
+  change, or after ranges are proven on goldens?~~ — done as a follow-up (2026-07-16)
+  after ranges were proven on goldens and re-indexed repos: `find` (both fulltext and
+  structural modes) and `expand` now return `start_line`/`end_line`; `source`
+  extracts by byte span for `treesitter`/`go-ast` ranges (line fallback otherwise —
+  a `scip-declaration` stub's byte props are only the identifier) and reports range
+  provenance so callers know a declaration-only answer when they see one.
