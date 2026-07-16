@@ -247,12 +247,16 @@ system:
 - a qualifier, when present (`Chunker.ChunkDocumentWithMeta`), must also match
   (method's parent class/receiver, or symbol suffix), else the candidate dies.
 
-**D3 `docmine/fence`** — fenced code blocks. Identifiers are extracted with the
-RFC-010 tree-sitter machinery where the fence declares a supported language
-(parse the block, collect call/identifier tokens), plain word-tokens otherwise.
-Same resolution pipeline as D2 but only *unique-in-service* matches link, at
+**D3 `docmine/fence`** — fenced code blocks. Identifiers are extracted
+lexically: call-syntax tokens (`name(`) and mixed-case tokens, minus a
+language-keyword stoplist, deduplicated per fence. (Implementation note,
+2026-07-17: originally spec'd as tree-sitter parsing of fence bodies; dropped
+deliberately — fences are often incomplete snippets, and the graph-validation
+step is what carries precision, not extraction fidelity. Lexical extraction +
+validation is a different sufficient design, not a cut corner.) Same
+resolution pipeline as D2 but only *unique-in-service* matches link, at
 conf 0.70, and edges per chunk are capped at 20 (a pasted code dump must not
-generate a hundred edges; the cap is logged when hit, never silent).
+generate a hundred edges; the cap is counted in the report, never silent).
 
 All matchers deduplicate per (chunk, target): the highest-confidence matcher wins
 and its `reasons` list records every matcher that fired.
