@@ -3,6 +3,8 @@ package semlink
 import (
 	"context"
 	"math"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -55,7 +57,7 @@ func TestSemanticConfidenceMapping(t *testing.T) {
 
 func TestOptionsDefaults(t *testing.T) {
 	o := Options{}.withDefaults()
-	if o.SimilarityThreshold != 0.78 || o.TopK != 10 || o.MaxLLMCalls != 2000 {
+	if o.SimilarityThreshold != 0.78 || o.TopK != 10 || o.MaxLLMCalls != 2000 || o.Concurrency != 8 {
 		t.Errorf("defaults wrong: %+v", o)
 	}
 	// The judge defaults ON: an unset Options{} must select the validated
@@ -67,12 +69,40 @@ func TestOptionsDefaults(t *testing.T) {
 
 	// Explicit values survive.
 	off := false
-	o = Options{SimilarityThreshold: 0.5, TopK: 3, MaxLLMCalls: 7, Judge: &off}.withDefaults()
-	if o.SimilarityThreshold != 0.5 || o.TopK != 3 || o.MaxLLMCalls != 7 {
+	o = Options{SimilarityThreshold: 0.5, TopK: 3, MaxLLMCalls: 7, Judge: &off, Concurrency: 1}.withDefaults()
+	if o.SimilarityThreshold != 0.5 || o.TopK != 3 || o.MaxLLMCalls != 7 || o.Concurrency != 1 {
 		t.Errorf("explicit options clobbered: %+v", o)
 	}
 	if o.judgeEnabled() {
 		t.Error("explicit Judge=false must survive withDefaults")
+	}
+}
+
+// TestSpendBudgetConcurrent hammers the budget from many goroutines: the
+// reservation must be exact — precisely MaxLLMCalls grants, never more —
+// because parallel summarize/judge workers all draw from it.
+func TestSpendBudgetConcurrent(t *testing.T) {
+	r := &Runner{opts: Options{MaxLLMCalls: 50}.withDefaults()}
+	const workers = 200
+
+	var granted atomic.Int64
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if r.spendBudget() {
+				granted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if granted.Load() != 50 {
+		t.Errorf("granted = %d, want exactly 50", granted.Load())
+	}
+	if r.budgetUsed != 50 {
+		t.Errorf("budgetUsed = %d, want 50", r.budgetUsed)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/model/provenance"
 	neo4jdrv "github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -38,16 +39,22 @@ type summaryTarget struct {
 }
 
 // summarizeAll runs the bottom-up pass: exported symbols → files → service.
-// Each level is hash-cached: unchanged input costs zero LLM calls.
+// Each level is hash-cached (unchanged input costs zero LLM calls) and fans
+// out to opts.Concurrency workers — levels stay strictly ordered because
+// file summaries consume symbol summaries and the service summary consumes
+// file summaries.
 func (r *Runner) summarizeAll(ctx context.Context, report *Report) error {
 	symbols, err := r.loadSymbolTargets(ctx)
 	if err != nil {
 		return err
 	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(r.opts.Concurrency)
 	for _, t := range symbols {
-		if err := r.summarizeSymbol(ctx, t, report); err != nil {
-			return err
-		}
+		g.Go(func() error { return r.summarizeSymbol(gctx, t, report) })
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	if err := r.summarizeFiles(ctx, report); err != nil {
@@ -126,12 +133,12 @@ func (r *Runner) summarizeSymbol(ctx context.Context, t summaryTarget, report *R
 	input := strings.Join([]string{t.label, t.name, t.signature, t.docstring, r.readBody(t)}, "\n")
 	hash := hashString(input)
 	if hash == t.oldHash {
-		report.SummariesUpToDate++
+		r.tally(func() { report.SummariesUpToDate++ })
 		return nil
 	}
 
 	if !r.spendBudget() {
-		report.SkippedBudget++
+		r.tally(func() { report.SkippedBudget++ })
 		return nil
 	}
 
@@ -161,30 +168,34 @@ func (r *Runner) summarizeFiles(ctx context.Context, report *Report) error {
 		return fmt.Errorf("failed to load file summary inputs: %w", err)
 	}
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(r.opts.Concurrency)
 	for _, rec := range records {
 		m := rec.AsMap()
-		parts := stringList(m["parts"])
-		input := strings.Join(parts, "\n")
-		hash := hashString(input)
-		if hash == str(m, "oldHash") {
-			report.SummariesUpToDate++
-			continue
-		}
-		if !r.spendBudget() {
-			report.SkippedBudget++
-			continue
-		}
-
-		user := fmt.Sprintf("File %s contains:\n%s\n\nSummarize what this file is responsible for.", str(m, "path"), input)
-		summary, err := r.completer.Complete(ctx, summarySystemPrompt, user)
-		if err != nil {
-			return fmt.Errorf("failed to summarize file %s: %w", str(m, "nodeKey"), err)
-		}
-		if err := r.writeSummary(ctx, str(m, "id"), str(m, "nodeKey"), clampSummary(summary), hash, report); err != nil {
-			return err
-		}
+		g.Go(func() error { return r.summarizeFileRecord(gctx, m, report) })
 	}
-	return nil
+	return g.Wait()
+}
+
+func (r *Runner) summarizeFileRecord(ctx context.Context, m map[string]any, report *Report) error {
+	parts := stringList(m["parts"])
+	input := strings.Join(parts, "\n")
+	hash := hashString(input)
+	if hash == str(m, "oldHash") {
+		r.tally(func() { report.SummariesUpToDate++ })
+		return nil
+	}
+	if !r.spendBudget() {
+		r.tally(func() { report.SkippedBudget++ })
+		return nil
+	}
+
+	user := fmt.Sprintf("File %s contains:\n%s\n\nSummarize what this file is responsible for.", str(m, "path"), input)
+	summary, err := r.completer.Complete(ctx, summarySystemPrompt, user)
+	if err != nil {
+		return fmt.Errorf("failed to summarize file %s: %w", str(m, "nodeKey"), err)
+	}
+	return r.writeSummary(ctx, str(m, "id"), str(m, "nodeKey"), clampSummary(summary), hash, report)
 }
 
 // summarizeService builds one service-level summary from file summaries. The
@@ -257,7 +268,7 @@ func (r *Runner) writeSummary(ctx context.Context, elementID, nodeKey, summary, 
 	if err != nil {
 		return fmt.Errorf("failed to write summary for %s: %w", nodeKey, err)
 	}
-	report.SummariesWritten++
+	r.tally(func() { report.SummariesWritten++ })
 	return nil
 }
 

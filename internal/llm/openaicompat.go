@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -101,10 +102,11 @@ func truncate(b []byte, n int) string {
 type openAICompatCompleter struct {
 	client *openAICompatClient
 	model  string
+	extra  map[string]any
 }
 
 func newOpenAICompatCompleter(cfg EndpointConfig, apiKey string) *openAICompatCompleter {
-	return &openAICompatCompleter{client: newHTTPClient(cfg, apiKey), model: cfg.Model}
+	return &openAICompatCompleter{client: newHTTPClient(cfg, apiKey), model: cfg.Model, extra: cfg.Extra}
 }
 
 type chatMessage struct {
@@ -112,15 +114,22 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
-type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-}
-
 type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+}
+
+// mergeExtra copies vendor-specific fields into payload, refusing to override
+// the core fields the adapter owns.
+func mergeExtra(payload, extra map[string]any, protected ...string) map[string]any {
+	for k, v := range extra {
+		if slices.Contains(protected, k) {
+			continue
+		}
+		payload[k] = v
+	}
+	return payload
 }
 
 // Model identifies the completion model; semlink stamps it into summaryModel
@@ -134,8 +143,9 @@ func (c *openAICompatCompleter) Complete(ctx context.Context, system, user strin
 	}
 	messages = append(messages, chatMessage{Role: "user", Content: user})
 
+	payload := mergeExtra(map[string]any{"model": c.model, "messages": messages}, c.extra, "model", "messages")
 	var resp chatResponse
-	if err := c.client.post(ctx, "/chat/completions", chatRequest{Model: c.model, Messages: messages}, &resp); err != nil {
+	if err := c.client.post(ctx, "/chat/completions", payload, &resp); err != nil {
 		return "", err
 	}
 	if len(resp.Choices) == 0 {
@@ -150,15 +160,11 @@ type openAICompatEmbedder struct {
 	client     *openAICompatClient
 	model      string
 	dimensions int
+	extra      map[string]any
 }
 
 func newOpenAICompatEmbedder(cfg EndpointConfig, apiKey string) *openAICompatEmbedder {
-	return &openAICompatEmbedder{client: newHTTPClient(cfg, apiKey), model: cfg.Model, dimensions: cfg.Dimensions}
-}
-
-type embeddingRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
+	return &openAICompatEmbedder{client: newHTTPClient(cfg, apiKey), model: cfg.Model, dimensions: cfg.Dimensions, extra: cfg.Extra}
 }
 
 type embeddingResponse struct {
@@ -173,8 +179,9 @@ func (e *openAICompatEmbedder) Embed(ctx context.Context, texts []string) ([][]f
 		return nil, nil
 	}
 
+	payload := mergeExtra(map[string]any{"model": e.model, "input": texts}, e.extra, "model", "input")
 	var resp embeddingResponse
-	if err := e.client.post(ctx, "/embeddings", embeddingRequest{Model: e.model, Input: texts}, &resp); err != nil {
+	if err := e.client.post(ctx, "/embeddings", payload, &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.Data) != len(texts) {

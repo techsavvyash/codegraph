@@ -35,6 +35,11 @@ type EndpointConfig struct {
 	Model      string
 	APIKeyEnv  string // name of the env var holding the key ("" = no auth, e.g. local Ollama)
 	Dimensions int    // embeddings only
+	// Extra holds vendor-specific request fields merged verbatim into every
+	// request body — e.g. {"reasoning_effort": "minimal"} cuts gpt-5-family
+	// latency ~2x for summary-sized outputs. Core fields (model, messages,
+	// input) cannot be overridden.
+	Extra map[string]any
 }
 
 // Config selects and configures the provider.

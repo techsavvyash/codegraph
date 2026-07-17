@@ -32,23 +32,27 @@ func llmConfigFromViper() llm.Config {
 			BaseURL:   viper.GetString("llm.completion.base_url"),
 			Model:     viper.GetString("llm.completion.model"),
 			APIKeyEnv: viper.GetString("llm.completion.api_key_env"),
+			Extra:     viper.GetStringMap("llm.completion.extra"),
 		},
 		Embedding: llm.EndpointConfig{
 			BaseURL:    viper.GetString("llm.embedding.base_url"),
 			Model:      viper.GetString("llm.embedding.model"),
 			APIKeyEnv:  viper.GetString("llm.embedding.api_key_env"),
 			Dimensions: viper.GetInt("llm.embedding.dimensions"),
+			Extra:      viper.GetStringMap("llm.embedding.extra"),
 		},
 	}
 }
 
 // semlinkOptionsFromViper maps the semlink section. Unset keys keep the
-// package defaults (threshold 0.78, top_k 10, judge on, max_llm_calls 2000).
+// package defaults (threshold 0.78, top_k 10, judge on, max_llm_calls 2000,
+// concurrency 8).
 func semlinkOptionsFromViper() semlink.Options {
 	opts := semlink.Options{
 		SimilarityThreshold: viper.GetFloat64("semlink.similarity_threshold"),
 		TopK:                viper.GetInt("semlink.top_k"),
 		MaxLLMCalls:         viper.GetInt("semlink.max_llm_calls"),
+		Concurrency:         viper.GetInt("semlink.concurrency"),
 	}
 	if viper.IsSet("semlink.judge") {
 		judge := viper.GetBool("semlink.judge")

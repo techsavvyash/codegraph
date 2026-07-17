@@ -8,6 +8,7 @@ package semlink
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	graph "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/llm"
@@ -30,6 +31,11 @@ type Options struct {
 	// Embedding calls are not counted — they are orders of magnitude cheaper.
 	// Hitting the budget stops cleanly; hash caches make re-runs resume.
 	MaxLLMCalls int
+	// Concurrency bounds in-flight LLM calls during summarization and
+	// judging (the run's wall-clock is dominated by sequential completion
+	// latency otherwise). Embedding is already batched. Set 1 for strictly
+	// ordered runs.
+	Concurrency int
 }
 
 func (o Options) withDefaults() Options {
@@ -41,6 +47,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MaxLLMCalls == 0 {
 		o.MaxLLMCalls = 2000
+	}
+	if o.Concurrency == 0 {
+		o.Concurrency = 8
 	}
 	if o.Judge == nil {
 		on := true
@@ -76,7 +85,16 @@ type Runner struct {
 	projectRoot string // for reading function bodies; "" = signatures/docstrings only
 	opts        Options
 
+	mu         sync.Mutex // guards budgetUsed and Report mutation across workers
 	budgetUsed int
+}
+
+// tally applies a Report mutation under the runner lock — every counter
+// update in a parallel phase must go through this.
+func (r *Runner) tally(f func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f()
 }
 
 // NewRunner wires a semantic linking run. completer may be nil only when
@@ -136,7 +154,11 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 }
 
 // spendBudget reserves one completion call. Returns false when exhausted.
+// Reservation happens before the call, so concurrent workers can never
+// overshoot MaxLLMCalls.
 func (r *Runner) spendBudget() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.budgetUsed >= r.opts.MaxLLMCalls {
 		return false
 	}

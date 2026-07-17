@@ -12,7 +12,10 @@ import (
 
 func TestOpenAICompatCompleter_RequestShapeAndParse(t *testing.T) {
 	var gotAuth, gotPath string
-	var gotReq chatRequest
+	var gotReq struct {
+		Model    string        `json:"model"`
+		Messages []chatMessage `json:"messages"`
+	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -45,6 +48,54 @@ func TestOpenAICompatCompleter_RequestShapeAndParse(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatExtraParams pins the vendor-param passthrough: extras land
+// in the request body verbatim, but the adapter-owned core fields win.
+func TestOpenAICompatExtraParams(t *testing.T) {
+	var gotChat, gotEmbed map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("bad request body: %v", err)
+		}
+		switch r.URL.Path {
+		case "/chat/completions":
+			gotChat = body
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+		case "/embeddings":
+			gotEmbed = body
+			fmt.Fprint(w, `{"data":[{"index":0,"embedding":[1,0,0]}]}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := newOpenAICompatCompleter(EndpointConfig{BaseURL: srv.URL, Model: "m",
+		Extra: map[string]any{"reasoning_effort": "minimal", "model": "evil", "messages": "evil"}}, "")
+	if _, err := c.Complete(context.Background(), "", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if gotChat["reasoning_effort"] != "minimal" {
+		t.Errorf("extra param missing from chat body: %v", gotChat)
+	}
+	if gotChat["model"] != "m" {
+		t.Errorf("extra must not override model, got %v", gotChat["model"])
+	}
+	if _, ok := gotChat["messages"].([]any); !ok {
+		t.Errorf("extra must not override messages, got %T", gotChat["messages"])
+	}
+
+	e := newOpenAICompatEmbedder(EndpointConfig{BaseURL: srv.URL, Model: "emb", Dimensions: 3,
+		Extra: map[string]any{"dimensions": 3, "input": "evil"}}, "")
+	if _, err := e.Embed(context.Background(), []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotEmbed["dimensions"] != float64(3) {
+		t.Errorf("extra param missing from embed body: %v", gotEmbed)
+	}
+	if _, ok := gotEmbed["input"].([]any); !ok {
+		t.Errorf("extra must not override input, got %T", gotEmbed["input"])
+	}
+}
+
 func TestOpenAICompatCompleter_NoAuthHeaderWithoutKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
@@ -62,7 +113,7 @@ func TestOpenAICompatCompleter_NoAuthHeaderWithoutKey(t *testing.T) {
 
 func TestOpenAICompatEmbedder_BatchOrderByIndex(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req embeddingRequest
+		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("bad request: %v", err)
 		}

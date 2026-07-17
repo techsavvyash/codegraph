@@ -11,6 +11,7 @@ import (
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/model/provenance"
+	"golang.org/x/sync/errgroup"
 )
 
 const judgeSystemPrompt = "You judge whether a documentation excerpt describes or is implemented by a piece of code. " +
@@ -50,92 +51,104 @@ func (r *Runner) matchChunks(ctx context.Context, chunkIDs []string, report *Rep
 	}
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(r.opts.Concurrency)
 	for _, chunkID := range chunkIDs {
-		chunk, err := r.loadChunkForMatch(ctx, chunkID)
-		if err != nil {
-			return err
-		}
-		if chunk == nil {
+		g.Go(func() error {
+			return r.matchOneChunk(gctx, chunkID, model, strategy, createdAt, report)
+		})
+	}
+	return g.Wait()
+}
+
+// matchOneChunk runs kNN + judge for a single chunk and writes its semlink
+// MENTIONS. Safe to run concurrently: chunks are independent, and budget /
+// report mutations go through the runner lock.
+func (r *Runner) matchOneChunk(ctx context.Context, chunkID, model, strategy, createdAt string, report *Report) error {
+	chunk, err := r.loadChunkForMatch(ctx, chunkID)
+	if err != nil {
+		return err
+	}
+	if chunk == nil {
+		return nil
+	}
+
+	cands, err := r.knnCandidates(ctx, chunk.vector)
+	if err != nil {
+		return err
+	}
+
+	// Drop targets this chunk already mentions (Layer D subsumes S; a
+	// prior semlink edge just re-merges, skipping saves judge calls).
+	linked, err := r.linkedTargets(ctx, chunkID)
+	if err != nil {
+		return err
+	}
+
+	var edges []map[string]any
+	budgetHit := false
+	for _, cand := range cands {
+		if linked[cand.elementID] {
 			continue
 		}
 
-		cands, err := r.knnCandidates(ctx, chunk.vector)
-		if err != nil {
-			return err
-		}
-
-		// Drop targets this chunk already mentions (Layer D subsumes S; a
-		// prior semlink edge just re-merges, skipping saves judge calls).
-		linked, err := r.linkedTargets(ctx, chunkID)
-		if err != nil {
-			return err
-		}
-
-		var edges []map[string]any
-		budgetHit := false
-		for _, cand := range cands {
-			if linked[cand.elementID] {
+		confidence := 0.0
+		reasons := []string{"semantic-similarity"}
+		if r.opts.judgeEnabled() {
+			if !r.spendBudget() {
+				r.tally(func() { report.SkippedBudget++ })
+				budgetHit = true
 				continue
 			}
-
-			confidence := 0.0
-			reasons := []string{"semantic-similarity"}
-			if r.opts.judgeEnabled() {
-				if !r.spendBudget() {
-					report.SkippedBudget++
-					budgetHit = true
-					continue
-				}
-				verdict, jconf, err := r.judge(ctx, chunk.content, cand)
-				if err != nil {
-					return err
-				}
-				if !verdict {
-					report.JudgeRejected++
-					continue
-				}
-				report.JudgeAccepted++
-				reasons = append(reasons, "llm-judge-confirmed")
-				confidence = judgeConfBase + judgeConfSlope*clamp01(jconf)
-			} else {
-				confidence = cand.cosine * simOnlyScale
-				if confidence > simOnlyCap {
-					confidence = simOnlyCap
-				}
-				if confidence <= 0 {
-					continue
-				}
-			}
-
-			props, err := provenance.BuildMentionEdgeProps(confidence, reasons, strategy, createdAt,
-				r.scope.ScopeID, []string{
-					fmt.Sprintf("cos:%.3f", cand.cosine),
-					"sumhash:" + hashString(cand.summary)[:12],
-				})
+			verdict, jconf, err := r.judge(ctx, chunk.content, cand)
 			if err != nil {
-				return fmt.Errorf("semlink provenance invalid for %s: %w", cand.nodeKey, err)
-			}
-			edges = append(edges, map[string]any{"fromId": chunkID, "toId": cand.elementID, "props": props})
-		}
-
-		if len(edges) > 0 {
-			if err := r.client.MergeRelsBatch(ctx, string(models.MentionsRel), edges, 100); err != nil {
 				return err
 			}
-			report.EdgesWritten += len(edges)
+			if !verdict {
+				r.tally(func() { report.JudgeRejected++ })
+				continue
+			}
+			r.tally(func() { report.JudgeAccepted++ })
+			reasons = append(reasons, "llm-judge-confirmed")
+			confidence = judgeConfBase + judgeConfSlope*clamp01(jconf)
+		} else {
+			confidence = cand.cosine * simOnlyScale
+			if confidence > simOnlyCap {
+				confidence = simOnlyCap
+			}
+			if confidence <= 0 {
+				continue
+			}
 		}
 
-		// Mark the chunk matched only when its full candidate set was
-		// processed — a budget-interrupted chunk re-matches next run.
-		if !budgetHit {
-			if _, err := r.client.ExecuteQuery(ctx, `
-				MATCH (c) WHERE elementId(c) = $id
-				SET c.semlinkModel = $model, c.semlinkAt = $now
-			`, map[string]any{"id": chunkID, "model": model, "now": createdAt}); err != nil {
-				return err
-			}
-			report.ChunksMatched++
+		props, err := provenance.BuildMentionEdgeProps(confidence, reasons, strategy, createdAt,
+			r.scope.ScopeID, []string{
+				fmt.Sprintf("cos:%.3f", cand.cosine),
+				"sumhash:" + hashString(cand.summary)[:12],
+			})
+		if err != nil {
+			return fmt.Errorf("semlink provenance invalid for %s: %w", cand.nodeKey, err)
 		}
+		edges = append(edges, map[string]any{"fromId": chunkID, "toId": cand.elementID, "props": props})
+	}
+
+	if len(edges) > 0 {
+		if err := r.client.MergeRelsBatch(ctx, string(models.MentionsRel), edges, 100); err != nil {
+			return err
+		}
+		r.tally(func() { report.EdgesWritten += len(edges) })
+	}
+
+	// Mark the chunk matched only when its full candidate set was
+	// processed — a budget-interrupted chunk re-matches next run.
+	if !budgetHit {
+		if _, err := r.client.ExecuteQuery(ctx, `
+			MATCH (c) WHERE elementId(c) = $id
+			SET c.semlinkModel = $model, c.semlinkAt = $now
+		`, map[string]any{"id": chunkID, "model": model, "now": createdAt}); err != nil {
+			return err
+		}
+		r.tally(func() { report.ChunksMatched++ })
 	}
 	return nil
 }
