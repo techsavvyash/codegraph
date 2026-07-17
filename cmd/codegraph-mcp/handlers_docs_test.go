@@ -151,4 +151,12 @@ func TestExpandRendersEdgeProvenance(t *testing.T) {
 		require.Empty(t, e.Strategy, "structural edges must not carry provenance annotations")
 		require.Zero(t, e.Confidence)
 	}
+
+	// Doc nodes have no name/path property: text rendering must fall back to
+	// title (Document) / headingPath (DocumentChunk), not show blanks.
+	args2["format"] = "text"
+	resp = server.handleExpandTool(context.Background(), args2)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content[0].Text, "MCP Docs Guide > Usage",
+		"DocumentChunk display name must fall back to headingPath")
 }

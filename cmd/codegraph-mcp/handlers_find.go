@@ -149,7 +149,7 @@ func (s *CodeGraphMCPServer) handleFindTool(ctx context.Context, args map[string
 		// on n.name alone would make every File tie at NULL and never paginate.
 		queryStr := fmt.Sprintf(`
 MATCH (n:%s)
-WITH n, coalesce(n.name, n.path, '') AS sortName
+WITH n, coalesce(n.name, n.path, n.title, n.headingPath, '') AS sortName
 WHERE %s
 `, label, whereClause)
 

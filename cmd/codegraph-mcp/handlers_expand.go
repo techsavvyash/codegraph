@@ -15,7 +15,7 @@ func (s *CodeGraphMCPServer) resolveNodeID(ctx context.Context, nodeIDArg, name,
 		records, err := s.client.ExecuteQuery(ctx,
 			`MATCH (n) WHERE elementId(n) = $id
 			 RETURN elementId(n) AS node_id, n.nodeKey AS node_key, labels(n)[0] AS label,
-			        coalesce(n.name, n.path, '') AS name,
+			        coalesce(n.name, n.path, n.title, n.headingPath, '') AS name,
 			        n.fqn AS qualified_name,
 			        n.filePath AS file_path,
 			        n.startLine AS start_line,
@@ -51,7 +51,7 @@ func (s *CodeGraphMCPServer) resolveNodeID(ctx context.Context, nodeIDArg, name,
 
 	queryStr += `
 RETURN elementId(n) AS node_id, n.nodeKey AS node_key, labels(n)[0] AS label,
-       coalesce(n.name, n.path, '') AS name,
+       coalesce(n.name, n.path, n.title, n.headingPath, '') AS name,
        n.fqn AS qualified_name,
        n.filePath AS file_path,
        n.startLine AS start_line,
@@ -193,7 +193,7 @@ WITH last(nodes(path)) AS n, length(path) AS distance
 WHERE distance > 0
 RETURN elementId(n) AS node_id,
        labels(n)[0] AS label,
-       coalesce(n.name, n.path, '') AS name,
+       coalesce(n.name, n.path, n.title, n.headingPath, '') AS name,
        n.fqn AS qualified_name,
        n.filePath AS file_path,
        n.startLine AS start_line,
@@ -525,7 +525,7 @@ func (s *CodeGraphMCPServer) handlePathTool(ctx context.Context, args map[string
 MATCH (a) WHERE elementId(a) = $fromId
 MATCH (b) WHERE elementId(b) = $toId
 %s
-RETURN [n IN nodes(p) | {node_id: elementId(n), label: labels(n)[0], name: coalesce(n.name, n.path, '')}] AS pathNodes,
+RETURN [n IN nodes(p) | {node_id: elementId(n), label: labels(n)[0], name: coalesce(n.name, n.path, n.title, n.headingPath, '')}] AS pathNodes,
        [r IN relationships(p) | {from: elementId(startNode(r)), to: elementId(endNode(r)), type: type(r)}] AS pathEdges,
        length(p) AS hops
 ORDER BY hops
