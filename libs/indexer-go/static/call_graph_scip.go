@@ -35,7 +35,7 @@ type SCIPCallGraphBuilder struct {
 	modulePath  string // Go module path from go.mod, used to filter external targets
 	serviceName string // Service node name used to restrict listGoFiles to this module only
 	scopeCtx    models.ScopeContext
-œ	// moduleNodes is the service-wide bare-name → elementId map for cross-file callee
+	// moduleNodes is the service-wide bare-name → elementId map for cross-file callee
 	// resolution. Only free functions (no receiver) are keyed by bare name. Methods are
 	// keyed by "ReceiverType.Name" (e.g. "RedisCache.Get") to prevent cross-receiver
 	// collision under last-write-wins.
