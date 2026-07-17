@@ -1,15 +1,10 @@
 .env
 
-# Go workspace sum (auto-generated; individual go.sum files are committed)
-go.work.sum
-
 # SCIP index files (temporary)
 index.scip
 
-# Node / Nx
+# Node
 node_modules/
-.nx/cache
-.nx/workspace-data
 
 # Python
 .venv/
@@ -19,15 +14,14 @@ __pycache__/
 *.pyc
 
 # Local build artifacts
-bin/codegraph-new
-bin/codegraph-mcp-new
-codegraph
-cli-go
-mcp-server/mcp-server
+bin/
+/codegraph
+cmd/codegraph/codegraph
+cmd/codegraph-mcp/codegraph-mcp
 
 # SvelteKit build output
-apps/chat-ui/.svelte-kit/
-apps/chat-ui/build/
+web/chat-ui/.svelte-kit/
+web/chat-ui/build/
 
 # Playwright test artifacts
 .playwright-mcp/
@@ -42,3 +36,7 @@ plugins/
 
 
 *.pem
+
+.trash/
+# Golden-test actual-output artifacts
+*.got

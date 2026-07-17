@@ -5,7 +5,7 @@ This document converts the latest audit into an execution-ready checklist with c
 Related sources:
 
 - `docs/19-pristine-state-task-backlog.md`
-- `docs/rfc/003-evidence-driven-intelligence-architecture.md`
+- `rfc/009-evidence-driven-intelligence-architecture.md` (superseded by RFC-005)
 - `docs/18-business-context-gap-closure-plan.md`
 
 ---

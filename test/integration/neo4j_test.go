@@ -6,9 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/context-maximiser/code-graph/libs/neo4j-go"
-	"github.com/context-maximiser/code-graph/libs/schema-go"
-	"github.com/context-maximiser/code-graph/libs/indexer-go/static"
+	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/graph/schema"
 )
 
 // Test configuration
@@ -29,7 +28,7 @@ func getEnv(key, defaultValue string) string {
 // createTestClient creates a Neo4j client for testing
 func createTestClient(t *testing.T) *neo4j.Client {
 	t.Helper()
-	
+
 	config := neo4j.Config{
 		URI:      testNeo4jURI,
 		Username: testNeo4jUser,
@@ -45,16 +44,21 @@ func createTestClient(t *testing.T) *neo4j.Client {
 	return client
 }
 
-// cleanupDatabase removes all test data from the database
+// cleanupDatabase removes test data scoped to neo4j_test
 func cleanupDatabase(t *testing.T, client *neo4j.Client) {
 	t.Helper()
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Delete all nodes and relationships
-	cypher := "MATCH (n) DETACH DELETE n"
-	_, err := client.ExecuteQuery(ctx, cypher, nil)
+	// Delete only nodes created by neo4j_test (scoped by scopeId and TestNode label)
+	cypher := `
+		MATCH (n)
+		WHERE n.scopeId = $scope OR n:TestNode
+		DETACH DELETE n
+	`
+	params := map[string]any{"scope": "itest-neo4j"}
+	_, err := client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		t.Logf("Warning: failed to cleanup database: %v", err)
 	}
@@ -87,7 +91,7 @@ func TestSchemaCreation(t *testing.T) {
 	}()
 
 	schemaManager := schema.NewSchemaManager(client)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -134,10 +138,11 @@ func TestBasicNodeOperations(t *testing.T) {
 
 	// Create a test service node
 	serviceProps := map[string]any{
-		"name":          "test-service",
+		"name":          "itest-neo4j",
+		"scopeId":       "itest-neo4j",
 		"language":      "Go",
 		"version":       "v1.0.0",
-		"repositoryUrl": "https://github.com/test/test-service",
+		"repositoryUrl": "https://github.com/test/itest-neo4j",
 		"createdAt":     time.Now().UTC(),
 		"updatedAt":     time.Now().UTC(),
 	}
@@ -151,6 +156,7 @@ func TestBasicNodeOperations(t *testing.T) {
 	fileProps := map[string]any{
 		"path":         "/test/main.go",
 		"absolutePath": "/home/user/test/main.go",
+		"scopeId":      "itest-neo4j",
 		"language":     "Go",
 		"hash":         "abc123",
 		"lineCount":    100,
@@ -174,8 +180,8 @@ func TestBasicNodeOperations(t *testing.T) {
 		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
 		RETURN s.name as serviceName, f.path as filePath
 	`
-	params := map[string]any{"serviceName": "test-service"}
-	
+	params := map[string]any{"serviceName": "itest-neo4j"}
+
 	result, err := client.ExecuteQuery(ctx, cypher, params)
 	if err != nil {
 		t.Fatalf("Failed to query relationship: %v", err)
@@ -186,88 +192,14 @@ func TestBasicNodeOperations(t *testing.T) {
 	}
 
 	record := result[0].AsMap()
-	if record["serviceName"] != "test-service" {
-		t.Errorf("Expected service name 'test-service', got %v", record["serviceName"])
+	if record["serviceName"] != "itest-neo4j" {
+		t.Errorf("Expected service name 'itest-neo4j', got %v", record["serviceName"])
 	}
 	if record["filePath"] != "/test/main.go" {
 		t.Errorf("Expected file path '/test/main.go', got %v", record["filePath"])
 	}
 
 	t.Log("Successfully created and queried nodes and relationships")
-}
-
-func TestStaticIndexer(t *testing.T) {
-	client := createTestClient(t)
-	defer func() {
-		cleanupDatabase(t, client)
-		client.Close(context.Background())
-	}()
-
-	// Set up schema first
-	schemaManager := schema.NewSchemaManager(client)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	err := schemaManager.CreateSchema(ctx)
-	if err != nil {
-		t.Fatalf("Failed to create schema: %v", err)
-	}
-
-	// Create indexer and index a simple test project
-	indexer := static.NewStaticIndexer(client, "test-service", "v1.0.0", "")
-	
-	// We'll index the current project as a test
-	projectPath := "../.." // Go up to project root
-	
-	err = indexer.IndexProject(ctx, projectPath)
-	if err != nil {
-		t.Fatalf("Failed to index project: %v", err)
-	}
-
-	// Verify that nodes were created
-	cypher := "MATCH (n) RETURN labels(n) as labels, count(n) as count"
-	result, err := client.ExecuteQuery(ctx, cypher, nil)
-	if err != nil {
-		t.Fatalf("Failed to query indexed nodes: %v", err)
-	}
-
-	nodeTypes := make(map[string]int)
-	for _, record := range result {
-		recordMap := record.AsMap()
-		if labels, ok := recordMap["labels"].([]interface{}); ok && len(labels) > 0 {
-			if label, ok := labels[0].(string); ok {
-				if count, ok := recordMap["count"].(int64); ok {
-					nodeTypes[label] = int(count)
-				}
-			}
-		}
-	}
-
-	// Check that we have the expected node types
-	expectedTypes := []string{"Service", "File", "Module", "Function", "Symbol"}
-	for _, expectedType := range expectedTypes {
-		if count, found := nodeTypes[expectedType]; !found || count == 0 {
-			t.Errorf("Expected at least 1 %s node, got %d", expectedType, count)
-		} else {
-			t.Logf("Found %d %s nodes", count, expectedType)
-		}
-	}
-
-	// Check that we can find a specific function (assuming main function exists)
-	cypher = "MATCH (f:Function {name: 'main'}) RETURN f.name, f.filePath LIMIT 1"
-	result, err = client.ExecuteQuery(ctx, cypher, nil)
-	if err != nil {
-		t.Fatalf("Failed to query for main function: %v", err)
-	}
-
-	if len(result) > 0 {
-		record := result[0].AsMap()
-		t.Logf("Found main function at %v", record["filePath"])
-	} else {
-		t.Log("No main function found (this might be expected)")
-	}
-
-	t.Log("Successfully indexed project and verified node creation")
 }
 
 func TestBatchOperations(t *testing.T) {
@@ -279,6 +211,9 @@ func TestBatchOperations(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Clean up any leftover TestNodes from prior crashes
+	cleanupDatabase(t, client)
 
 	// Test batch node creation
 	nodes := []neo4j.BatchNode{

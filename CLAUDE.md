@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Building
 - `make build` - Build the CLI application (outputs to `bin/codegraph`)
-- `make build-server` - Build the server application (outputs to `bin/server`)
+- `make build-mcp` - Build the MCP server (outputs to `bin/codegraph-mcp`)
 
 ### Testing
 - `make test` - Run unit tests
@@ -26,25 +26,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make db-reset` - Reset database completely
 
 ### Quick Development
-- `make dev` - Build and index project with AST parsing
 - `make dev-scip` - Build and index project with SCIP indexing
-- `make index-self` - Index this project using AST parsing
 - `make index-self-scip` - Index this project using SCIP
 
 ## Architecture Overview
 
-CodeGraph is a Neo4j-based code intelligence platform that creates a Code Property Graph (CPG). The system consists of:
+CodeGraph is a Neo4j-based code intelligence platform that creates a Code Property Graph (CPG). It's a single Go module (`go.mod` at repo root; no `go.work`, no per-package `go.mod` files). The system consists of:
 
 ### Core Components
-1. **CLI Application** (`apps/cli/`) - Main entry point with Cobra commands
-2. **MCP Server** (`apps/mcp-server-go/`) - Model Context Protocol server
-3. **Neo4j Client** (`libs/neo4j-go/`) - Database connectivity and query building
-4. **Schema Management** (`libs/schema-go/`) - Neo4j constraints and indexes
-5. **Indexing Pipelines** (`libs/indexer-go/`) - Two main indexers:
-   - `static/` - AST-based Go code indexing and SCIP protocol indexing
-   - `documents/` - Document and feature extraction
-6. **Query Services** (`libs/query-go/`) - LSP-like features and advanced queries
-7. **Data Models** (`libs/core-models-go/`) - Graph node and relationship definitions
+1. **CLI Application** (`cmd/codegraph/`) - Main entry point with Cobra commands
+2. **MCP Server** (`cmd/codegraph-mcp/`) - Model Context Protocol server
+3. **Neo4j Client** (`internal/graph/`) - Database connectivity, query building, schema (`internal/graph/schema/`), and GDS graph algorithms (`internal/graph/gds/`)
+4. **Indexing Pipeline** (`internal/ingest/`):
+   - `scip/` - SCIP protocol indexing (multi-language)
+   - `pipeline/` - Stage orchestration (IngestCode, ComputeGraphMetrics, InferServiceDeps, GenerateFlowSpines)
+   - `docs/` - Parked document-chunking primitive (unused until a future docs-ingestion revival)
+5. **Query Services** (`internal/query/`) - LSP-like features, flow spine generation (`internal/query/inference/`)
+6. **Search** (`internal/search/`) - Full-text + hybrid search, pluggable text index backends (`internal/search/textindex/`)
+7. **Data Models** (`internal/model/`) - Graph node/relationship definitions, generation contracts (`internal/model/contracts/`), provenance (`internal/model/provenance/`)
+8. **Benchmarking** (`internal/benchmarks/`) - Self-benchmark harness and phase timing
 
 ### Neo4j Schema
 The platform uses a rich graph schema with node types:
@@ -63,9 +63,8 @@ The platform uses a rich graph schema with node types:
 - **DEFINES/REFERENCES** - Symbol definitions and usages
 - **INHERITS_FROM/IMPLEMENTS** - OOP relationships
 
-### Indexing Approaches
-1. **AST Indexing** - Direct Go AST parsing for fast local analysis
-2. **SCIP Indexing** - Uses SCIP protocol for cross-language compatibility and precise symbol resolution
+### Indexing Approach
+**SCIP Indexing** is the only indexing path - uses the SCIP protocol for cross-language compatibility and precise symbol resolution.
 
 ## Configuration
 
@@ -104,9 +103,6 @@ verbose: false
 ./bin/codegraph index scip /path/to/ts/project --language=typescript --service="frontend"
 ./bin/codegraph index scip /path/to/py/project --language=python --service="ml-service"
 
-# Index a Go project using AST parsing (legacy, Go-only)
-./bin/codegraph index project /path/to/go/project --service="my-service"
-
 # Search for symbols
 ./bin/codegraph query search "Client"
 
@@ -132,8 +128,10 @@ Language auto-detection works by checking for:
 
 ## Project Structure Notes
 
-- **apps/cli/main.go** - Single main file with all CLI commands using Cobra
-- **Makefile** - Comprehensive build automation with 30+ targets
+- **cmd/codegraph/main.go** - Single main file with all CLI commands using Cobra
+- **cmd/codegraph-mcp/main.go** - MCP server entry point
+- **Makefile** - Build automation (single-module: no per-package `go mod tidy` loops)
 - **docker-compose.yml** - Neo4j 5.15 with APOC plugins
-- Uses Go 1.24+ with modern dependency management
-- Integration tests require running Neo4j instance
+- Uses Go 1.24+, single `go.mod` at repo root
+- Integration tests (`test/integration/`) require a running Neo4j instance; excluded from `make test`, run via `make test-integration`
+- **web/chat-ui** - SvelteKit chat UI (talks to `cmd/codegraph-mcp` over stdio; binary path configurable via `CODEGRAPH_MCP_BIN`, defaults to `../../bin/codegraph-mcp`)

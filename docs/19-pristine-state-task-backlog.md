@@ -4,7 +4,7 @@ This backlog defines the concrete tasks required to move from the current implem
 
 Related design docs:
 
-- `docs/rfc/003-evidence-driven-intelligence-architecture.md`
+- `rfc/009-evidence-driven-intelligence-architecture.md` (superseded by RFC-005)
 - `docs/18-business-context-gap-closure-plan.md`
 
 ---

@@ -1,0 +1,3746 @@
+{
+  "nodes": [
+    {
+      "labels": [
+        "APIRoute"
+      ],
+      "nodeKey": "api:ANY:/greeter/Shout",
+      "props": {
+        "detectionSource": "cross_pkg",
+        "framework": "structural",
+        "method": "ANY",
+        "nodeKey": "api:ANY:/greeter/Shout",
+        "path": "/greeter/Shout",
+        "protocol": "structural",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "api:ANY:/greeter/Shout|main"
+      }
+    },
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 19,
+        "endLine": 10,
+        "filePath": "greeter/greeter.go",
+        "fqn": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+        "isAbstract": false,
+        "name": "EnglishGreeter",
+        "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+        "startColumn": 5,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 18,
+        "endLine": 5,
+        "filePath": "greeter/formal.go",
+        "fqn": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+        "isAbstract": false,
+        "name": "FormalGreeter",
+        "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+        "startColumn": 5,
+        "startLine": 5
+      }
+    },
+    {
+      "labels": [
+        "Class"
+      ],
+      "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "accessModifier": "public",
+        "docstring": "",
+        "endColumn": 16,
+        "endLine": 25,
+        "filePath": "greeter/greeter.go",
+        "fqn": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+        "isAbstract": false,
+        "name": "LoudGreeter",
+        "nodeKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+        "startColumn": 5,
+        "startLine": 25
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:tinygo:greeter/formal.go",
+      "props": {
+        "absolutePath": "greeter/formal.go",
+        "hash": "8b5c11a73d930158468ef613391aa96f226a06c94560dc058915d804721d3cb8",
+        "language": "Go",
+        "lineCount": 0,
+        "nodeKey": "file:tinygo:greeter/formal.go",
+        "path": "greeter/formal.go",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "file:tinygo:greeter/formal.go|main",
+        "serviceName": "tinygo"
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:tinygo:greeter/greeter.go",
+      "props": {
+        "absolutePath": "greeter/greeter.go",
+        "hash": "7b70c80496496225259641108a8d756778009c4f26c8de542a228a4094fa641f",
+        "language": "Go",
+        "lineCount": 0,
+        "nodeKey": "file:tinygo:greeter/greeter.go",
+        "path": "greeter/greeter.go",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "file:tinygo:greeter/greeter.go|main",
+        "serviceName": "tinygo"
+      }
+    },
+    {
+      "labels": [
+        "File"
+      ],
+      "nodeKey": "file:tinygo:main.go",
+      "props": {
+        "absolutePath": "main.go",
+        "hash": "f5d1571ebef16848c1a99aca6d4cfd67305bebff174e6695ce3a23c4bf463030",
+        "language": "Go",
+        "lineCount": 0,
+        "nodeKey": "file:tinygo:main.go",
+        "path": "main.go",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "file:tinygo:main.go|main",
+        "serviceName": "tinygo"
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "crossPkgCallerCount": 1,
+        "docstring": "",
+        "endByte": 555,
+        "endColumn": 22,
+        "endLine": 21,
+        "filePath": "greeter/greeter.go",
+        "inDegree": 1,
+        "isCrossPkgTarget": true,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "NewEnglishGreeter",
+        "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+        "outDegree": 0,
+        "paramTypes": [],
+        "rangeSource": "go-ast",
+        "receiverType": "",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+        "startByte": 472,
+        "startColumn": 5,
+        "startLine": 19
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "crossPkgCallerCount": 1,
+        "docstring": "",
+        "endByte": 837,
+        "endColumn": 19,
+        "endLine": 31,
+        "filePath": "greeter/greeter.go",
+        "inDegree": 1,
+        "isCrossPkgTarget": true,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "NewLoudGreeter",
+        "nodeKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+        "outDegree": 0,
+        "paramTypes": [],
+        "rangeSource": "go-ast",
+        "receiverType": "",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+        "startByte": 731,
+        "startColumn": 5,
+        "startLine": 29
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "docstring": "",
+        "endByte": 434,
+        "endColumn": 10,
+        "endLine": 22,
+        "filePath": "main.go",
+        "inDegree": 1,
+        "isExported": false,
+        "isTestFunction": false,
+        "name": "greet",
+        "nodeKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+        "outDegree": 2,
+        "paramTypes": [
+          "example.com/tinygo/greeter.Greeter",
+          "string"
+        ],
+        "rangeSource": "go-ast",
+        "receiverType": "",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+        "startByte": 359,
+        "startColumn": 5,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Function"
+      ],
+      "nodeKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "props": {
+        "docstring": "",
+        "endByte": 286,
+        "endColumn": 9,
+        "endLine": 17,
+        "filePath": "main.go",
+        "inDegree": 0,
+        "isExported": false,
+        "isTestFunction": false,
+        "name": "main",
+        "nodeKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+        "outDegree": 4,
+        "paramTypes": [],
+        "rangeSource": "go-ast",
+        "receiverType": "",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+        "startByte": 64,
+        "startColumn": 5,
+        "startLine": 9
+      }
+    },
+    {
+      "labels": [
+        "Interface"
+      ],
+      "nodeKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "endColumn": 12,
+        "endLine": 6,
+        "filePath": "greeter/greeter.go",
+        "name": "Greeter",
+        "nodeKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+        "startColumn": 5,
+        "startLine": 6
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "crossPkgCallerCount": 1,
+        "docstring": "",
+        "endByte": 233,
+        "endColumn": 28,
+        "endLine": 12,
+        "filePath": "greeter/formal.go",
+        "inDegree": 2,
+        "isCrossPkgTarget": true,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "Greet",
+        "nodeKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+        "outDegree": 0,
+        "paramTypes": [
+          "string"
+        ],
+        "rangeSource": "go-ast",
+        "receiverType": "FormalGreeter",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+        "startByte": 137,
+        "startColumn": 23,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "crossPkgCallerCount": 1,
+        "docstring": "",
+        "endByte": 360,
+        "endColumn": 29,
+        "endLine": 17,
+        "filePath": "greeter/formal.go",
+        "inDegree": 1,
+        "isCrossPkgTarget": true,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "Shout",
+        "nodeKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+        "outDegree": 1,
+        "paramTypes": [
+          "string"
+        ],
+        "rangeSource": "go-ast",
+        "receiverType": "*FormalGreeter",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+        "startByte": 268,
+        "startColumn": 24,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "props": {
+        "crossPkgCallerCount": 1,
+        "docstring": "",
+        "endByte": 470,
+        "endColumn": 29,
+        "endLine": 17,
+        "filePath": "greeter/greeter.go",
+        "inDegree": 1,
+        "isCrossPkgTarget": true,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "Greet",
+        "nodeKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+        "outDegree": 0,
+        "paramTypes": [
+          "string"
+        ],
+        "rangeSource": "go-ast",
+        "receiverType": "EnglishGreeter",
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+        "startByte": 386,
+        "startColumn": 24,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Method"
+      ],
+      "nodeKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "docstring": "",
+        "endByte": 284,
+        "endColumn": 6,
+        "endLine": 7,
+        "filePath": "greeter/greeter.go",
+        "inDegree": 0,
+        "isExported": true,
+        "isTestFunction": false,
+        "name": "Greet",
+        "nodeKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+        "outDegree": 0,
+        "returnType": "",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+        "startByte": 279,
+        "startColumn": 1,
+        "startLine": 7
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "endColumn": 15,
+        "endLine": 1,
+        "filePath": "greeter/formal.go",
+        "name": "greeter",
+        "nodeKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+        "startColumn": 8,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Module"
+      ],
+      "nodeKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+      "props": {
+        "endColumn": 12,
+        "endLine": 1,
+        "filePath": "main.go",
+        "name": "tinygo",
+        "nodeKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo`/|main",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+        "startColumn": 8,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:10:8",
+      "props": {
+        "context": "",
+        "endColumn": 21,
+        "endLine": 10,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:10:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:10:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:11:25",
+      "props": {
+        "context": "",
+        "endColumn": 30,
+        "endLine": 11,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:11:25",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:11:25|main",
+        "serviceName": "tinygo",
+        "startColumn": 25,
+        "startLine": 11
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:15:9",
+      "props": {
+        "context": "",
+        "endColumn": 22,
+        "endLine": 15,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:15:9",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:15:9|main",
+        "serviceName": "tinygo",
+        "startColumn": 9,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:16:16",
+      "props": {
+        "context": "",
+        "endColumn": 23,
+        "endLine": 16,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:16:16",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:16:16|main",
+        "serviceName": "tinygo",
+        "startColumn": 16,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:16:26",
+      "props": {
+        "context": "",
+        "endColumn": 31,
+        "endLine": 16,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:16:26",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:16:26|main",
+        "serviceName": "tinygo",
+        "startColumn": 26,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:16:8",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 16,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:16:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:16:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/formal.go:3:8",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 3,
+        "filePath": "greeter/formal.go",
+        "nodeKey": "ref:tinygo:greeter/formal.go:3:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/formal.go:3:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 3
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:15:8",
+      "props": {
+        "context": "",
+        "endColumn": 22,
+        "endLine": 15,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:15:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:15:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 15
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:16:10",
+      "props": {
+        "context": "",
+        "endColumn": 16,
+        "endLine": 16,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:16:10",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:16:10|main",
+        "serviceName": "tinygo",
+        "startColumn": 10,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:19:25",
+      "props": {
+        "context": "",
+        "endColumn": 39,
+        "endLine": 19,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:19:25",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:19:25|main",
+        "serviceName": "tinygo",
+        "startColumn": 25,
+        "startLine": 19
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:1:8",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 1,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:1:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:1:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 1
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:20:23",
+      "props": {
+        "context": "",
+        "endColumn": 29,
+        "endLine": 20,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:20:23",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:20:23|main",
+        "serviceName": "tinygo",
+        "startColumn": 23,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:20:8",
+      "props": {
+        "context": "",
+        "endColumn": 22,
+        "endLine": 20,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:20:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:20:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:26:1",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 26,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:26:1",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:26:1|main",
+        "serviceName": "tinygo",
+        "startColumn": 1,
+        "startLine": 26
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:29:22",
+      "props": {
+        "context": "",
+        "endColumn": 33,
+        "endLine": 29,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:29:22",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:29:22|main",
+        "serviceName": "tinygo",
+        "startColumn": 22,
+        "startLine": 29
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:30:20",
+      "props": {
+        "context": "",
+        "endColumn": 34,
+        "endLine": 30,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:30:20",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:30:20|main",
+        "serviceName": "tinygo",
+        "startColumn": 20,
+        "startLine": 30
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:30:36",
+      "props": {
+        "context": "",
+        "endColumn": 50,
+        "endLine": 30,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:30:36",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:30:36|main",
+        "serviceName": "tinygo",
+        "startColumn": 36,
+        "startLine": 30
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:30:51",
+      "props": {
+        "context": "",
+        "endColumn": 57,
+        "endLine": 30,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:30:51",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:30:51|main",
+        "serviceName": "tinygo",
+        "startColumn": 51,
+        "startLine": 30
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:greeter/greeter.go:30:8",
+      "props": {
+        "context": "",
+        "endColumn": 19,
+        "endLine": 30,
+        "filePath": "greeter/greeter.go",
+        "nodeKey": "ref:tinygo:greeter/greeter.go:30:8",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:greeter/greeter.go:30:8|main",
+        "serviceName": "tinygo",
+        "startColumn": 8,
+        "startLine": 30
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:10:14",
+      "props": {
+        "context": "",
+        "endColumn": 31,
+        "endLine": 10,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:10:14",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:10:14|main",
+        "serviceName": "tinygo",
+        "startColumn": 14,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:10:6",
+      "props": {
+        "context": "",
+        "endColumn": 13,
+        "endLine": 10,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:10:6",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:10:6|main",
+        "serviceName": "tinygo",
+        "startColumn": 6,
+        "startLine": 10
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:11:1",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 11,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:11:1",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:11:1|main",
+        "serviceName": "tinygo",
+        "startColumn": 1,
+        "startLine": 11
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:11:13",
+      "props": {
+        "context": "",
+        "endColumn": 18,
+        "endLine": 11,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:11:13",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:11:13|main",
+        "serviceName": "tinygo",
+        "startColumn": 13,
+        "startLine": 11
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:11:5",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 11,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:11:5",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:11:5|main",
+        "serviceName": "tinygo",
+        "startColumn": 5,
+        "startLine": 11
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:13:12",
+      "props": {
+        "context": "",
+        "endColumn": 19,
+        "endLine": 13,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:13:12",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:13:12|main",
+        "serviceName": "tinygo",
+        "startColumn": 12,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:13:20",
+      "props": {
+        "context": "",
+        "endColumn": 33,
+        "endLine": 13,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:13:20",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:13:20|main",
+        "serviceName": "tinygo",
+        "startColumn": 20,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:13:34",
+      "props": {
+        "context": "",
+        "endColumn": 39,
+        "endLine": 13,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:13:34",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:13:34|main",
+        "serviceName": "tinygo",
+        "startColumn": 34,
+        "startLine": 13
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:14:1",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 14,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:14:1",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:14:1|main",
+        "serviceName": "tinygo",
+        "startColumn": 1,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:14:20",
+      "props": {
+        "context": "",
+        "endColumn": 25,
+        "endLine": 14,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:14:20",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:14:20|main",
+        "serviceName": "tinygo",
+        "startColumn": 20,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:14:5",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 14,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:14:5",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:14:5|main",
+        "serviceName": "tinygo",
+        "startColumn": 5,
+        "startLine": 14
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:16:1",
+      "props": {
+        "context": "",
+        "endColumn": 4,
+        "endLine": 16,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:16:1",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:16:1|main",
+        "serviceName": "tinygo",
+        "startColumn": 1,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:16:13",
+      "props": {
+        "context": "",
+        "endColumn": 18,
+        "endLine": 16,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:16:13",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:16:13|main",
+        "serviceName": "tinygo",
+        "startColumn": 13,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:16:19",
+      "props": {
+        "context": "",
+        "endColumn": 26,
+        "endLine": 16,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:16:19",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:16:19|main",
+        "serviceName": "tinygo",
+        "startColumn": 19,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:16:27",
+      "props": {
+        "context": "",
+        "endColumn": 41,
+        "endLine": 16,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:16:27",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:16:27|main",
+        "serviceName": "tinygo",
+        "startColumn": 27,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:16:5",
+      "props": {
+        "context": "",
+        "endColumn": 12,
+        "endLine": 16,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:16:5",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:16:5|main",
+        "serviceName": "tinygo",
+        "startColumn": 5,
+        "startLine": 16
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:20:13",
+      "props": {
+        "context": "",
+        "endColumn": 20,
+        "endLine": 20,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:20:13",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:20:13|main",
+        "serviceName": "tinygo",
+        "startColumn": 13,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:20:21",
+      "props": {
+        "context": "",
+        "endColumn": 28,
+        "endLine": 20,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:20:21",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:20:21|main",
+        "serviceName": "tinygo",
+        "startColumn": 21,
+        "startLine": 20
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:21:10",
+      "props": {
+        "context": "",
+        "endColumn": 15,
+        "endLine": 21,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:21:10",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:21:10|main",
+        "serviceName": "tinygo",
+        "startColumn": 10,
+        "startLine": 21
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:4:2",
+      "props": {
+        "context": "",
+        "endColumn": 5,
+        "endLine": 4,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:4:2",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:4:2|main",
+        "serviceName": "tinygo",
+        "startColumn": 2,
+        "startLine": 4
+      }
+    },
+    {
+      "labels": [
+        "Reference"
+      ],
+      "nodeKey": "ref:tinygo:main.go:6:2",
+      "props": {
+        "context": "",
+        "endColumn": 28,
+        "endLine": 6,
+        "filePath": "main.go",
+        "nodeKey": "ref:tinygo:main.go:6:2",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "ref:tinygo:main.go:6:2|main",
+        "serviceName": "tinygo",
+        "startColumn": 2,
+        "startLine": 6
+      }
+    },
+    {
+      "labels": [
+        "Service"
+      ],
+      "nodeKey": "svc:tinygo",
+      "props": {
+        "language": "Go",
+        "name": "tinygo",
+        "nodeKey": "svc:tinygo",
+        "packageName": "example.com/tinygo",
+        "repositoryUrl": "https://example.com/tinygo",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "svc:tinygo|main",
+        "version": "v0.0.0"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "displayName": "greeter",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "displayName": "EnglishGreeter",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "props": {
+        "displayName": "Greet",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+      "props": {
+        "displayName": "Prefix",
+        "documentation": "",
+        "kind": "Field",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "displayName": "FormalGreeter",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "displayName": "Greet",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "displayName": "Shout",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+      "props": {
+        "displayName": "Title",
+        "documentation": "",
+        "kind": "Field",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "displayName": "Greeter",
+        "documentation": "",
+        "kind": "Interface",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "displayName": "Greet",
+        "documentation": "",
+        "kind": "Method",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "displayName": "LoudGreeter",
+        "documentation": "",
+        "kind": "Type",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.",
+      "props": {
+        "displayName": "EnglishGreeter",
+        "documentation": "",
+        "kind": "Field",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "displayName": "NewEnglishGreeter",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "displayName": "NewLoudGreeter",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+      "props": {
+        "displayName": "tinygo",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo`/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "displayName": "greet",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "props": {
+        "displayName": "main",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main().|main",
+        "symbol": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "displayName": "fmt",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/|main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "displayName": "Println",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().|main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println()."
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 strings/",
+      "props": {
+        "displayName": "strings",
+        "documentation": "",
+        "kind": "Package",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 strings/",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 strings/|main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 strings/"
+      }
+    },
+    {
+      "labels": [
+        "Symbol"
+      ],
+      "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 strings/ToUpper().",
+      "props": {
+        "displayName": "ToUpper",
+        "documentation": "",
+        "kind": "Function",
+        "nodeKey": "scip-go gomod github.com/golang/go/src go1.21 strings/ToUpper().",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "scip-go gomod github.com/golang/go/src go1.21 strings/ToUpper().|main",
+        "symbol": "scip-go gomod github.com/golang/go/src go1.21 strings/ToUpper()."
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinygo:greeter/formal.go#Title:6",
+      "props": {
+        "endColumn": 6,
+        "endLine": 6,
+        "filePath": "greeter/formal.go",
+        "isConstant": false,
+        "name": "Title",
+        "nodeKey": "var:tinygo:greeter/formal.go#Title:6",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinygo:greeter/formal.go#Title:6|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+        "startColumn": 1,
+        "startLine": 6,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinygo:greeter/greeter.go#EnglishGreeter:26",
+      "props": {
+        "endColumn": 15,
+        "endLine": 26,
+        "filePath": "greeter/greeter.go",
+        "isConstant": false,
+        "name": "EnglishGreeter",
+        "nodeKey": "var:tinygo:greeter/greeter.go#EnglishGreeter:26",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinygo:greeter/greeter.go#EnglishGreeter:26|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.",
+        "startColumn": 1,
+        "startLine": 26,
+        "type": ""
+      }
+    },
+    {
+      "labels": [
+        "Variable"
+      ],
+      "nodeKey": "var:tinygo:greeter/greeter.go#Prefix:11",
+      "props": {
+        "endColumn": 7,
+        "endLine": 11,
+        "filePath": "greeter/greeter.go",
+        "isConstant": false,
+        "name": "Prefix",
+        "nodeKey": "var:tinygo:greeter/greeter.go#Prefix:11",
+        "scope": "main",
+        "scopeId": "main",
+        "scopedKey": "var:tinygo:greeter/greeter.go#Prefix:11|main",
+        "serviceName": "tinygo",
+        "signature": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+        "startColumn": 1,
+        "startLine": 11,
+        "type": ""
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 21,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 21,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "main.go",
+        "isConditional": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "branchDepth": 0,
+        "filePath": "greeter/formal.go",
+        "isConditional": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:10:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:11:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:15:9",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:16:16",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:16:26",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:16:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/formal.go:3:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/formal.go",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:tinygo:greeter/formal.go#Title:6",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Class"
+      ],
+      "endKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:15:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:16:10",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:19:25",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:1:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:20:23",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:20:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:26:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:29:22",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:30:20",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:30:36",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:30:51",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:greeter/greeter.go:30:8",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:tinygo:greeter/greeter.go#EnglishGreeter:26",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:greeter/greeter.go",
+      "endLabels": [
+        "Variable"
+      ],
+      "endKey": "var:tinygo:greeter/greeter.go#Prefix:11",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Module"
+      ],
+      "endKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:10:14",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:10:6",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:11:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:11:13",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:11:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:13:12",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:13:20",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:13:34",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:14:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:14:20",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:14:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:16:1",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:16:13",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:16:19",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:16:27",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:16:5",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:20:13",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:20:21",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:21:10",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:4:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinygo:main.go",
+      "endLabels": [
+        "Reference"
+      ],
+      "endKey": "ref:tinygo:main.go:6:2",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinygo",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:tinygo:greeter/formal.go",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinygo",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:tinygo:greeter/greeter.go",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CONTAINS",
+      "startLabels": [
+        "Service"
+      ],
+      "startKey": "svc:tinygo",
+      "endLabels": [
+        "File"
+      ],
+      "endKey": "file:tinygo:main.go",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Function"
+      ],
+      "startKey": "func:tinygo:main.go#scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/main().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Interface"
+      ],
+      "startKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Module"
+      ],
+      "startKey": "mod:scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:tinygo:greeter/formal.go#Title:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:tinygo:greeter/greeter.go#EnglishGreeter:26",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "DEFINES",
+      "startLabels": [
+        "Variable"
+      ],
+      "startKey": "var:tinygo:greeter/greeter.go#Prefix:11",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+      "props": {
+        "isExported": true,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Class"
+      ],
+      "startKey": "class:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "endLabels": [
+        "Interface"
+      ],
+      "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/formal.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "IMPLEMENTS",
+      "startLabels": [
+        "Method"
+      ],
+      "startKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Greet().",
+      "endLabels": [
+        "Method"
+      ],
+      "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:10:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:11:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:15:9",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "column": 9,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:16:16",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 strings/ToUpper().",
+      "props": {
+        "column": 16,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:16:26",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Greet().",
+      "props": {
+        "column": 26,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:16:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 strings/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/formal.go:3:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 strings/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 3,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:15:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 15,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:16:10",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+      "props": {
+        "column": 10,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:19:25",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "column": 25,
+        "isDefinition": false,
+        "line": 19,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:1:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:20:23",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+      "props": {
+        "column": 23,
+        "isDefinition": false,
+        "line": 20,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:20:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 20,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:26:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 26,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:29:22",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "column": 22,
+        "isDefinition": false,
+        "line": 29,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:30:20",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#EnglishGreeter.",
+      "props": {
+        "column": 20,
+        "isDefinition": false,
+        "line": 30,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:30:36",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#",
+      "props": {
+        "column": 36,
+        "isDefinition": false,
+        "line": 30,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:30:51",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/EnglishGreeter#Prefix.",
+      "props": {
+        "column": 51,
+        "isDefinition": false,
+        "line": 30,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:greeter/greeter.go:30:8",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/LoudGreeter#",
+      "props": {
+        "column": 8,
+        "isDefinition": false,
+        "line": 30,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:10:14",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewEnglishGreeter().",
+      "props": {
+        "column": 14,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:10:6",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 6,
+        "isDefinition": false,
+        "line": 10,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:11:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:11:13",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "column": 13,
+        "isDefinition": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:11:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "column": 5,
+        "isDefinition": false,
+        "line": 11,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:13:12",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 12,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:13:20",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#",
+      "props": {
+        "column": 20,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:13:34",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Title.",
+      "props": {
+        "column": 34,
+        "isDefinition": false,
+        "line": 13,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:14:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:14:20",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/FormalGreeter#Shout().",
+      "props": {
+        "column": 20,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:14:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "column": 5,
+        "isDefinition": false,
+        "line": 14,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:16:1",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 1,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:16:13",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo`/greet().",
+      "props": {
+        "column": 13,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:16:19",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 19,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:16:27",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/NewLoudGreeter().",
+      "props": {
+        "column": 27,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:16:5",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/Println().",
+      "props": {
+        "column": 5,
+        "isDefinition": false,
+        "line": 16,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:20:13",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 13,
+        "isDefinition": false,
+        "line": 20,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:20:21",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
+      "props": {
+        "column": 21,
+        "isDefinition": false,
+        "line": 20,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:21:10",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
+      "props": {
+        "column": 10,
+        "isDefinition": false,
+        "line": 21,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:4:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod github.com/golang/go/src go1.21 fmt/",
+      "props": {
+        "column": 2,
+        "isDefinition": false,
+        "line": 4,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "REFERENCES",
+      "startLabels": [
+        "Reference"
+      ],
+      "startKey": "ref:tinygo:main.go:6:2",
+      "endLabels": [
+        "Symbol"
+      ],
+      "endKey": "scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/",
+      "props": {
+        "column": 2,
+        "isDefinition": false,
+        "line": 6,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    }
+  ]
+}
