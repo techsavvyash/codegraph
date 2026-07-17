@@ -441,6 +441,25 @@ services `itest-docs-*` cleaned via the existing harness lock/cleanup machinery.
 >   resume, idempotent re-runs, zero-LLM-call cache hits). A real-provider
 >   smoke run is deferred until a vendor is chosen (provider decision was
 >   explicitly "pluggable, decide at build time").
+> - **Layer S real-vendor smoke (2026-07-17, OpenAI):** gpt-5-nano
+>   (`reasoning_effort: minimal` via the extra-params passthrough — 0
+>   reasoning tokens, ~1.4s vs ~3.1s/call) + text-embedding-3-small @ 1536.
+>   codegraph corpus: 687 summaries, 1563 embeddings, 877 chunks matched,
+>   638 judge-confirmed semlink edges in ~2.5 min end-to-end at concurrency
+>   8 (sequential projection was >1 h; parallel summarize/judge landed as a
+>   follow-up perf commit). Re-runs are zero-LLM-call idempotent.
+> - **Threshold must be calibrated per embedding model.** 3-small's cosine
+>   distribution is compressed: top-1 candidate p50 ≈ 0.42, best real
+>   matches 0.60–0.78 — the 0.78 default passes *nothing*. 0.55 (~top
+>   decile of top-1) is the calibrated value, set via
+>   `semlink.similarity_threshold`. Chunk stamps now record
+>   `semlinkThreshold`, so changing the threshold re-opens matching
+>   automatically (found the hard way: model-only stamps required manual
+>   clears). A summary-budget-clipped run no longer stamps chunks at all —
+>   matching against an incomplete corpus must not look final.
+> - Found by the real-vendor run: `summaryModel` stamped `"completer"`
+>   (the completer lacked `Model()`); test doubles moved to the test-only
+>   `llmtest` package and the `"fake"` provider removed from `llm.New`.
 > - **Walkthrough:** committed as `docs/22-doc-code-linking-walkthrough.md`
 >   (find → MENTIONS → source, real transcript).
 > - Found and fixed during dogfood: missing `interface_name_idx` (codespan

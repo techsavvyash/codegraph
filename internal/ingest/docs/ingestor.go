@@ -278,7 +278,7 @@ func (ing *Ingestor) ingestDoc(ctx context.Context, src Source, ref DocRef, serv
 	if len(writtenIDs) > 0 {
 		if _, err := ing.client.ExecuteQuery(ctx, `
 			MATCH (c:DocumentChunk) WHERE elementId(c) IN $ids
-			REMOVE c.embedding, c.embeddingModel, c.semlinkAt, c.semlinkModel, c.minedAt
+			REMOVE c.embedding, c.embeddingModel, c.semlinkAt, c.semlinkModel, c.semlinkThreshold, c.minedAt
 			WITH c
 			OPTIONAL MATCH (c)-[m:MENTIONS]->()
 			DELETE m

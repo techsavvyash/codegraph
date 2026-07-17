@@ -175,6 +175,23 @@ func TestSemlinkEndToEnd(t *testing.T) {
 	require.Zero(t, report2.EdgesWritten)
 	require.Zero(t, report2.ChunksMatched, "semlinkModel marker must skip matched chunks")
 	require.Equal(t, callsBefore, completer.Calls(), "idempotent re-run must not call the LLM")
+
+	// --- Threshold change re-opens matching (real-vendor calibration found
+	// stamps keyed on model only, forcing manual clears). Same model, lower
+	// threshold: every chunk re-matches; the existing edge just re-merges.
+	runner3, err := semlink.NewRunner(client, semlinkService, models.DefaultScope(),
+		completer, embedder, "", semlink.Options{SimilarityThreshold: 0.40})
+	require.NoError(t, err)
+	report3, err := runner3.Run(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 3, report3.ChunksMatched, "threshold change must re-open all chunks")
+	recs, err = client.ExecuteQuery(ctx, `
+		MATCH (c:DocumentChunk {serviceName: $svc})-[m:MENTIONS]->(t {nodeKey: $target})
+		RETURN count(m) AS n
+	`, map[string]any{"svc": semlinkService, "target": alphaFn})
+	require.NoError(t, err)
+	n, _ := recs[0].AsMap()["n"].(int64)
+	require.EqualValues(t, 1, n, "re-match must MERGE, not duplicate, the alpha edge")
 }
 
 // TestSemlinkBudgetResumes verifies budget exhaustion stops cleanly and a
@@ -208,6 +225,10 @@ func TestSemlinkBudgetResumes(t *testing.T) {
 	require.NoError(t, err, "budget exhaustion must not be an error")
 	require.Equal(t, 1, report.SummariesWritten)
 	require.GreaterOrEqual(t, report.SkippedBudget, 1)
+	// With concurrency, either symbol may win the single budget slot; a
+	// summary-clipped run must therefore never stamp chunks as matched, or a
+	// chunk matched against the incomplete corpus would be skipped forever.
+	require.Zero(t, report.ChunksMatched, "summary-clipped run must not stamp chunks")
 
 	// Re-run with headroom: the paid summary is cached, the rest completes.
 	runner2, err := semlink.NewRunner(client, semlinkService, models.DefaultScope(),

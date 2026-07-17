@@ -145,7 +145,12 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		return nil, err
 	}
 
-	if err := r.matchChunks(ctx, chunkIDs, report); err != nil {
+	// A budget-clipped summary corpus means incomplete kNN candidates:
+	// matching still runs (edges found now are kept), but chunks must not be
+	// stamped as matched, or the missing summaries would be invisible to
+	// every future run.
+	stampAllowed := report.SkippedBudget == 0
+	if err := r.matchChunks(ctx, chunkIDs, stampAllowed, report); err != nil {
 		return nil, err
 	}
 

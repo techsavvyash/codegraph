@@ -88,14 +88,18 @@ func (r *Runner) embedChunks(ctx context.Context, report *Report) ([]string, err
 		return nil, err
 	}
 
-	// Match set: embedded-this-run ∪ never-matched-with-this-model.
+	// Match set: embedded-this-run ∪ not yet matched with this model at this
+	// threshold — a threshold change re-opens every chunk (MERGE keeps prior
+	// edges idempotent; already-linked targets skip the judge).
 	records, err = r.client.ExecuteQuery(ctx, `
 		MATCH (c:DocumentChunk {serviceName: $svc, scopeId: $scope})
 		WHERE c.embedding IS NOT NULL AND c.embeddingModel = $model
-		  AND coalesce(c.semlinkModel, '') <> $model
+		  AND (coalesce(c.semlinkModel, '') <> $model
+		       OR coalesce(c.semlinkThreshold, -1.0) <> $threshold)
 		RETURN elementId(c) AS id
 		ORDER BY c.nodeKey
-	`, map[string]any{"svc": r.serviceName, "scope": r.scope.ScopeID, "model": model})
+	`, map[string]any{"svc": r.serviceName, "scope": r.scope.ScopeID, "model": model,
+		"threshold": r.opts.SimilarityThreshold})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load match set: %w", err)
 	}

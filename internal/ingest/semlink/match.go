@@ -39,7 +39,9 @@ type matchCandidate struct {
 }
 
 // matchChunks runs kNN + judge for each chunk and writes semlink MENTIONS.
-func (r *Runner) matchChunks(ctx context.Context, chunkIDs []string, report *Report) error {
+// stampAllowed=false (budget-clipped summary corpus) suppresses the
+// semlink-done markers so every chunk re-matches once the corpus completes.
+func (r *Runner) matchChunks(ctx context.Context, chunkIDs []string, stampAllowed bool, report *Report) error {
 	if len(chunkIDs) == 0 {
 		return nil
 	}
@@ -55,7 +57,7 @@ func (r *Runner) matchChunks(ctx context.Context, chunkIDs []string, report *Rep
 	g.SetLimit(r.opts.Concurrency)
 	for _, chunkID := range chunkIDs {
 		g.Go(func() error {
-			return r.matchOneChunk(gctx, chunkID, model, strategy, createdAt, report)
+			return r.matchOneChunk(gctx, chunkID, model, strategy, createdAt, stampAllowed, report)
 		})
 	}
 	return g.Wait()
@@ -64,7 +66,7 @@ func (r *Runner) matchChunks(ctx context.Context, chunkIDs []string, report *Rep
 // matchOneChunk runs kNN + judge for a single chunk and writes its semlink
 // MENTIONS. Safe to run concurrently: chunks are independent, and budget /
 // report mutations go through the runner lock.
-func (r *Runner) matchOneChunk(ctx context.Context, chunkID, model, strategy, createdAt string, report *Report) error {
+func (r *Runner) matchOneChunk(ctx context.Context, chunkID, model, strategy, createdAt string, stampAllowed bool, report *Report) error {
 	chunk, err := r.loadChunkForMatch(ctx, chunkID)
 	if err != nil {
 		return err
@@ -139,13 +141,15 @@ func (r *Runner) matchOneChunk(ctx context.Context, chunkID, model, strategy, cr
 		r.tally(func() { report.EdgesWritten += len(edges) })
 	}
 
-	// Mark the chunk matched only when its full candidate set was
-	// processed — a budget-interrupted chunk re-matches next run.
-	if !budgetHit {
+	// Mark the chunk matched only when its full candidate set was processed
+	// against a complete summary corpus — a budget-interrupted chunk (or any
+	// chunk of a summary-clipped run) re-matches next run.
+	if !budgetHit && stampAllowed {
 		if _, err := r.client.ExecuteQuery(ctx, `
 			MATCH (c) WHERE elementId(c) = $id
-			SET c.semlinkModel = $model, c.semlinkAt = $now
-		`, map[string]any{"id": chunkID, "model": model, "now": createdAt}); err != nil {
+			SET c.semlinkModel = $model, c.semlinkAt = $now, c.semlinkThreshold = $threshold
+		`, map[string]any{"id": chunkID, "model": model, "now": createdAt,
+			"threshold": r.opts.SimilarityThreshold}); err != nil {
 			return err
 		}
 		r.tally(func() { report.ChunksMatched++ })
