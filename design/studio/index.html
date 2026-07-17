@@ -1,0 +1,51 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeGraph Studio &#183; design bundle</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'IBM Plex Sans',-apple-system,sans-serif; font-size:14px; line-height:1.5;
+  color:#16181D; background:#FCFCFD; padding:24px 16px 48px; max-width:1100px; margin:0 auto;
+  -webkit-font-smoothing:antialiased; }
+h1 { font-size:20px; font-weight:600; letter-spacing:-.01em; }
+.lede { color:#6E7686; font-size:13px; margin:4px 0 20px; }
+h2 { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em;
+  color:#6E7686; margin:24px 0 10px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px; }
+.card { display:block; background:#fff; border:1px solid #E3E6EA; border-radius:10px;
+  padding:12px 14px; text-decoration:none; color:inherit; box-shadow:0 1px 2px rgba(22,24,29,.05); }
+.card:active, .card:hover { background:#EDF2FF; border-color:#BAC8FF; }
+.nm { font-weight:600; font-size:14px; }
+.sub { color:#6E7686; font-size:12px; margin-top:2px; }
+.pth { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#9AA1AC; margin-top:6px; }
+</style>
+<h1>CodeGraph Studio</h1>
+<p class="lede">RFC-012 design bundle &#183; 19 cards &#183; foundations, components, and 1440px screen mockups (pinch-zoom on mobile)</p>
+<h2>Foundations</h2>
+<div class="grid">
+<a class="card" href="foundations/colors.html"><div class="nm">Color</div><div class="sub">Surfaces &#183; ink &#183; accent &#183; categorical node palette &#183; edge provenance</div><div class="pth">foundations/colors.html</div></a>
+<a class="card" href="foundations/spacing.html"><div class="nm">Spacing &amp; shape</div><div class="sub">4-base scale &#183; radii &#183; three shadows &#183; borders &#183; dev-tool density</div><div class="pth">foundations/spacing.html</div></a>
+<a class="card" href="foundations/type.html"><div class="nm">Typography</div><div class="sub">IBM Plex Sans + Mono &#183; 7-step scale &#183; sans/mono voice rules &#183; weights</div><div class="pth">foundations/type.html</div></a>
+</div>
+<h2>Components</h2>
+<div class="grid">
+<a class="card" href="components/chat.html"><div class="nm">Chat dock</div><div class="sub">Tool activity &#183; cited answers &#183; streaming state &#183; citation-to-canvas contract</div><div class="pth">components/chat.html</div></a>
+<a class="card" href="components/console.html"><div class="nm">Cypher console</div><div class="sub">Read-only editor &#183; EXPLAIN hints &#183; results table &#183; send to canvas</div><div class="pth">components/console.html</div></a>
+<a class="card" href="components/dashboard-cards.html"><div class="nm">Dashboard cards</div><div class="sub">Service card &#183; KPI numerals &#183; health flags</div><div class="pth">components/dashboard-cards.html</div></a>
+<a class="card" href="components/edge-badges.html"><div class="nm">Edges &amp; provenance</div><div class="sub">Canvas strokes &#183; rel-type reference &#183; inspector edge rows &#183; confidence bands</div><div class="pth">components/edge-badges.html</div></a>
+<a class="card" href="components/flow-spine.html"><div class="nm">Flows &amp; entry points</div><div class="sub">Entry-point tiers T1&#8211;T4 &#183; vertical flow spine with depth guides</div><div class="pth">components/flow-spine.html</div></a>
+<a class="card" href="components/inspector.html"><div class="nm">Inspector</div><div class="sub">336px right pane &#183; Function and DocumentChunk variants &#183; properties / source / relationships</div><div class="pth">components/inspector.html</div></a>
+<a class="card" href="components/navigator.html"><div class="nm">Navigator rail</div><div class="sub">Results &#183; entry points by tier &#183; docs tree &#8212; the 260px left rail in its three modes</div><div class="pth">components/navigator.html</div></a>
+<a class="card" href="components/node-chips.html"><div class="nm">Node chips</div><div class="sub">Label-colored references &#183; default / selected / pinned &#183; citation form</div><div class="pth">components/node-chips.html</div></a>
+<a class="card" href="components/omnibox.html"><div class="nm">Omnibox</div><div class="sub">Command palette (&#8984;K) &#183; lexical / structural / semantic modes &#183; grouped results</div><div class="pth">components/omnibox.html</div></a>
+<a class="card" href="components/states.html"><div class="nm">States &amp; feedback</div><div class="sub">Skeletons &#183; empty canvas &#183; truncation &#183; timeout &#183; row cap &#183; toast</div><div class="pth">components/states.html</div></a>
+<a class="card" href="components/topbar.html"><div class="nm">Topbar</div><div class="sub">Brand &#183; service switcher &#183; omnibox &#183; primary tabs &#183; switcher open &#183; scoped state</div><div class="pth">components/topbar.html</div></a>
+</div>
+<h2>Screens</h2>
+<div class="grid">
+<a class="card" href="screens/chat.html"><div class="nm">Chat driving the canvas</div><div class="sub">Open assistant drawer &#183; tool activity &#183; numbered citations focusing the working set</div><div class="pth">screens/chat.html</div></a>
+<a class="card" href="screens/dashboard.html"><div class="nm">Dashboard</div><div class="sub">Index overview &#183; KPI strip &#183; service cards &#183; health flags &#183; call hubs</div><div class="pth">screens/dashboard.html</div></a>
+<a class="card" href="screens/docs.html"><div class="nm">Docs explorer</div><div class="sub">Doc tree &#183; chunk reading pane &#183; mentions panel with provenance badges</div><div class="pth">screens/docs.html</div></a>
+<a class="card" href="screens/flows.html"><div class="nm">Flows</div><div class="sub">Tiered entry points &#183; stepped call spine with depth guides &#183; inspector</div><div class="pth">screens/flows.html</div></a>
+<a class="card" href="screens/graph.html"><div class="nm">Graph explorer</div><div class="sub">Topbar &#183; navigator &#183; canvas with provenance edges &#183; inspector &#183; chat drawer</div><div class="pth">screens/graph.html</div></a>
+</div>
