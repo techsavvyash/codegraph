@@ -2,7 +2,8 @@
 // linking): a Completer for summaries/judging and an Embedder for vectors.
 // The vendor is a configuration choice, not a design commitment — one
 // openai-compat HTTP adapter covers OpenAI, Ollama, vLLM, OpenRouter, and
-// Voyage-style embedding APIs; a deterministic fake ships for tests.
+// Voyage-style embedding APIs. Deterministic test doubles live in the
+// test-only llmtest subpackage; they are not a selectable provider.
 package llm
 
 import (
@@ -38,7 +39,7 @@ type EndpointConfig struct {
 
 // Config selects and configures the provider.
 type Config struct {
-	Provider   string // "openai-compat" | "fake" | "" (disabled)
+	Provider   string // "openai-compat" | "" (disabled)
 	Completion EndpointConfig
 	Embedding  EndpointConfig
 }
@@ -77,15 +78,8 @@ func New(cfg Config) (Completer, Embedder, error) {
 			return nil, nil, fmt.Errorf("openai-compat provider configured without completion or embedding endpoints")
 		}
 		return completer, embedder, nil
-	case "fake":
-		// Test/dev provider: deterministic, no network.
-		dim := cfg.Embedding.Dimensions
-		if dim <= 0 {
-			dim = 8
-		}
-		return &FakeCompleter{}, NewFakeEmbedder(dim), nil
 	default:
-		return nil, nil, fmt.Errorf("unknown LLM provider %q (supported: openai-compat, fake)", cfg.Provider)
+		return nil, nil, fmt.Errorf("unknown LLM provider %q (supported: openai-compat)", cfg.Provider)
 	}
 }
 

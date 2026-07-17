@@ -9,7 +9,7 @@ import (
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
-	"github.com/context-maximiser/code-graph/internal/llm"
+	"github.com/context-maximiser/code-graph/internal/llm/llmtest"
 	"github.com/context-maximiser/code-graph/internal/search"
 )
 
@@ -56,7 +56,7 @@ func TestSearchSemanticFusion(t *testing.T) {
 	`, map[string]any{"svc": semSearchService})
 	require.NoError(t, err)
 
-	embedder := llm.NewFakeEmbedder(8)
+	embedder := llmtest.NewEmbedder(8)
 	embedder.Fn = func(text string) []float32 {
 		if text == "how does batch processing work" {
 			return []float32{1, 0, 0, 0, 0, 0, 0, 0}

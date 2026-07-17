@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -177,47 +176,9 @@ func TestNewProviderSelection(t *testing.T) {
 	if emb.Dimensions() != 4 || emb.Model() != "e" {
 		t.Errorf("embedder metadata wrong: %d %q", emb.Dimensions(), emb.Model())
 	}
-
-	// Fake provider.
-	comp, emb, err = New(Config{Provider: "fake"})
-	if err != nil || comp == nil || emb == nil {
-		t.Fatalf("fake provider failed: %v", err)
-	}
-}
-
-func TestFakeEmbedderDeterminismAndNorm(t *testing.T) {
-	e := NewFakeEmbedder(16)
-	v1, err := e.Embed(context.Background(), []string{"hello", "world", "hello"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := range v1[0] {
-		if v1[0][i] != v1[2][i] {
-			t.Fatal("identical texts must embed identically")
-		}
-	}
-
-	same := true
-	for i := range v1[0] {
-		if v1[0][i] != v1[1][i] {
-			same = false
-			break
-		}
-	}
-	if same {
-		t.Error("different texts must embed differently")
-	}
-
-	var norm float64
-	for _, x := range v1[0] {
-		norm += float64(x) * float64(x)
-	}
-	if math.Abs(norm-1.0) > 1e-5 {
-		t.Errorf("vectors must be unit-norm, got %v", norm)
-	}
-
-	if e.Calls() != 3 {
-		t.Errorf("Calls() = %d, want 3", e.Calls())
+	// The completer must self-describe its model too — semlink stamps it into
+	// summaryModel provenance (regression: it once fell back to "completer").
+	if named, ok := comp.(interface{ Model() string }); !ok || named.Model() != "m" {
+		t.Errorf("completer must expose Model() = %q, got ok=%v", "m", ok)
 	}
 }

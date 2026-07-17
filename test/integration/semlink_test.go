@@ -15,7 +15,7 @@ import (
 	"github.com/context-maximiser/code-graph/internal/graph/schema"
 	"github.com/context-maximiser/code-graph/internal/ingest/docs"
 	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
-	"github.com/context-maximiser/code-graph/internal/llm"
+	"github.com/context-maximiser/code-graph/internal/llm/llmtest"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -38,8 +38,8 @@ func semlinkVectors(text string) []float32 {
 
 // semlinkCompleter fakes both prompt kinds: summaries carry the flavor word
 // of the symbol they describe; judge verdicts accept only same-flavor pairs.
-func semlinkCompleter() *llm.FakeCompleter {
-	return &llm.FakeCompleter{Fn: func(system, user string) (string, error) {
+func semlinkCompleter() *llmtest.Completer {
+	return &llmtest.Completer{Fn: func(system, user string) (string, error) {
 		if strings.Contains(system, "judge") {
 			sameFlavor := (strings.Contains(user, "alpha") && strings.Contains(user, "AlphaWorker77")) ||
 				(strings.Contains(user, "beta") && strings.Contains(user, "BetaWorker77"))
@@ -124,7 +124,7 @@ func TestSemlinkEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, len(ingReport.Changed), "title + two sections")
 
-	embedder := llm.NewFakeEmbedder(8)
+	embedder := llmtest.NewEmbedder(8)
 	embedder.Fn = semlinkVectors
 	completer := semlinkCompleter()
 
@@ -196,7 +196,7 @@ func TestSemlinkBudgetResumes(t *testing.T) {
 	_, err := ing.Run(ctx, &docs.RepoMarkdownSource{Root: root})
 	require.NoError(t, err)
 
-	embedder := llm.NewFakeEmbedder(8)
+	embedder := llmtest.NewEmbedder(8)
 	embedder.Fn = semlinkVectors
 	completer := semlinkCompleter()
 
