@@ -1,0 +1,162 @@
+<!-- @dsCard group="Components" name="Navigator rail" subtitle="Results &#183; entry points by tier &#183; docs tree &#8212; the 260px left rail in its three modes" -->
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+:root {
+  --bg-page:#FCFCFD; --bg-panel:#FFFFFF; --bg-subtle:#F6F7F9; --bg-hover:#EEF0F3; --bg-canvas:#FAFBFC;
+  --border:#E3E6EA; --border-strong:#CDD2D9;
+  --ink:#16181D; --ink-2:#444B57; --ink-3:#6E7686; --ink-disabled:#9AA1AC;
+  --accent:#3B5BDB; --accent-hover:#364FC7; --accent-subtle:#EDF2FF; --accent-border:#BAC8FF; --accent-ink:#2B44A1;
+  --ok:#087F5B; --ok-subtle:#E6FCF5; --warn:#E67700; --warn-subtle:#FFF9DB; --err:#C92A2A; --err-subtle:#FFF5F5;
+  --node-service:#7048E8; --node-service-bg:#F3F0FF; --node-file:#495057; --node-file-bg:#F1F3F5;
+  --node-function:#1C7ED6; --node-function-bg:#E7F5FF; --node-method:#0B7285; --node-method-bg:#E3FAFC;
+  --node-class:#E8590C; --node-class-bg:#FFF4E6; --node-interface:#9C36B5; --node-interface-bg:#F8F0FC;
+  --node-document:#C2255C; --node-document-bg:#FFF0F6; --node-chunk:#E64980; --node-chunk-bg:#FFF0F6;
+  --edge-structural:#ADB5BD; --edge-docmine:#E67700; --edge-docmine-bg:#FFF9DB; --edge-semlink:#6741D9; --edge-semlink-bg:#F3F0FF;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',sans-serif; --font-mono:'IBM Plex Mono','SF Mono','Cascadia Code',monospace;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-6:24px; --s-8:32px;
+  --r-sm:4px; --r-md:6px; --r-lg:10px; --r-full:9999px;
+  --shadow-1:0 1px 2px rgba(22,24,29,.05);
+  --shadow-2:0 1px 3px rgba(22,24,29,.07), 0 4px 12px rgba(22,24,29,.05);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:var(--font-sans); font-size:var(--text-base); line-height:1.5; color:var(--ink); background:var(--bg-page); -webkit-font-smoothing:antialiased; padding:var(--s-8); }
+.mono { font-family:var(--font-mono); }
+
+h1 { font-size:var(--text-lg); font-weight:600; letter-spacing:-.01em; }
+.lede { color:var(--ink-3); font-size:var(--text-sm); margin:var(--s-1) 0 var(--s-6); }
+h2 { font-size:var(--text-xs); font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-3); margin:var(--s-6) 0 var(--s-3); }
+
+.rails { display:flex; gap:var(--s-6); align-items:flex-start; flex-wrap:wrap; }
+.railwrap { width:260px; }
+.caption { font-size:var(--text-xs); color:var(--ink-3); margin-bottom:var(--s-2); }
+.rail { width:260px; background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-1); overflow:hidden; padding-bottom:var(--s-2); }
+
+/* mode tabs (as in the app shell) */
+.nav-head { display:flex; gap:2px; padding:var(--s-2); border-bottom:1px solid var(--border); }
+.nav-tab { flex:1; text-align:center; font-size:var(--text-xs); font-weight:500; color:var(--ink-3); padding:4px 0; border-radius:var(--r-sm); cursor:pointer; }
+.nav-tab.active { background:var(--bg-subtle); color:var(--ink); }
+.nav-sec { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-3); padding:var(--s-3) var(--s-3) var(--s-1); }
+
+/* result / list rows */
+.nitem { display:flex; align-items:center; gap:7px; padding:5px var(--s-3); font-size:var(--text-sm); cursor:pointer; }
+.nitem:hover { background:var(--bg-subtle); }
+.nitem.sel { background:var(--accent-subtle); }
+.nitem .dot { width:7px; height:7px; border-radius:var(--r-full); flex:none; }
+.nitem .nm { font-family:var(--font-mono); font-size:var(--text-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nitem .k { margin-left:auto; font-size:10px; color:var(--ink-disabled); flex:none; }
+
+/* entry-point tiers */
+.tier { display:flex; align-items:center; gap:7px; padding:var(--s-3) var(--s-3) var(--s-1); }
+.tier .badge { font-family:var(--font-mono); font-size:9.5px; font-weight:600; border-radius:var(--r-full); padding:0 7px; background:var(--bg-subtle); color:var(--ink-3); flex:none; }
+.tier .badge.t1 { background:var(--accent-subtle); color:var(--accent-ink); }
+.tier .lbl { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.eitem { display:flex; flex-direction:column; gap:1px; padding:4px var(--s-3) 4px 22px; cursor:pointer; }
+.eitem:hover { background:var(--bg-subtle); }
+.eitem .top { display:flex; align-items:center; gap:7px; }
+.eitem .dot { width:7px; height:7px; border-radius:var(--r-full); flex:none; }
+.eitem .nm { font-family:var(--font-mono); font-size:var(--text-sm); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.eitem .deg { font-family:var(--font-mono); font-size:10px; color:var(--ink-disabled); padding-left:14px; }
+
+/* docs tree */
+.trow { display:flex; align-items:center; gap:6px; padding:4px var(--s-3); font-size:var(--text-sm); cursor:pointer; white-space:nowrap; }
+.trow:hover { background:var(--bg-subtle); }
+.trow.sel { background:var(--accent-subtle); }
+.trow .car { color:var(--ink-3); font-size:9px; width:10px; flex:none; }
+.trow .dot { width:7px; height:7px; border-radius:var(--r-full); flex:none; }
+.trow .nm { font-family:var(--font-mono); font-size:var(--text-sm); overflow:hidden; text-overflow:ellipsis; }
+.trow .nm.folder { font-family:var(--font-sans); font-weight:500; color:var(--ink-2); }
+.trow .cnt { margin-left:auto; font-size:10px; color:var(--ink-disabled); background:var(--bg-subtle); border-radius:var(--r-full); padding:0 7px; flex:none; }
+.trow.d1 { padding-left:26px; }
+.trow.d2 { padding-left:44px; }
+</style>
+
+<h1>Navigator rail</h1>
+<p class="lede">The 260px left rail. Three modes share one frame: search results feed the canvas, entry points rank where to start reading a service, and the docs tree walks Document &#8594; Chunk structure.</p>
+
+<h2>Three modes</h2>
+<div class="rails">
+
+  <!-- Mode 1: Results -->
+  <div class="railwrap">
+    <div class="caption">1 &#183; Results &#8212; last omnibox query, kept as a working list</div>
+    <div class="rail">
+      <div class="nav-head">
+        <div class="nav-tab active">Results</div><div class="nav-tab">Entry points</div><div class="nav-tab">Docs</div>
+      </div>
+      <div class="nav-sec">find &#34;budget&#34; &#183; lexical &#183; 7</div>
+      <div class="nitem sel"><span class="dot" style="background:var(--node-function)"></span><span class="nm">spendBudget()</span><span class="k">Fn</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-function)"></span><span class="nm">matchChunks()</span><span class="k">Fn</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-function)"></span><span class="nm">matchOneChunk()</span><span class="k">Fn</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-method)"></span><span class="nm">Runner.Run()</span><span class="k">Md</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-file)"></span><span class="nm">semlink/match.go</span><span class="k">File</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Budget</span><span class="k">Chunk</span></div>
+      <div class="nitem"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Layer S</span><span class="k">Chunk</span></div>
+    </div>
+  </div>
+
+  <!-- Mode 2: Entry points -->
+  <div class="railwrap">
+    <div class="caption">2 &#183; Entry points &#8212; ranked starting nodes, by tier</div>
+    <div class="rail">
+      <div class="nav-head">
+        <div class="nav-tab">Results</div><div class="nav-tab active">Entry points</div><div class="nav-tab">Docs</div>
+      </div>
+      <div class="tier"><span class="badge t1">T1</span><span class="lbl">API-exposed</span></div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-function)"></span><span class="nm">handleFindToolV2()</span></div>
+        <div class="deg">in 0 &#183; out 14</div>
+      </div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-function)"></span><span class="nm">handleExpandTool()</span></div>
+        <div class="deg">in 0 &#183; out 9</div>
+      </div>
+      <div class="tier"><span class="badge">T2</span><span class="lbl">Iface impl, no callers</span></div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-method)"></span><span class="nm">OpenAICompat.Complete()</span></div>
+        <div class="deg">in 0 &#183; out 3 &#183; impl Completer</div>
+      </div>
+      <div class="tier"><span class="badge">T3</span><span class="lbl">Exported roots</span></div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-method)"></span><span class="nm">Runner.Run()</span></div>
+        <div class="deg">in 1 &#183; out 11</div>
+      </div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-method)"></span><span class="nm">Ingestor.Run()</span></div>
+        <div class="deg">in 2 &#183; out 18</div>
+      </div>
+      <div class="tier"><span class="badge">T4</span><span class="lbl">High centrality</span></div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-function)"></span><span class="nm">matchChunks()</span></div>
+        <div class="deg">in 1 &#183; out 4 &#183; pr 0.031</div>
+      </div>
+      <div class="eitem">
+        <div class="top"><span class="dot" style="background:var(--node-function)"></span><span class="nm">summarizeAll()</span></div>
+        <div class="deg">in 2 &#183; out 6 &#183; pr 0.024</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mode 3: Docs -->
+  <div class="railwrap">
+    <div class="caption">3 &#183; Docs &#8212; Document &#8594; Chunk tree for the scoped service</div>
+    <div class="rail">
+      <div class="nav-head">
+        <div class="nav-tab">Results</div><div class="nav-tab">Entry points</div><div class="nav-tab active">Docs</div>
+      </div>
+      <div class="nav-sec">codegraph &#183; 20 documents</div>
+      <div class="trow"><span class="car">&#9662;</span><span class="nm folder">rfc/</span><span class="cnt">12</span></div>
+      <div class="trow d1"><span class="car">&#9656;</span><span class="dot" style="background:var(--node-document)"></span><span class="nm">010-treesitter-structure&#8230;</span></div>
+      <div class="trow d1"><span class="car">&#9662;</span><span class="dot" style="background:var(--node-document)"></span><span class="nm">011-doc-code-linking.md</span></div>
+      <div class="trow d2"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Motivation</span></div>
+      <div class="trow d2"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Layer D</span></div>
+      <div class="trow d2 sel"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Layer S</span></div>
+      <div class="trow d2"><span class="dot" style="background:var(--node-chunk)"></span><span class="nm">RFC-011 &#8250; Budget</span></div>
+      <div class="trow"><span class="car">&#9662;</span><span class="nm folder">docs/</span><span class="cnt">8</span></div>
+      <div class="trow d1"><span class="car">&#9656;</span><span class="dot" style="background:var(--node-document)"></span><span class="nm">22-doc-code-linking-walk&#8230;</span></div>
+      <div class="trow d1"><span class="car">&#9656;</span><span class="dot" style="background:var(--node-document)"></span><span class="nm">architecture.md</span></div>
+    </div>
+  </div>
+
+</div>
