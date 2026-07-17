@@ -123,6 +123,10 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
+// Model identifies the completion model; semlink stamps it into summaryModel
+// node properties (falling back to "completer" for anonymous Completers).
+func (c *openAICompatCompleter) Model() string { return c.model }
+
 func (c *openAICompatCompleter) Complete(ctx context.Context, system, user string) (string, error) {
 	var messages []chatMessage
 	if system != "" {

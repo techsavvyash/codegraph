@@ -1,6 +1,7 @@
 package semlink
 
 import (
+	"context"
 	"math"
 	"testing"
 )
@@ -72,6 +73,28 @@ func TestOptionsDefaults(t *testing.T) {
 	}
 	if o.judgeEnabled() {
 		t.Error("explicit Judge=false must survive withDefaults")
+	}
+}
+
+// namedCompleter and anonCompleter pin summaryModelName's two paths.
+type namedCompleter struct{}
+
+func (namedCompleter) Complete(_ context.Context, _, _ string) (string, error) { return "", nil }
+func (namedCompleter) Model() string                                           { return "gpt-5-nano" }
+
+type anonCompleter struct{}
+
+func (anonCompleter) Complete(_ context.Context, _, _ string) (string, error) { return "", nil }
+
+// TestSummaryModelName guards the provenance stamp: a self-describing
+// completer's model name must reach summaryModel (regression: the real
+// openai-compat completer lacked Model() and every node got "completer").
+func TestSummaryModelName(t *testing.T) {
+	if got := (&Runner{completer: namedCompleter{}}).summaryModelName(); got != "gpt-5-nano" {
+		t.Errorf("named completer: summaryModelName() = %q, want gpt-5-nano", got)
+	}
+	if got := (&Runner{completer: anonCompleter{}}).summaryModelName(); got != "completer" {
+		t.Errorf("anonymous completer: summaryModelName() = %q, want completer fallback", got)
 	}
 }
 
