@@ -35,7 +35,11 @@ type SCIPCallGraphBuilder struct {
 	modulePath  string // Go module path from go.mod, used to filter external targets
 	serviceName string // Service node name used to restrict listGoFiles to this module only
 	scopeCtx    models.ScopeContext
-	moduleNodes map[string]string // service-wide funcName → elementId for cross-file callee resolution (bare-name fallback)
+œ	// moduleNodes is the service-wide bare-name → elementId map for cross-file callee
+	// resolution. Only free functions (no receiver) are keyed by bare name. Methods are
+	// keyed by "ReceiverType.Name" (e.g. "RedisCache.Get") to prevent cross-receiver
+	// collision under last-write-wins.
+	moduleNodes map[string]string
 
 	// Precise resolution data, derived from SCIP occurrences (see LoadSCIPResolution).
 	// These let processFile bind a call site to the EXACT callee SCIP resolved,
@@ -49,11 +53,55 @@ type SCIPCallGraphBuilder struct {
 	// impl, reachable via IMPLEMENTS. Keyed by interface-method symbolNodeKey →
 	// concrete impl elementId. Only unambiguous (single-impl) interfaces are kept.
 	ifaceToImpl map[string]string
+	// filteredSymbolKeys holds SCIP symbol keys whose definition lives in a generated
+	// or filtered file (e.g. *.pb.go, /gen/, /vendor/). resolvePreciseCallee returns
+	// the sentinel calleeFiltered for these so the call site skips CALLS-edge creation
+	// without falling through to bare-name fallback.
+	filteredSymbolKeys map[string]bool
+	// elementIDToReceiverType maps each Method node's element ID to its receiverType
+	// property (e.g. "*SubmitEntityFields"). Used by processFile to validate that a
+	// SCIP-precise resolution actually makes sense for the calling file: if the callee's
+	// receiver type doesn't appear anywhere in the source of the calling file, SCIP made
+	// a wrong cross-type resolution (e.g. resolving req.GetEmail() on a proto request to
+	// a same-named adapter method on an unrelated struct). Populated in loadModuleNodes.
+	elementIDToReceiverType map[string]string
 
 	// Resolution telemetry (logged at end of BuildCallGraph) so a single index run
 	// reveals whether precise resolution actually fired vs degraded to bare-name.
-	preciseHits  int
-	fallbackHits int
+	preciseHits    int
+	fallbackHits   int
+	filteredSkips  int
+	wrongTypeDrops int // SCIP precise hits dropped due to receiver-type mismatch
+}
+
+// calleeFiltered is a sentinel returned by resolvePreciseCallee when SCIP resolved
+// the call site to a symbol defined in a generated/filtered file (proto getter, etc.).
+// The call site loop must skip CALLS-edge creation without attempting bare-name fallback.
+const calleeFiltered = "__filtered__"
+
+// bareNameFallbackDenylist contains method/function names so common in Go that
+// bare-name fallback is almost certainly wrong for them. Any call whose SCIP
+// occurrence is missing AND whose name is in this set is silently dropped rather
+// than bound to an arbitrary same-named node in the service.
+var bareNameFallbackDenylist = map[string]bool{
+	// Standard interface methods that appear on every driver and framework type.
+	"Get":    true,
+	"Set":    true,
+	"Delete": true,
+	"Close":  true,
+	"Ping":   true,
+	"Do":     true,
+	"Exec":   true,
+	"Query":  true,
+	"Scan":   true,
+	"Next":   true,
+	"Err":    true,
+	"Error":  true,
+	"Read":   true,
+	"Write":  true,
+	"String": true,
+	"Reset":  true,
+	"Flush":  true,
 }
 
 // LoadSCIPResolution populates the precise call-resolution maps from the parsed
@@ -77,6 +125,7 @@ func (cg *SCIPCallGraphBuilder) LoadSCIPResolution(ctx context.Context, symbolDe
 		}
 	}
 
+	cg.filteredSymbolKeys = make(map[string]bool)
 	cg.occIndex = make(map[string]string)
 	for _, sd := range symbolDefs {
 		if sd == nil || sd.Info == nil || sd.Info.Symbol == nil {
@@ -92,6 +141,32 @@ func (cg *SCIPCallGraphBuilder) LoadSCIPResolution(ctx context.Context, symbolDe
 			continue
 		}
 		symKey := models.SymbolNodeKey(symStr)
+
+		// Mark symbols whose call sites must NOT fall through to bare-name matching.
+		// resolvePreciseCallee returns the calleeFiltered sentinel for these, so a
+		// call SCIP definitively resolved is skipped rather than mis-bound to an
+		// unrelated same-named node. Two distinct cases:
+		//
+		//  (1) Definition lives in a generated file we index (*.pb.go, /gen/). The
+		//      node exists but is noise — catch it via the definition file path.
+		//
+		//  (2) Definition lives OUTSIDE this module (proto getters from the shared
+		//      proto module, stdlib, third-party deps). SCIP still emits usage
+		//      occurrences at our call sites and resolves them to the external
+		//      symbol, but GetDefinitionReference() is nil because the definition is
+		//      not in our index — so case (1) never fires for them. These are the
+		//      req.GetEmail()/GetName()/GetType() proto getters: without this branch
+		//      resolvePreciseCallee returns "" (indistinguishable from "unresolved")
+		//      and bare-name fallback binds them to an arbitrary same-named
+		//      method/handler in this service (e.g. *SubmitEntityFields.GetEmail).
+		if defRef := sd.GetDefinitionReference(); defRef != nil {
+			if isGeneratedFilePath(defRef.FilePath) {
+				cg.filteredSymbolKeys[symKey] = true
+			}
+		} else if cg.isExternalSymbol(symStr) {
+			cg.filteredSymbolKeys[symKey] = true
+		}
+
 		// DisplayName carries the SCIP descriptor suffix (e.g. "UpdateStatusByID().");
 		// strip it so the key matches the bare identifier the AST yields at call sites
 		// (call.TargetName == "UpdateStatusByID"). Without this every lookup misses and
@@ -111,8 +186,8 @@ func (cg *SCIPCallGraphBuilder) LoadSCIPResolution(ctx context.Context, symbolDe
 
 	cg.loadInterfaceImpls(ctx)
 
-	fmt.Printf("  Loaded SCIP resolution: %d symbol→node entries, %d call-site occurrences, %d interface→impl bridges\n",
-		len(cg.symbolToNodeID), len(cg.occIndex), len(cg.ifaceToImpl))
+	fmt.Printf("  Loaded SCIP resolution: %d symbol→node entries, %d call-site occurrences, %d interface→impl bridges, %d filtered symbols\n",
+		len(cg.symbolToNodeID), len(cg.occIndex), len(cg.ifaceToImpl), len(cg.filteredSymbolKeys))
 }
 
 // loadInterfaceImpls builds the interface-method → concrete-impl bridge from the
@@ -153,6 +228,25 @@ func (cg *SCIPCallGraphBuilder) loadInterfaceImpls(ctx context.Context) {
 	}
 }
 
+// isExternalSymbol reports whether a SCIP symbol string names a definition that
+// lives outside this service's Go module (the shared proto module, stdlib, or any
+// third-party dependency). SCIP symbol strings embed the defining module, e.g.
+//
+//	scip-go gomod github.com/tazapay/proto v1.6.83 `.../account/grpc/v1`/ForgotPasswordRequest#GetEmail().
+//	scip-go gomod github.com/tazapay/account v1.0.0 `.../utils`/SubmitEntityFields#GetEmail().
+//
+// An in-module symbol always carries this service's module path; an external one
+// (proto getters, deps) does not. When modulePath is unknown (empty go.mod) we
+// cannot judge, so we conservatively report false and leave such symbols to the
+// normal resolution path. This is what lets proto getters be filtered even though
+// their definitions never appear in our index (GetDefinitionReference() == nil).
+func (cg *SCIPCallGraphBuilder) isExternalSymbol(symStr string) bool {
+	if cg.modulePath == "" {
+		return false
+	}
+	return !strings.Contains(symStr, cg.modulePath)
+}
+
 // occKey builds the composite key used by occIndex. NUL separators avoid any
 // collision between path/name segments.
 func occKey(filePath string, line int, name string) string {
@@ -160,12 +254,18 @@ func occKey(filePath string, line int, name string) string {
 }
 
 // resolvePreciseCallee returns the elementId of the exact callee SCIP resolved for
-// the call site at (filePath, line, name), or "" when no occurrence covers it. A
-// ±1 line tolerance absorbs any residual 0-/1-based drift between SCIP ranges and
+// the call site at (filePath, line, name), or "" when no occurrence covers it.
+// Returns (calleeFiltered, false) when SCIP resolved the call to a symbol defined in a
+// generated/filtered file (e.g. proto getters in *.pb.go) — callers must skip
+// CALLS-edge creation for that sentinel without falling back to bare-name matching.
+// The second return value (viaInterface) is true when the resolution used the
+// ifaceToImpl bridge rather than symbolToNodeID directly. Callers use this to decide
+// whether to apply the receiver-type plausibility check (only for direct resolutions).
+// A ±1 line tolerance absorbs any residual 0-/1-based drift between SCIP ranges and
 // AST token positions without sacrificing per-receiver precision.
-func (cg *SCIPCallGraphBuilder) resolvePreciseCallee(filePath string, line int, name string) string {
+func (cg *SCIPCallGraphBuilder) resolvePreciseCallee(filePath string, line int, name string) (string, bool) {
 	if len(cg.occIndex) == 0 {
-		return ""
+		return "", false
 	}
 	for _, l := range [3]int{line, line - 1, line + 1} {
 		symKey, ok := cg.occIndex[occKey(filePath, l, name)]
@@ -174,14 +274,20 @@ func (cg *SCIPCallGraphBuilder) resolvePreciseCallee(filePath string, line int, 
 		}
 		// Concrete function/method: bind directly.
 		if id, ok := cg.symbolToNodeID[symKey]; ok {
-			return id
+			return id, false
 		}
 		// Interface method (no concrete node): bridge to its sole implementation.
 		if id, ok := cg.ifaceToImpl[symKey]; ok {
-			return id
+			return id, true
+		}
+		// Symbol defined in a filtered/generated file (e.g. proto getter).
+		// Return the sentinel so the caller skips bare-name fallback — there is no
+		// point searching for a same-named node in the service for these.
+		if cg.filteredSymbolKeys[symKey] {
+			return calleeFiltered, false
 		}
 	}
-	return ""
+	return "", false
 }
 
 // NewSCIPCallGraphBuilder creates a new call graph builder.
@@ -255,7 +361,8 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	fmt.Printf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
-	fmt.Printf("  Callee resolution: %d precise (SCIP symbol), %d bare-name fallback\n", cg.preciseHits, cg.fallbackHits)
+	fmt.Printf("  Callee resolution: %d precise (SCIP symbol), %d bare-name fallback, %d filtered/skipped (proto/generated), %d dropped (wrong receiver type)\n",
+		cg.preciseHits, cg.fallbackHits, cg.filteredSkips, cg.wrongTypeDrops)
 
 	// Compute in/out degree properties on all Function/Method nodes in scope.
 	if err := cg.ComputeDegreeProperties(ctx); err != nil {
@@ -466,6 +573,10 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		astCalls = make(map[int][]astCallSite)
 	}
 
+	// Read file source for receiver-type plausibility checks below.
+	// OS page cache means this is effectively free after parseFuncRanges already read it.
+	fileSource, _ := os.ReadFile(fullPath)
+
 	created := 0
 	seen := map[string]bool{}
 
@@ -483,14 +594,42 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 			// Prefer PRECISE resolution: bind to the exact callee SCIP resolved for
 			// this call site, disambiguating receiver types that share a method name
 			// (e.g. the many distinct Get()/UpdateStatusByID() across repositories).
-			calleeID := cg.resolvePreciseCallee(filePath, call.Line, call.TargetName)
+			calleeID, viaInterface := cg.resolvePreciseCallee(filePath, call.Line, call.TargetName)
+			if calleeID == calleeFiltered {
+				// SCIP identified the callee as a generated/filtered symbol (proto getter
+				// etc.). Skip edge creation entirely — bare-name fallback would only
+				// misattribute this to a same-named service function.
+				cg.filteredSkips++
+				continue
+			}
+			// Receiver-type plausibility check: SCIP sometimes resolves a method call
+			// (e.g. req.GetEmail() on a proto request) to a completely unrelated method
+			// with the same name on a different receiver type (e.g. *SubmitEntityFields).
+			// When the resolved callee has a receiverType that doesn't appear anywhere in
+			// the calling file's source text, the resolution is clearly wrong. We apply
+			// this check only for direct resolutions (not interface bridges), because
+			// the concrete impl of an interface may legitimately be in a package the
+			// caller never imports directly.
+			if calleeID != "" && !viaInterface {
+				if rt := cg.elementIDToReceiverType[calleeID]; rt != "" {
+					typeName := strings.TrimPrefix(rt, "*")
+					if len(fileSource) > 0 && !strings.Contains(string(fileSource), typeName) {
+						cg.wrongTypeDrops++
+						calleeID = ""
+					}
+				}
+			}
 			if calleeID != "" {
 				cg.preciseHits++
 			}
 			// Fall back to bare-name matching only when no occurrence covers the site
 			// (preserves edges SCIP didn't resolve). Same-file first, then the
 			// service-wide map for cross-file calls.
-			if calleeID == "" {
+			//
+			// Guard: names in bareNameFallbackDenylist are too common across Go
+			// interfaces, drivers, and framework types to safely resolve by bare name.
+			// Dropping the edge is always better than creating a wrong one.
+			if calleeID == "" && !bareNameFallbackDenylist[call.TargetName] {
 				calleeID = graphNodes[call.TargetName]
 				if calleeID == "" {
 					calleeID = cg.moduleNodes[call.TargetName]
@@ -821,16 +960,22 @@ func isDBCallSite(targetName string, receiverChain []string) bool {
 }
 
 // loadModuleNodes pre-loads all Function/Method node IDs for the service into
-// moduleNodes, keyed by bare function name. Called once before the per-file loop
-// to enable cross-file callee resolution without Reference nodes.
-// When multiple functions share the same base name, last-write wins; same-file
-// graphNodes lookups in processFile take priority over this map.
+// moduleNodes. Called once before the per-file loop to enable cross-file callee
+// resolution without Reference nodes.
+//
+// Key scheme (prevents cross-receiver last-write-wins collision):
+//   - Free functions (no receiverType): keyed by bare name, e.g. "ParseToken".
+//   - Methods:  keyed by "ReceiverType.Name", e.g. "RedisCache.Get".
+//
+// Same-file graphNodes lookups in processFile take priority over this map.
+// The bare-name denylist in processFile prevents ambiguous names (Get, Set, etc.)
+// from being resolved even when an entry exists here.
 func (cg *SCIPCallGraphBuilder) loadModuleNodes(ctx context.Context) error {
 	query := `
 		MATCH (fn)
 		WHERE (fn:Function OR fn:Method)
 		  AND fn.scopeId = $scopeId
-		RETURN fn.name AS name, elementId(fn) AS id
+		RETURN fn.name AS name, coalesce(fn.receiverType, '') AS receiverType, elementId(fn) AS id
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
 		"scopeId": cg.scopeCtx.ScopeID,
@@ -839,17 +984,30 @@ func (cg *SCIPCallGraphBuilder) loadModuleNodes(ctx context.Context) error {
 		return err
 	}
 	cg.moduleNodes = make(map[string]string, len(results))
+	cg.elementIDToReceiverType = make(map[string]string, len(results))
 	for _, rec := range results {
 		rm := rec.AsMap()
 		name := getStringFromMap(rm, "name")
 		id := getStringFromMap(rm, "id")
+		receiverType := getStringFromMap(rm, "receiverType")
 		if name == "" || id == "" {
 			continue
 		}
 		// Strip SCIP descriptor suffixes (e.g. "GetByID().").
 		name = strings.TrimSuffix(name, "().")
 		name = strings.TrimSuffix(name, "()")
-		cg.moduleNodes[name] = id
+
+		if receiverType != "" {
+			// Method: key by "ReceiverType.Name" — strips pointer marker so both
+			// *RedisCache and RedisCache resolve to the same key "RedisCache.Get".
+			receiver := strings.TrimPrefix(receiverType, "*")
+			cg.moduleNodes[receiver+"."+name] = id
+			// Track receiver type for cross-type SCIP resolution validation.
+			cg.elementIDToReceiverType[id] = receiverType
+		} else {
+			// Free function: bare name is unambiguous within the service.
+			cg.moduleNodes[name] = id
+		}
 	}
 	return nil
 }

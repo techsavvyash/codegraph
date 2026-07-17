@@ -148,6 +148,56 @@ func TestReadModulePathMalformed(t *testing.T) {
 	}
 }
 
+func TestIsExternalSymbol(t *testing.T) {
+	cg := &SCIPCallGraphBuilder{modulePath: "github.com/tazapay/account"}
+
+	tests := []struct {
+		name   string
+		symbol string
+		want   bool
+	}{
+		{
+			name:   "proto getter from external proto module",
+			symbol: "scip-go gomod github.com/tazapay/proto v1.6.83 `github.com/tazapay/proto/gen/go/account/grpc/v1`/ForgotPasswordRequest#GetEmail().",
+			want:   true,
+		},
+		{
+			name:   "in-module method with same bare name",
+			symbol: "scip-go gomod github.com/tazapay/account v1.0.0 `github.com/tazapay/account/utils`/SubmitEntityFields#GetEmail().",
+			want:   false,
+		},
+		{
+			name:   "in-module free function",
+			symbol: "scip-go gomod github.com/tazapay/account v1.0.0 `github.com/tazapay/account/service/grpc/v1`/userErrorValidation().",
+			want:   false,
+		},
+		{
+			name:   "stdlib symbol",
+			symbol: "scip-go gomod std v1.24 `strings`/ToLower().",
+			want:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cg.isExternalSymbol(tc.symbol); got != tc.want {
+				t.Errorf("isExternalSymbol(%q) = %v, want %v", tc.symbol, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsExternalSymbolUnknownModule guards the empty-go.mod case: with no module
+// path we cannot judge, so nothing is classified external (falls back to normal
+// resolution rather than filtering everything).
+func TestIsExternalSymbolUnknownModule(t *testing.T) {
+	cg := &SCIPCallGraphBuilder{modulePath: ""}
+	sym := "scip-go gomod github.com/tazapay/proto v1.6.83 `x`/ForgotPasswordRequest#GetEmail()."
+	if cg.isExternalSymbol(sym) {
+		t.Error("with empty modulePath, isExternalSymbol should report false")
+	}
+}
+
 func TestParseFuncRangesInvalidFile(t *testing.T) {
 	_, err := parseFuncRanges("/nonexistent/path.go")
 	if err == nil {
