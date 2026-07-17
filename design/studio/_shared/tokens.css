@@ -1,0 +1,98 @@
+/* ═══════════════════════════════════════════════════════════════
+   CodeGraph Studio — Design Tokens (canonical)
+   Every preview card inlines this block verbatim inside <style>.
+   Light, professional developer-tool language. IBM Plex voice.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── Surfaces ─────────────────────────────── */
+  --bg-page:    #FCFCFD;   /* app background          */
+  --bg-panel:   #FFFFFF;   /* cards, panes, popovers  */
+  --bg-subtle:  #F6F7F9;   /* wells, code, rails      */
+  --bg-hover:   #EEF0F3;   /* hover fill              */
+  --bg-canvas:  #FAFBFC;   /* graph canvas stage      */
+
+  /* ── Borders ──────────────────────────────── */
+  --border:        #E3E6EA;
+  --border-strong: #CDD2D9;
+
+  /* ── Ink ──────────────────────────────────── */
+  --ink:          #16181D;
+  --ink-2:        #444B57;
+  --ink-3:        #6E7686;
+  --ink-disabled: #9AA1AC;
+
+  /* ── Accent (actions, selection, focus) ───── */
+  --accent:        #3B5BDB;
+  --accent-hover:  #364FC7;
+  --accent-subtle: #EDF2FF;
+  --accent-border: #BAC8FF;
+  --accent-ink:    #2B44A1;
+
+  /* ── Status ───────────────────────────────── */
+  --ok:          #087F5B;  --ok-subtle:   #E6FCF5;
+  --warn:        #E67700;  --warn-subtle: #FFF9DB;
+  --err:         #C92A2A;  --err-subtle:  #FFF5F5;
+
+  /* ── Categorical node palette (label → hue) ─
+     Identical everywhere a node appears: canvas
+     dot, chip, inspector header, chat citation.  */
+  --node-service:   #7048E8;  --node-service-bg:   #F3F0FF;
+  --node-file:      #495057;  --node-file-bg:      #F1F3F5;
+  --node-function:  #1C7ED6;  --node-function-bg:  #E7F5FF;
+  --node-method:    #0B7285;  --node-method-bg:    #E3FAFC;
+  --node-class:     #E8590C;  --node-class-bg:     #FFF4E6;
+  --node-interface: #9C36B5;  --node-interface-bg: #F8F0FC;
+  --node-variable:  #868E96;  --node-variable-bg:  #F8F9FA;
+  --node-symbol:    #087F5B;  --node-symbol-bg:    #E6FCF5;
+  --node-document:  #C2255C;  --node-document-bg:  #FFF0F6;
+  --node-chunk:     #E64980;  --node-chunk-bg:     #FFF0F6;
+
+  /* ── Edge provenance grammar ────────────────
+     structural  = solid, neutral, no badge
+     docmine     = solid amber badge  (conf 0.70–0.95)
+     semlink     = dashed violet badge (conf ≤ 0.60)   */
+  --edge-structural: #ADB5BD;
+  --edge-docmine:    #E67700;  --edge-docmine-bg: #FFF9DB;
+  --edge-semlink:    #6741D9;  --edge-semlink-bg: #F3F0FF;
+
+  /* ── Typography ─────────────────────────────
+     Sans 13px base (dev-tool density).
+     scale: 11 / 12 / 13 / 14 / 16 / 20 / 28     */
+  --font-sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', 'Cascadia Code', monospace;
+  --text-xs:   11px;   /* badges, meta          */
+  --text-sm:   12px;   /* secondary, table      */
+  --text-base: 13px;   /* body                  */
+  --text-md:   14px;   /* emphasized body       */
+  --text-lg:   16px;   /* pane titles           */
+  --text-xl:   20px;   /* page titles           */
+  --text-2xl:  28px;   /* dashboard numerals    */
+  --mono-size: 12.5px;
+
+  /* ── Spacing (4-base) ───────────────────────  */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px;  --s-4: 16px;
+  --s-5: 20px; --s-6: 24px; --s-8: 32px;  --s-10: 40px;
+
+  /* ── Radii ──────────────────────────────────  */
+  --r-sm: 4px;  --r-md: 6px;  --r-lg: 10px;  --r-full: 9999px;
+
+  /* ── Shadows (barely-there) ─────────────────  */
+  --shadow-1: 0 1px 2px rgba(22,24,29,.05);
+  --shadow-2: 0 1px 3px rgba(22,24,29,.07), 0 4px 12px rgba(22,24,29,.05);
+  --shadow-3: 0 4px 10px rgba(22,24,29,.08), 0 12px 32px rgba(22,24,29,.10);
+}
+
+/* ── Base ── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+code, pre, .mono { font-family: var(--font-mono); font-size: var(--mono-size); }

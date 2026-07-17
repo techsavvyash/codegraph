@@ -1,0 +1,100 @@
+<!-- @dsCard group="Components" name="Node chips" subtitle="Label-colored references &#183; default / selected / pinned &#183; citation form" -->
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+:root {
+  --bg-page:#FCFCFD; --bg-panel:#FFFFFF; --bg-subtle:#F6F7F9; --bg-hover:#EEF0F3;
+  --border:#E3E6EA; --border-strong:#CDD2D9;
+  --ink:#16181D; --ink-2:#444B57; --ink-3:#6E7686;
+  --accent:#3B5BDB; --accent-subtle:#EDF2FF; --accent-border:#BAC8FF; --accent-ink:#2B44A1;
+  --node-service:#7048E8; --node-service-bg:#F3F0FF; --node-file:#495057; --node-file-bg:#F1F3F5;
+  --node-function:#1C7ED6; --node-function-bg:#E7F5FF; --node-method:#0B7285; --node-method-bg:#E3FAFC;
+  --node-class:#E8590C; --node-class-bg:#FFF4E6; --node-interface:#9C36B5; --node-interface-bg:#F8F0FC;
+  --node-document:#C2255C; --node-document-bg:#FFF0F6; --node-chunk:#E64980; --node-chunk-bg:#FFF0F6;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',sans-serif; --font-mono:'IBM Plex Mono','SF Mono',monospace;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-lg:16px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-6:24px; --s-8:32px;
+  --r-sm:4px; --r-md:6px; --r-full:9999px;
+  --shadow-1:0 1px 2px rgba(22,24,29,.05);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:var(--font-sans); font-size:var(--text-base); line-height:1.55; color:var(--ink); background:var(--bg-page); -webkit-font-smoothing:antialiased; padding:var(--s-8); }
+
+h1 { font-size:var(--text-lg); font-weight:600; letter-spacing:-.01em; }
+.lede { color:var(--ink-3); font-size:var(--text-sm); margin:var(--s-1) 0 var(--s-6); }
+h2 { font-size:var(--text-xs); font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-3); margin:var(--s-6) 0 var(--s-3); }
+.row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-2); }
+
+/* &#9472;&#9472; The chip &#9472;&#9472;
+   A node reference anywhere outside the canvas: search results,
+   inspector edge lists, chat citations. dot = label hue; name in
+   mono when it is an identifier. */
+.chip {
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--bg-panel); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:3px 10px 3px 8px;
+  font-size:var(--text-sm); font-weight:500; color:var(--ink-2);
+  box-shadow:var(--shadow-1); cursor:pointer; line-height:1.4;
+}
+.chip:hover { background:var(--bg-hover); }
+.chip .dot { width:8px; height:8px; border-radius:var(--r-full); flex:none; }
+.chip .id { font-family:var(--font-mono); font-size:var(--text-sm); color:var(--ink); }
+.chip .kind { font-size:var(--text-xs); color:var(--ink-3); }
+.chip .meta { font-size:var(--text-xs); color:var(--ink-3); border-left:1px solid var(--border); padding-left:6px; margin-left:2px; }
+
+/* selected: accent ring; pinned: filled accent corner-tag */
+.chip.selected { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
+.chip.pinned { background:var(--accent-subtle); border-color:var(--accent-border); color:var(--accent-ink); }
+.chip.pinned .pin { font-size:10px; color:var(--accent); }
+
+/* citation form: numbered superscript chip used inline in chat prose */
+.cite {
+  display:inline-flex; align-items:center; gap:5px; vertical-align:baseline;
+  background:var(--bg-subtle); border:1px solid var(--border);
+  border-radius:var(--r-full); padding:1px 8px 1px 6px;
+  font-size:var(--text-xs); font-weight:500; cursor:pointer;
+}
+.cite:hover { background:var(--accent-subtle); border-color:var(--accent-border); }
+.cite .n { font-family:var(--font-mono); color:var(--accent); font-size:10px; }
+.cite .dot { width:7px; height:7px; border-radius:var(--r-full); }
+.cite .id { font-family:var(--font-mono); color:var(--ink-2); }
+.prose { max-width:520px; background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-md); padding:14px 16px; box-shadow:var(--shadow-1); color:var(--ink-2); }
+</style>
+
+<h1>Node chips</h1>
+<p class="lede">A node reference anywhere outside the canvas. The dot always carries the label hue; identifiers are set in mono. Clicking a chip focuses the node on the canvas and opens the inspector.</p>
+
+<h2>By label</h2>
+<div class="row">
+  <span class="chip"><span class="dot" style="background:var(--node-service)"></span><span class="id">codegraph</span><span class="kind">Service</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-file)"></span><span class="id">internal/ingest/semlink/match.go</span><span class="kind">File</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-function)"></span><span class="id">matchChunks()</span><span class="kind">Function</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-method)"></span><span class="id">Runner.Run()</span><span class="kind">Method</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-class)"></span><span class="id">SchemaManager</span><span class="kind">Class</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-interface)"></span><span class="id">Completer</span><span class="kind">Interface</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-document)"></span><span class="id">rfc/011-doc-code-linking.md</span><span class="kind">Document</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-chunk)"></span><span class="id">RFC-011 &#8250; Layer S</span><span class="kind">Chunk</span></span>
+</div>
+
+<h2>With context meta</h2>
+<div class="row">
+  <span class="chip"><span class="dot" style="background:var(--node-function)"></span><span class="id">spendBudget()</span><span class="kind">Function</span><span class="meta">semlink.go:141 &#183; codegraph</span></span>
+  <span class="chip"><span class="dot" style="background:var(--node-method)"></span><span class="id">Ingestor.Run()</span><span class="kind">Method</span><span class="meta">12 callers</span></span>
+</div>
+
+<h2>States</h2>
+<div class="row">
+  <span class="chip"><span class="dot" style="background:var(--node-function)"></span><span class="id">matchOneChunk()</span><span class="kind">default</span></span>
+  <span class="chip selected"><span class="dot" style="background:var(--node-function)"></span><span class="id">matchOneChunk()</span><span class="kind">selected</span></span>
+  <span class="chip pinned"><span class="pin">&#8982;</span><span class="dot" style="background:var(--node-function)"></span><span class="id">matchOneChunk()</span><span class="kind">pinned for path</span></span>
+</div>
+
+<h2>Citation form (inline in chat prose)</h2>
+<div class="prose">
+  Chunk matching fans out through
+  <span class="cite"><span class="n">1</span><span class="dot" style="background:var(--node-function)"></span><span class="id">matchChunks()</span></span>
+  which reserves budget via
+  <span class="cite"><span class="n">2</span><span class="dot" style="background:var(--node-function)"></span><span class="id">spendBudget()</span></span>
+  before each judge call, and the behavior is specified in
+  <span class="cite"><span class="n">3</span><span class="dot" style="background:var(--node-chunk)"></span><span class="id">RFC-011 &#8250; Budget</span></span>.
+</div>
