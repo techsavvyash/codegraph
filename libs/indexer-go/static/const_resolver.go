@@ -1,6 +1,7 @@
 package static
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -21,13 +22,32 @@ import (
 type constResolver struct {
 	// values maps a bare const name to its raw declaration expression, resolved lazily.
 	values map[string]ast.Expr
+
+	// P3-2 collision guard. Bare-name, first-wins resolution across a whole repo is a
+	// latent correctness risk for generic const names (`Failed`, `Created`): if two
+	// packages declare the same name with DIFFERENT string values, silently picking one
+	// can attribute the wrong event/queue. These maps let us detect that and degrade the
+	// name to "not static" (like a runtime var) instead of guessing.
+	//   valueFile — bare name → file path of the first declaration (for WARN reporting)
+	//   litValue  — bare name → the first declaration's string-literal value, when it was one
+	//   ambiguous — bare name → true once a divergent string-literal value is seen
+	// These are only READ in the resolve path, so a hand-built resolver with nil maps
+	// (as in tests) is safe — nil-map reads return the zero value.
+	valueFile map[string]string
+	litValue  map[string]string
+	ambiguous map[string]bool
 }
 
 // newConstResolver walks every non-test .go file under projectPath and collects string
 // const declarations. Parse failures and noisy paths are skipped silently — a partially
 // populated resolver still resolves everything it did see.
 func newConstResolver(projectPath string) *constResolver {
-	r := &constResolver{values: make(map[string]ast.Expr)}
+	r := &constResolver{
+		values:    make(map[string]ast.Expr),
+		valueFile: make(map[string]string),
+		litValue:  make(map[string]string),
+		ambiguous: make(map[string]bool),
+	}
 
 	_ = filepath.Walk(projectPath, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil || info.IsDir() {
@@ -55,9 +75,27 @@ func newConstResolver(projectPath string) *constResolver {
 					if i >= len(valueSpec.Values) || name.Name == "_" {
 						continue
 					}
-					// First declaration wins (idempotent across duplicate bare names).
+					expr := valueSpec.Values[i]
 					if _, seen := r.values[name.Name]; !seen {
-						r.values[name.Name] = valueSpec.Values[i]
+						// First declaration wins (idempotent across duplicate bare names).
+						r.values[name.Name] = expr
+						r.valueFile[name.Name] = path
+						if lit, ok := stringLitValue(expr); ok {
+							r.litValue[name.Name] = lit
+						}
+						continue
+					}
+					// P3-2: duplicate bare name. Flag only string-literal-vs-string-literal
+					// divergence — the concrete correctness risk (`Failed`/`Created` with
+					// different values in different packages). Non-literal duplicates keep
+					// first-wins to avoid false ambiguity on composed/aliased consts.
+					newLit, newOK := stringLitValue(expr)
+					oldLit, oldOK := r.litValue[name.Name]
+					if newOK && oldOK && newLit != oldLit && !r.ambiguous[name.Name] {
+						r.ambiguous[name.Name] = true
+						fmt.Printf("Warning: const %q resolves to divergent values across the repo "+
+							"(%q in %s vs %q in %s) — marking ambiguous (resolve → not static)\n",
+							name.Name, oldLit, r.valueFile[name.Name], newLit, path)
 					}
 				}
 			}
@@ -138,6 +176,12 @@ func (r *constResolver) resolveName(name string, visited map[string]bool, bindin
 	if v, ok := bindings[name]; ok {
 		return v, true // caller-supplied binding (e.g. switch tag → case-label value)
 	}
+	if r.ambiguous[name] {
+		// P3-2: same bare name declared with divergent string values across the repo.
+		// Treat as a runtime variable rather than silently picking one — downstream this
+		// degrades to a group.* fallback hub instead of a wrong concrete event/queue.
+		return "", false
+	}
 	if visited[name] {
 		return "", false // cycle guard
 	}
@@ -148,6 +192,23 @@ func (r *constResolver) resolveName(name string, visited map[string]bool, bindin
 	visited[name] = true
 	defer delete(visited, name)
 	return r.resolve(expr, visited, bindings)
+}
+
+// AmbiguousCount returns how many bare const names were flagged as ambiguous by the
+// P3-2 collision guard (divergent string-literal values across the repo). Used for
+// the per-run coverage telemetry (P3-1).
+func (r *constResolver) AmbiguousCount() int {
+	return len(r.ambiguous)
+}
+
+// stringLitValue returns the unquoted value of expr when it is a string literal.
+func stringLitValue(expr ast.Expr) (string, bool) {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	v, _ := unquoteGo(lit.Value)
+	return v, true
 }
 
 // unquoteGo strips the surrounding quotes from a Go string literal token. Handles the common
@@ -166,12 +227,37 @@ func unquoteGo(lit string) (string, error) {
 // QueueToService returns the owning service of a Tazapay queue URL. Queue names follow the
 // convention `queue.<service>.<name>` (or `dlq.<service>.<name>`), so the 2nd dot-segment is
 // the owning/listening service. Returns "" when the string does not match the convention.
+//
+// P3-3: the input is validated against `^(queue|dlq)\.[a-z0-9-]+\.` so that garbage values —
+// hard-coded `https://sqs...amazonaws.com/...` URLs or env-key strings like `queue.event_url`
+// (only two segments) — yield "" rather than a nonsense service segment leaking into the graph.
 func QueueToService(queueURL string) string {
 	parts := strings.Split(queueURL, ".")
-	if len(parts) < 2 {
+	// Need at least three segments: <prefix>.<service>.<name>.
+	if len(parts) < 3 {
+		return ""
+	}
+	if parts[0] != "queue" && parts[0] != "dlq" {
+		return ""
+	}
+	if !isQueueServiceSegment(parts[1]) {
 		return ""
 	}
 	return parts[1]
+}
+
+// isQueueServiceSegment reports whether s is a valid queue service segment: non-empty and
+// composed only of lowercase letters, digits, or hyphens (the `[a-z0-9-]+` of the convention).
+func isQueueServiceSegment(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // splitEvent decomposes a resolved event string into its group/action parts.

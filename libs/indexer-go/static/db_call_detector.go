@@ -236,6 +236,31 @@ type DBCallDetector struct {
 	// File-scoped (NOT reset per function) because ops-dashboard keeps one collection
 	// per file: the struct + constructor + methods all live together. (P2-6)
 	mongoFileCollection string
+
+	// P3-1 coverage telemetry. Accumulated across the whole run (NOT reset per function)
+	// so the end-of-run report can show how many recognised DB query-method call sites
+	// were dropped, and why — the P0-2/P0-3 silent-drop class made visible.
+	// These counters cover ONLY the generic driver path (pgx/pgxpool/sqlx/gorm/mongo via a
+	// tracked var or struct-field receiver). They deliberately do NOT count the Tazapay-repo
+	// pattern (repo.<Repo>.<Method>) or pgxscan.Get/Select, which write DBCalls via separate
+	// functions — so genericWritten reconciles as seen-untracked-unresolvedSQL, and the run's
+	// TOTAL DBCall count (from the buffer) is generic + repo-pattern + pgxscan.
+	//   statCandidatesSeen        — generic DB query methods invoked (Query/Exec/QueryRow/...)
+	//   statGenericWritten        — generic candidates that produced a DBCall node
+	//   statRejectedUntrackedRecv — dropped: receiver not bound to a DB client/repo (also
+	//                               absorbs non-DB calls that merely share a method name like
+	//                               Get/Select/Find/Save — expected, not a real miss)
+	//   statRejectedUnresolvedSQL — dropped: SQL could not be parsed into an operation
+	statCandidatesSeen        int
+	statGenericWritten        int
+	statRejectedUntrackedRecv int
+	statRejectedUnresolvedSQL int
+}
+
+// Stats returns the P3-1 generic-driver-path DB coverage counters accumulated over the run:
+// candidates seen, written, rejected-for-untracked-receiver, rejected-for-unresolvable-SQL.
+func (d *DBCallDetector) Stats() (candidatesSeen, genericWritten, rejectedUntrackedReceiver, rejectedUnresolvedSQL int) {
+	return d.statCandidatesSeen, d.statGenericWritten, d.statRejectedUntrackedRecv, d.statRejectedUnresolvedSQL
 }
 
 // NewDBCallDetector creates a detector scoped to a single service indexing run.
@@ -618,6 +643,7 @@ func (d *DBCallDetector) processCallExpr(
 	if !isQueryMethod {
 		return nil
 	}
+	d.statCandidatesSeen++ // P3-1: a recognised DB query method invocation.
 
 	var dbKind string
 	detected := false
@@ -652,6 +678,7 @@ func (d *DBCallDetector) processCallExpr(
 	}
 
 	if !detected {
+		d.statRejectedUntrackedRecv++ // P3-1: DB method on an unbound receiver — dropped.
 		return nil
 	}
 
@@ -662,7 +689,8 @@ func (d *DBCallDetector) processCallExpr(
 
 	operation, table := parseSQL(sqlStr, methodName, callExpr, dbKind)
 	if operation == "" {
-		return nil // not a recognisable DB call
+		d.statRejectedUnresolvedSQL++ // P3-1: SQL not parseable into an operation — dropped.
+		return nil                    // not a recognisable DB call
 	}
 
 	// P2-6: a mongo-specific method on a struct-field receiver is a MongoDB call.
@@ -697,6 +725,8 @@ func (d *DBCallDetector) processCallExpr(
 		setProps["dbKind"] = "mongo"
 	}
 	maps.Copy(setProps, d.scopeCtx.Props())
+
+	d.statGenericWritten++ // P3-1: generic-path candidate resolved to a DBCall node.
 
 	if d.callBuffer != nil {
 		d.callBuffer.addDBCall(nodeKey, setProps)

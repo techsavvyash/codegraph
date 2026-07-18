@@ -1469,6 +1469,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	dbDet := NewDBCallDetector(si.client, si.serviceName, si.scopeCtx, repoSQLMap)
 	dbDet.SetCallNodeBuffer(callBuffer)
 
+	stats := newIndexStats(si.serviceName) // P3-1 coverage telemetry.
 	detected, skipped := 0, 0
 	err = filepath.Walk(projectPath, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil || info.IsDir() {
@@ -1492,6 +1493,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 		}
 
 		importMap := buildImportMap(astFile)
+		stats.recordFileImports(importMap) // P3-1: tally wrapper imports per file.
 		apiDet.BeginFile(astFile, importMap)
 		dbDet.BeginFile(astFile) // P2-6: resolve the file's mongo collection once.
 
@@ -1523,6 +1525,15 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	if err != nil {
 		return err
 	}
+
+	// P3-1: snapshot coverage counters BEFORE flush (flush resets the buffer), then report.
+	stats.functionsScanned = detected
+	stats.functionsSkipped = skipped
+	stats.captureWritten(callBuffer)
+	stats.dbCandidatesSeen, stats.dbGenericWritten, stats.dbRejectedUntrackedRecv, stats.dbRejectedUnresolvedSQL = dbDet.Stats()
+	stats.constAmbiguous = constRes.AmbiguousCount()
+	stats.Report()
+
 	if flushErr := callBuffer.flush(ctx, si.client); flushErr != nil {
 		return fmt.Errorf("failed to flush call-node buffer: %w", flushErr)
 	}
