@@ -82,7 +82,71 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 		log.Printf("[CrossServiceResolver] external dependency rollup error: %v", err)
 	}
 
+	// DB pass: link DBCall nodes to the concrete repository-method implementation
+	// (pgx/ or postgres/) they call, via RESOLVES_TO. Same-service resolution — the
+	// DBCall already carries repositoryFilePath + repositoryMethod from the SQL scan.
+	dbCount, err := r.resolveDBCallsToRepoMethods(ctx)
+	if err != nil {
+		log.Printf("[CrossServiceResolver] DBCall→repo-method resolution error: %v", err)
+	}
+	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (DBCall→repo method impl)", dbCount)
+
 	return total, nil
+}
+
+// resolveDBCallsToRepoMethods writes a RESOLVES_TO edge from each DBCall to the
+// concrete repository-method implementation it invokes. The DBCall already stores
+// the target as string properties (repositoryFilePath + repositoryMethod) resolved
+// by ScanRepositorySQL; this pass turns that into a traversable graph edge so a
+// DBCall "opens" into its pgx/postgres method (and the call graph can descend
+// through the DB layer: caller → DBCall → repo method → its own callees).
+//
+// Matching is deliberately NOT gated on a :Function/:Method label — SCIP-created
+// impl-method nodes have been observed with empty labels — but on (service, exact
+// impl file, method-name prefix). The impl node is narrowed by its own filePath
+// property (equality — the method's SCIP-relative filePath equals the DBCall's
+// repositoryFilePath, both service-root-relative), NOT by File.path ENDS WITH:
+// Neo4j rejects a STRING_SUFFIX predicate with a runtime value against the RANGE
+// index on File.path. Equality and STARTS WITH (name) are both index-safe; only
+// ENDS WITH/CONTAINS are not. SCIP suffixes display names with a descriptor
+// ("GetRule()."), so name matching uses STARTS WITH (method + '('), which also
+// anchors on '(' to avoid prefix bleed (GetRule vs GetRuleByID). Labeled nodes are
+// ranked ahead of unlabeled ones when both match. Silent-drop rule: if no impl
+// node matches, the string props are left as-is (status quo) — no edge is forced.
+func (r *CrossServiceHandlerResolver) resolveDBCallsToRepoMethods(ctx context.Context) (int, error) {
+	linkQuery := `
+		MATCH (d:DBCall)
+		WHERE d.repositoryFilePath IS NOT NULL AND d.repositoryFilePath <> ''
+		  AND d.repositoryMethod   IS NOT NULL AND d.repositoryMethod   <> ''
+		  AND d.serviceName        IS NOT NULL AND d.serviceName        <> ''
+		  AND NOT (d)-[:RESOLVES_TO]->()
+		MATCH (svc:Service {name: d.serviceName})-[:CONTAINS]->(:File)-[:CONTAINS]->(m)
+		WHERE m.filePath = d.repositoryFilePath
+		  AND (m.name = d.repositoryMethod OR m.name STARTS WITH (d.repositoryMethod + '('))
+		WITH d, m,
+		     (CASE WHEN m:Function OR m:Method THEN 0 ELSE 1 END) AS labelRank
+		ORDER BY labelRank ASC, m.nodeKey ASC
+		WITH d, collect(m) AS impls
+		WITH d, impls[0] AS best, size(impls) AS n
+		WHERE best IS NOT NULL
+		MERGE (d)-[rel:RESOLVES_TO]->(best)
+		ON CREATE SET rel.confidence = CASE WHEN n = 1 THEN 0.95 ELSE 0.7 END,
+		              rel.resolutionMethod = 'repo_impl', rel.resolvedAt = $now
+		ON MATCH  SET rel.confidence = CASE WHEN n = 1 THEN 0.95 ELSE 0.7 END,
+		              rel.resolutionMethod = 'repo_impl', rel.resolvedAt = $now
+		RETURN count(rel) AS written
+	`
+	rows, err := r.client.ExecuteQuery(ctx, linkQuery, map[string]any{"now": time.Now().UTC().Unix()})
+	if err != nil {
+		return 0, fmt.Errorf("resolveDBCallsToRepoMethods: %w", err)
+	}
+	written := 0
+	if len(rows) > 0 {
+		if v, ok := rows[0].AsMap()["written"].(int64); ok {
+			written = int(v)
+		}
+	}
+	return written, nil
 }
 
 // resolveExternalDependencies creates Service → DEPENDS_ON_EXTERNAL → ExternalService rollup

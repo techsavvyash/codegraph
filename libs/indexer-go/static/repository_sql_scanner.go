@@ -20,39 +20,50 @@ type RepoMethodInfo struct {
 // Key uses the PascalCase interface name, e.g. "Account.GetByID".
 type RepoSQLMap map[string]RepoMethodInfo
 
-// ScanRepositorySQL pre-scans the service's pgx/ directory to build a lookup
-// map of repository interface method → table + operation.
+// repositoryImplDirs are the directory names where Tazapay services keep their
+// repository implementation structs. Most services use pgx/, but seven keep them
+// in postgres/ instead (ruleengine, refund, metadata, payment-orchestration,
+// onboarding, settlement-orchestration, grpc-micro) — same file format, same
+// pointer-receiver convention. Both are scanned; a service may have either or both.
+var repositoryImplDirs = []string{"pgx", "postgres"}
+
+// ScanRepositorySQL pre-scans the service's repository implementation directories
+// (pgx/ and postgres/) to build a lookup map of repository interface method →
+// table + operation.
 //
 // It works for any Tazapay service that follows the standard layout:
 //
-//	<projectPath>/pgx/*.go  — implementation structs with pointer receivers
+//	<projectPath>/pgx/*.go       — implementation structs with pointer receivers
+//	<projectPath>/postgres/*.go  — same, for services that use postgres/ instead
 //
-// If the pgx/ directory doesn't exist, an empty map is returned (non-fatal).
+// If neither directory exists, an empty map is returned (non-fatal).
 func ScanRepositorySQL(projectPath string) (RepoSQLMap, error) {
-	pgxDir := filepath.Join(projectPath, "pgx")
-	if _, err := os.Stat(pgxDir); os.IsNotExist(err) {
-		return RepoSQLMap{}, nil
-	}
-
 	result := make(RepoSQLMap)
 
-	entries, err := os.ReadDir(pgxDir)
-	if err != nil {
-		return result, err
-	}
+	for _, dir := range repositoryImplDirs {
+		repoDir := filepath.Join(projectPath, dir)
+		if _, err := os.Stat(repoDir); os.IsNotExist(err) {
+			continue
+		}
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-			continue
+		entries, err := os.ReadDir(repoDir)
+		if err != nil {
+			return result, err
 		}
-		path := filepath.Join(pgxDir, entry.Name())
-		relPath, relErr := filepath.Rel(projectPath, path)
-		if relErr != nil {
-			relPath = filepath.Join("pgx", entry.Name())
-		}
-		if err := scanPgxFile(path, relPath, result); err != nil {
-			// Non-fatal: skip bad files and continue.
-			continue
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+				continue
+			}
+			path := filepath.Join(repoDir, entry.Name())
+			relPath, relErr := filepath.Rel(projectPath, path)
+			if relErr != nil {
+				relPath = filepath.Join(dir, entry.Name())
+			}
+			if err := scanPgxFile(path, relPath, result); err != nil {
+				// Non-fatal: skip bad files and continue.
+				continue
+			}
 		}
 	}
 

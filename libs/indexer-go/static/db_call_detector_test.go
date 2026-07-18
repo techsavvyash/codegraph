@@ -182,6 +182,106 @@ func withoutRepo(ctx context.Context, repo string) {
 	}
 }
 
+// ── P0-3: bare `repo := repository.Pgx()` assignment binding ──────────────────
+
+func TestDBDetector_ProcessAssignment_barePgx(t *testing.T) {
+	// settlement/service/scheduler/scheduler.go:38 shape: repo := repository.Pgx()
+	// with no BeginTx must still bind repo as a tazapay-tx receiver.
+	src := `package p
+import "github.com/tazapay/settlement/repository"
+func f() {
+	repo := repository.Pgx()
+	_ = repo
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	d := newTestDBDetector()
+	for _, a := range collectAssignStmts(fn) {
+		d.processAssignment(a)
+	}
+	if d.varDBType["repo"] != "tazapay-tx" {
+		t.Errorf("expected repo → tazapay-tx, got %q", d.varDBType["repo"])
+	}
+}
+
+func TestDBDetector_ProcessAssignment_barePgxFieldReceiver(t *testing.T) {
+	// The `d.repository.Pgx()` selector-receiver form (isRepositoryPgxCall handles it).
+	src := `package p
+func f(d any) {
+	repo := d.repository.Pgx()
+	_ = repo
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	det := newTestDBDetector()
+	for _, a := range collectAssignStmts(fn) {
+		det.processAssignment(a)
+	}
+	if det.varDBType["repo"] != "tazapay-tx" {
+		t.Errorf("expected repo → tazapay-tx, got %q", det.varDBType["repo"])
+	}
+}
+
+func TestDBDetector_BarePgx_EmitsDBCall(t *testing.T) {
+	// Full pipeline: bare repo := repository.Pgx() then repo.<Repo>.<Method> yields a DBCall.
+	src := `package p
+import (
+	"context"
+	"github.com/tazapay/settlement/repository"
+)
+func schedule(ctx context.Context) {
+	repo := repository.Pgx()
+	_ = repo.Queue.GetPending(ctx)
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 DBCall from bare-repo binding, got %d", len(calls))
+	}
+	if calls[0]["repositoryInterface"] != "Queue" {
+		t.Errorf("repositoryInterface = %v, want Queue", calls[0]["repositoryInterface"])
+	}
+}
+
+func TestDBDetector_ProcessAssignment_noFalseBinding(t *testing.T) {
+	// A generic X() call unrelated to repository.Pgx() must NOT bind as tazapay-tx.
+	src := `package p
+func f(svc any) {
+	x := svc.Something()
+	_ = x
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	d := newTestDBDetector()
+	for _, a := range collectAssignStmts(fn) {
+		d.processAssignment(a)
+	}
+	if _, bound := d.varDBType["x"]; bound {
+		t.Errorf("unrelated X() call must not bind, got %q", d.varDBType["x"])
+	}
+}
+
+// ── P0-4(b): camelToSnake acronym handling ────────────────────────────────────
+
+func TestCamelToSnake_Acronyms(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"PayoutAttempt", "payout_attempt"},
+		{"BulkPayout", "bulk_payout"},
+		{"ForterAPITrace", "forter_api_trace"},
+		{"DLQEvent", "dlq_event"},
+		{"ConfigMFASMS", "config_mfasms"},
+		{"APIAccessControl", "api_access_control"},
+		{"OutboxBFI", "outbox_bfi"},
+		{"GPI", "gpi"},
+		{"LookupVASP", "lookup_vasp"},
+		{"MISData", "mis_data"},
+		{"Account", "account"},
+	}
+	for _, c := range cases {
+		if got := camelToSnake(c.in); got != c.want {
+			t.Errorf("camelToSnake(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // ── inferOperationFromSQL unit tests ──────────────────────────────────────────
 
 func TestInferOperationFromSQL(t *testing.T) {

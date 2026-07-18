@@ -217,6 +217,14 @@ func (d *DBCallDetector) processAssignment(assign *ast.AssignStmt) {
 		}
 	}
 
+	// P0-3 — Tazapay: repo := repository.Pgx()  (bare accessor, no BeginTx).
+	// Schedulers/helpers bind the repo once and issue repo.<Repo>.<Method> calls
+	// without a transaction. detectTazapayRepoCall resolves those once repo is bound.
+	if isRepositoryPgxCall(callExpr) {
+		d.varDBType[lhsIdent.Name] = "tazapay-tx"
+		return
+	}
+
 	pkgIdent, ok := sel.X.(*ast.Ident)
 	if !ok {
 		return
@@ -692,13 +700,27 @@ func inferOperationFromRepoMethod(method string) string {
 	return "QUERY"
 }
 
-// camelToSnake converts a CamelCase repo name to snake_case table name.
-// "PayoutAttempt" → "payout_attempt", "BulkPayout" → "bulk_payout"
+// camelToSnake converts a CamelCase repo name to snake_case table name, treating
+// consecutive capitals (acronyms) as a single token so they are not shattered:
+//
+//	"PayoutAttempt"  → "payout_attempt"   "BulkPayout"    → "bulk_payout"
+//	"ForterAPITrace" → "forter_api_trace" "DLQEvent"      → "dlq_event"
+//	"ConfigMFASMS"   → "config_mfasms"    "APIAccessControl" → "api_access_control"
+//
+// Rule: insert '_' before an uppercase letter only when the previous character is
+// lowercase/digit (word boundary) OR the next character is lowercase (acronym→word,
+// e.g. the "T" in "APITrace"). This is the standard camelCase→snake_case algorithm.
 func camelToSnake(s string) string {
+	runes := []rune(s)
 	var out []rune
-	for i, r := range s {
+	for i, r := range runes {
 		if i > 0 && r >= 'A' && r <= 'Z' {
-			out = append(out, '_')
+			prev := runes[i-1]
+			prevLowerOrDigit := (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9')
+			nextLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
+			if prevLowerOrDigit || nextLower {
+				out = append(out, '_')
+			}
 		}
 		out = append(out, []rune(strings.ToLower(string(r)))...)
 	}
