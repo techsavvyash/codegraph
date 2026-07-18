@@ -482,6 +482,8 @@ func (r *CrossServiceHandlerResolver) resolveGRPC(ctx context.Context) (int, err
 // CALLS_SERVICE (GRPCCall→Service) and RESOLVES_TO (GRPCCall→Method) edges.
 func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (int, error) {
 	// Fetch GRPCCall nodes with protoService set but no CALLS_SERVICE edge yet.
+	// callerService is carried through so the handler search can EXCLUDE the caller's
+	// own service (RPC-6): a cross-service RPC must never resolve to its own caller.
 	callsQuery := `
 		MATCH (gc:GRPCCall)
 		WHERE gc.protoService IS NOT NULL AND gc.protoService <> ''
@@ -489,7 +491,8 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 		  AND NOT (gc)-[:CALLS_SERVICE]->()
 		RETURN elementId(gc) AS gcId,
 		       gc.protoService AS protoService,
-		       gc.protoMethod  AS protoMethod
+		       gc.protoMethod  AS protoMethod,
+		       coalesce(gc.callerService, '') AS callerService
 	`
 	rows, err := r.client.ExecuteQuery(ctx, callsQuery, map[string]any{})
 	if err != nil {
@@ -502,18 +505,21 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 		gcId := getString(rm, "gcId")
 		protoService := getString(rm, "protoService")
 		protoMethod := getString(rm, "protoMethod")
+		callerService := getString(rm, "callerService")
 
 		if gcId == "" || protoService == "" || protoMethod == "" {
 			continue
 		}
 
-		// Search all services for a method whose receiverType ends with protoService+"Server"
-		// and whose name = protoMethod. Use ENDS WITH to handle both plain and pointer-prefixed
-		// receiver types ("BalanceServiceServer" and "*BalanceServiceServer").
+		// Search all services (except the caller's own) for a method whose receiverType
+		// ends with protoService+"Server" and whose name = protoMethod. ENDS WITH handles
+		// both plain and pointer-prefixed receiver types ("BalanceServiceServer" and
+		// "*BalanceServiceServer"). RPC-6: svc.name <> callerService prevents self-bind.
 		protoServerType := protoService + "Server"
 		handlerQuery := `
 			MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
-			WHERE (f:Function OR f:Method)
+			WHERE svc.name <> $callerService
+			  AND (f:Function OR f:Method)
 			  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
 			  AND f.receiverType ENDS WITH $protoServerType
 			RETURN elementId(svc) AS svcId, elementId(f) AS fId, f.nodeKey AS nodeKey
@@ -523,26 +529,33 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 		handlers, err := r.client.ExecuteQuery(ctx, handlerQuery, map[string]any{
 			"methodName":      protoMethod,
 			"protoServerType": protoServerType,
+			"callerService":   callerService,
 		})
 		if err != nil {
 			continue
 		}
 
-		// Fallback: receiver type match failed; try name-only across services that implement
-		// the proto server interface (finds the method even if receiverType wasn't stored).
+		// Fallback: receiver type match failed; try name-only across OTHER services that
+		// implement the proto server interface (finds the method even if receiverType
+		// wasn't stored with the "Server" suffix). RPC-6: the caller's own service is
+		// excluded, and the loose `f.signature CONTAINS` arm is dropped — a function that
+		// merely mentions the proto client type (e.g. the caller's own wrapper) is not a
+		// handler. Only the server-impl receiver type is a meaningful signal.
 		if len(handlers) == 0 {
 			nameOnlyQuery := `
 				MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
-				WHERE (f:Function OR f:Method)
+				WHERE svc.name <> $callerService
+				  AND (f:Function OR f:Method)
 				  AND (f.name = $methodName OR f.name STARTS WITH ($methodName + '('))
-				  AND (f.receiverType CONTAINS $protoService OR f.signature CONTAINS $protoService)
+				  AND f.receiverType CONTAINS $protoService
 				RETURN elementId(svc) AS svcId, elementId(f) AS fId, f.nodeKey AS nodeKey
 				ORDER BY f.nodeKey ASC
 				LIMIT 3
 			`
 			handlers, err = r.client.ExecuteQuery(ctx, nameOnlyQuery, map[string]any{
-				"methodName":   protoMethod,
-				"protoService": protoService,
+				"methodName":    protoMethod,
+				"protoService":  protoService,
+				"callerService": callerService,
 			})
 			if err != nil || len(handlers) == 0 {
 				continue

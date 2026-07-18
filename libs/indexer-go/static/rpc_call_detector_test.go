@@ -281,6 +281,140 @@ func f2() { x := 1; _ = x }`
 	_ = fset1 // used above in parseFirstFuncBody context
 }
 
+// ── P0-5: grpcclient getter → authoritative service binding ──────────────────
+
+func TestProcessAssignment_GRPCClientGetter_Authoritative(t *testing.T) {
+	// GetPaymentService's name says "payment", but its proto owner is payin.
+	// With the getter table set, varPkgMap must carry the authoritative owner
+	// ("payin"), and varTypeMap the real proto service ("PaymentServiceClient").
+	src := `package p
+func f() {
+	client := grpcclient.GetPaymentService(ctx)
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	d := newTestRPCDetector()
+	d.SetGetterServiceMap(GetterServiceMap{
+		"GetPaymentService": {Service: "payin", ProtoService: "PaymentService"},
+	})
+
+	for _, stmt := range collectAssignStmts(fn) {
+		d.processAssignment(stmt)
+	}
+
+	if got := d.varTypeMap["client"]; got != "PaymentServiceClient" {
+		t.Errorf("varTypeMap[client] = %q, want PaymentServiceClient", got)
+	}
+	if got := d.varPkgMap["client"]; got != "payin" {
+		t.Errorf("varPkgMap[client] = %q, want payin (authoritative owner)", got)
+	}
+}
+
+func TestProcessAssignment_GRPCClientGetter_NoGetPrefix(t *testing.T) {
+	// AccountHolderNameService has no Get prefix but ends in Service — must bind.
+	src := `package p
+func f() {
+	client := grpcclient.AccountHolderNameService(ctx)
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	d := newTestRPCDetector()
+	d.SetGetterServiceMap(GetterServiceMap{
+		"AccountHolderNameService": {Service: "sol", ProtoService: "AccountHolderNameService"},
+	})
+
+	for _, stmt := range collectAssignStmts(fn) {
+		d.processAssignment(stmt)
+	}
+
+	if got := d.varPkgMap["client"]; got != "sol" {
+		t.Errorf("varPkgMap[client] = %q, want sol", got)
+	}
+	if got := d.varTypeMap["client"]; got != "AccountHolderNameServiceClient" {
+		t.Errorf("varTypeMap[client] = %q, want AccountHolderNameServiceClient", got)
+	}
+}
+
+func TestProcessAssignment_GRPCClientGetter_Fallback(t *testing.T) {
+	// Table miss (no grpcclient package indexed) falls back to fuzzy name derivation.
+	src := `package p
+func f() {
+	client := grpcclient.GetBalanceService(ctx)
+}`
+	fn, _ := parseFirstFuncBody(t, src)
+	d := newTestRPCDetector() // no getter map set
+
+	for _, stmt := range collectAssignStmts(fn) {
+		d.processAssignment(stmt)
+	}
+
+	if got := d.varTypeMap["client"]; got != "BalanceServiceClient" {
+		t.Errorf("varTypeMap[client] = %q, want BalanceServiceClient", got)
+	}
+	if got := d.varPkgMap["client"]; got != "balance" {
+		t.Errorf("varPkgMap[client] = %q, want balance (fuzzy fallback)", got)
+	}
+}
+
+func TestIsGRPCClientGetter(t *testing.T) {
+	yes := []string{
+		"GetAccountService", "GetSettlementServiceServer", "GetRuleEngineServiceClient",
+		"AccountHolderNameService", "GetOnBoardingBankHTTPService",
+	}
+	no := []string{
+		"InitConnectionManager", "GetConnection", "GetUTObject", "NewPaymentServiceClient",
+	}
+	for _, n := range yes {
+		if !isGRPCClientGetter(n) {
+			t.Errorf("isGRPCClientGetter(%q) = false, want true", n)
+		}
+	}
+	for _, n := range no {
+		if isGRPCClientGetter(n) {
+			t.Errorf("isGRPCClientGetter(%q) = true, want false", n)
+		}
+	}
+}
+
+// ── P0-5: strict resolveByName (no both-ways substring mis-bind) ─────────────
+
+func TestResolveByName_StrictExactOnly(t *testing.T) {
+	// serviceAliases() runs on each Service name at load time, so byName carries the
+	// canonical forms. Model that: "settlement" is indexed, "pricing" is NOT.
+	si := &serviceIndex{
+		byName: map[string]string{
+			"settlement":        "id-settlement",
+			"settlementservice": "id-settlement",
+			"payin":             "id-payin",
+			"paymentrouter":     "id-pr",
+		},
+		byProto: map[string]string{},
+	}
+
+	// Exact canonical match (hyphen collapsed) still works.
+	if got := si.resolveByName("payment-router"); got != "id-pr" {
+		t.Errorf("resolveByName(payment-router) = %q, want id-pr", got)
+	}
+	if got := si.resolveByName("payin"); got != "id-payin" {
+		t.Errorf("resolveByName(payin) = %q, want id-payin", got)
+	}
+
+	// The live-data regression: a pricing getter's proto service name
+	// "SettlementPricingService" canonicalises to "settlementpricingservice", which
+	// STARTS WITH "settlement". Prefix matching mis-bound it to the settlement
+	// service; exact-only must return "" (pricing is not indexed → no edge).
+	if got := si.resolveByName("SettlementPricingService"); got != "" {
+		t.Errorf("resolveByName(SettlementPricingService) = %q, want \"\" (no prefix mis-bind)", got)
+	}
+
+	// "dashboard" (mid-token substring of dashboards) and "pay" (prefix of two
+	// services) must both bind nothing.
+	if got := si.resolveByName("dashboard"); got != "" {
+		t.Errorf("resolveByName(dashboard) = %q, want \"\"", got)
+	}
+	if got := si.resolveByName("pay"); got != "" {
+		t.Errorf("resolveByName(pay) = %q, want \"\"", got)
+	}
+}
+
 // ── HTTPCall detection helpers ────────────────────────────────────────────────
 
 func TestExtractHostFromURL_Backtick(t *testing.T) {

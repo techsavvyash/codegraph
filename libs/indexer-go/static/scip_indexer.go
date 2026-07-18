@@ -1152,8 +1152,8 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	// Reference node creation is suppressed while "Reference" is in noiseNodeLabels
 	// (reduces graph noise during testing — re-enable by removing "Reference" from that map).
 	var (
-		refIDs        map[string]string
-		referencesRels []map[string]any
+		refIDs          map[string]string
+		referencesRels  []map[string]any
 		refContainsRels []map[string]any
 		tMergeRef       time.Duration
 		tRelReferences  time.Duration
@@ -1427,6 +1427,16 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	rpcDet := NewRPCCallDetector(si.client, si.serviceName, si.scopeCtx)
 	rpcDet.SetCallNodeBuffer(callBuffer)
 	rpcDet.SetServiceIndex(svcIdx)
+
+	// P0-5 — authoritative getter→service table from the caller's own grpcclient
+	// package. Overrides fuzzy getter-name derivation (GetPaymentService → payin).
+	getterMap, getterErr := ScanGRPCClientGetters(projectPath)
+	if getterErr != nil {
+		fmt.Printf("Warning: grpcclient getter scan failed: %v\n", getterErr)
+		getterMap = GetterServiceMap{}
+	}
+	fmt.Printf("  grpcclient getter pre-scan: %d getters mapped\n", len(getterMap))
+	rpcDet.SetGetterServiceMap(getterMap)
 
 	eventDet := NewEventCallDetector(si.client, si.serviceName, si.scopeCtx)
 	eventDet.SetCallNodeBuffer(callBuffer)

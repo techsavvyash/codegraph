@@ -97,17 +97,22 @@ func (si *serviceIndex) resolveByName(name string) string {
 		}
 	}
 
-	// Fallback to fuzzy in-memory contains matching to retain old behavior.
+	// Strict fallback (P0-5): exact canonical key ONLY. No substring, no prefix.
+	//
+	// The original both-ways strings.Contains bound arbitrary wrong services
+	// ("dashboard" substring-matched ops-/mp-/merchant-dashboard). A first attempt
+	// replaced it with prefix matching, but live data proved prefix is just as
+	// unsafe: proto service names embed service tokens, so the canonical needle
+	// "settlementpricingservice" STARTS WITH the alias "settlement" and mis-bound
+	// GetSettlementPricingService (real owner: pricing) to the settlement service.
+	// Exact-only is the only safe rule here; the authoritative getter table
+	// (ScanGRPCClientGetters) supplies the real owner for every legitimate case, so
+	// when this exact lookup misses the correct outcome is NO edge, not a guess.
 	needle := canonicalServiceKey(name)
 	if needle == "" {
 		return ""
 	}
-	for alias, id := range si.byName {
-		if strings.Contains(alias, needle) || strings.Contains(needle, alias) {
-			return id
-		}
-	}
-	return ""
+	return si.byName[needle]
 }
 
 func (si *serviceIndex) resolveByProto(pkg string) string {

@@ -35,6 +35,12 @@ type RPCCallDetector struct {
 	varTypeMap map[string]string
 	// varPkgMap: local var name → package alias used in the constructor call (e.g. "pb").
 	varPkgMap map[string]string
+
+	// getterServices: authoritative grpcclient getter → owning-service binding
+	// (from ScanGRPCClientGetters). Detector-scoped — set once, survives the
+	// per-function reset of varTypeMap/varPkgMap. Empty when the caller has no
+	// grpcclient package.
+	getterServices GetterServiceMap
 }
 
 // NewRPCCallDetector creates a detector scoped to a single service indexing run.
@@ -56,6 +62,13 @@ func (d *RPCCallDetector) SetServiceIndex(idx *serviceIndex) {
 // SetCallNodeBuffer configures an optional shared call node buffer.
 func (d *RPCCallDetector) SetCallNodeBuffer(buf *callNodeBuffer) {
 	d.callBuffer = buf
+}
+
+// SetGetterServiceMap configures the authoritative grpcclient getter → service
+// table (from ScanGRPCClientGetters). When set, it overrides the fuzzy getter-name
+// token derivation for grpcclient.Get*Service call sites.
+func (d *RPCCallDetector) SetGetterServiceMap(m GetterServiceMap) {
+	d.getterServices = m
 }
 
 // DetectInFunction walks funcDecl looking for outbound gRPC call sites and writes
@@ -171,7 +184,23 @@ func (d *RPCCallDetector) processAssignment(assign *ast.AssignStmt) {
 	// grpcclient.GetOnBoardingBankHTTPService(ctx) → "OnBoardingBankHTTPServiceClient"
 	// Stored with "Client" suffix so the existing method-call detection in processCallExpr works.
 	if pkgIdent, ok := sel.X.(*ast.Ident); ok {
-		if pkgIdent.Name == "grpcclient" && strings.HasPrefix(funcName, "Get") && strings.HasSuffix(funcName, "Service") {
+		if pkgIdent.Name == "grpcclient" && isGRPCClientGetter(funcName) {
+			// P0-5 — authoritative binding first. The getter table (ScanGRPCClientGetters)
+			// resolves getter name → owning service + proto service via the return type's
+			// proto import path, which is correct even when the getter's own name lies
+			// (GetPaymentService → payin, GetSOLBalanceService → sol/BalanceService).
+			if info, known := d.getterServices[funcName]; known && info.Service != "" {
+				protoSvc := info.ProtoService
+				if protoSvc == "" {
+					protoSvc = strings.TrimPrefix(funcName, "Get")
+				}
+				d.varTypeMap[lhsIdent.Name] = protoSvc + "Client"
+				d.varPkgMap[lhsIdent.Name] = info.Service
+				return
+			}
+
+			// Fallback (table miss — e.g. no grpcclient package, or return type is not a
+			// proto path): fuzzy name-token derivation, as before.
 			svcName := strings.TrimPrefix(funcName, "Get") // "BalanceService"
 			d.varTypeMap[lhsIdent.Name] = svcName + "Client"
 			// Store the bare lowercase service name (not "grpcclient") so resolveTargetServiceFull
@@ -184,6 +213,19 @@ func (d *RPCCallDetector) processAssignment(assign *ast.AssignStmt) {
 			return
 		}
 	}
+}
+
+// isGRPCClientGetter reports whether a grpcclient package function name is a client
+// getter. The Get prefix is optional when the name already ends in a Service*
+// suffix, and the accepted suffixes are Service, ServiceServer, ServiceClient.
+// A leading "New" is rejected: NewXxxServiceClient is a proto constructor (handled
+// by the New*Client branch), not a grpcclient getter — Go's regexp lacks negative
+// lookahead, so the exclusion is explicit.
+func isGRPCClientGetter(funcName string) bool {
+	if strings.HasPrefix(funcName, "New") {
+		return false
+	}
+	return grpcClientGetterName.MatchString(funcName)
 }
 
 // processCallExpr checks whether this call expression is a gRPC method invocation on a
@@ -312,10 +354,14 @@ func (d *RPCCallDetector) resolveTargetService(ctx context.Context, serviceName 
 		}
 	}
 
+	// Strict (P0-5): exact name only. Neither the old both-ways CONTAINS nor a prefix
+	// match is safe — "settlementpricingservice" STARTS WITH "settlement" would
+	// mis-bind a pricing getter to the settlement service. This fallback is dormant
+	// when a serviceIndex is set (the pipeline always sets one); exact keeps it safe
+	// for the defensive nil-index path.
 	cypher := `
 		MATCH (s:Service)
-		WHERE toLower(s.name) CONTAINS toLower($name)
-		   OR toLower($name) CONTAINS toLower(s.name)
+		WHERE toLower(s.name) = toLower($name)
 		RETURN elementId(s) AS id
 		LIMIT 1
 	`
