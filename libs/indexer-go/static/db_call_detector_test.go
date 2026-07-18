@@ -364,13 +364,23 @@ func TestIsDBFieldName(t *testing.T) {
 	}{
 		{"db", true},
 		{"pool", true},
-		{"pgpool", true},
 		{"repo", true},
-		{"userrepo", true},
 		{"store", true},
 		{"conn", true},
 		{"gorm", true},
 		{"sqlx", true},
+		// P2-6: matching is now token-exact on camelCase/underscore boundaries, not a
+		// substring. camelCase and snake_case field names still resolve …
+		{"pgPool", true},
+		{"userRepo", true},
+		{"colSecondary", true}, // ops-dashboard mongo secondary handle → col
+		{"db_conn", true},
+		// … but lowercase-concatenated blobs (the old substring false-positive class,
+		// DB-8) and unrelated fields no longer match.
+		{"pgpool", false},
+		{"userrepo", false},
+		{"collectionAccount", false}, // "collection" ≠ "col"
+		{"protocol", false},
 		{"client", false},
 		{"handler", false},
 		{"logger", false},

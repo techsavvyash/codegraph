@@ -177,8 +177,8 @@ func extractSQLInfoFromFunc(funcDecl *ast.FuncDecl, constValues map[string]strin
 		if !strings.ContainsAny(upper, "SUID") { // SELECT/INSERT/UPDATE/DELETE
 			return true
 		}
-		if m := tableFromSQL.FindStringSubmatch(sqlStr); len(m) > 1 {
-			table = strings.ToLower(m[1])
+		if t := firstTableFromSQL(sqlStr); t != "" {
+			table = strings.ToLower(t)
 			operation = inferOperationFromSQL(sqlStr)
 		}
 		return table == ""
@@ -209,4 +209,3 @@ func unquoteString(s string) string {
 	}
 	return s
 }
-

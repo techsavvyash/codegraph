@@ -1493,6 +1493,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 
 		importMap := buildImportMap(astFile)
 		apiDet.BeginFile(astFile, importMap)
+		dbDet.BeginFile(astFile) // P2-6: resolve the file's mongo collection once.
 
 		for _, decl := range astFile.Decls {
 			funcDecl, ok := decl.(*ast.FuncDecl)
@@ -1656,6 +1657,15 @@ func isTestFilePath(path string) bool {
 func isGeneratedFilePath(path string) bool {
 	p := strings.ToLower(path)
 	return strings.HasSuffix(p, ".pb.go") ||
+		// Tazapay convention: grpcclient/grpc_ut.go holds unit-test injection scaffolding
+		// (GetUTObject + ServiceClient-typed structs). It is NOT a _test.go file, so it
+		// was being indexed as real code — 5,120+ GetUTObject references plus struct
+		// fields (Account, Fx, RuleEngine, ...) that feed noise into gRPC heuristics.
+		// The one production caller (settlement/service/http/v3/beneficiary.go's
+		// `grpcclient.GetUTObject()` guard) only reads a test-mock holder, so excluding
+		// the file orphans no meaningful edge. Basename match: grpc_ut.go anywhere.
+		strings.HasSuffix(p, "/grpc_ut.go") ||
+		p == "grpc_ut.go" ||
 		strings.Contains(p, "/gen/") ||
 		strings.HasPrefix(p, "gen/") ||
 		strings.Contains(p, "/generated/") ||

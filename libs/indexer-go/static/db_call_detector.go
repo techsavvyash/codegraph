@@ -19,6 +19,136 @@ import (
 // Matches FROM, INTO, UPDATE, and JOIN clauses.
 var tableFromSQL = regexp.MustCompile(`(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+["` + "`" + `]?(\w+)["` + "`" + `]?`)
 
+// firstTableFromSQL resolves the real target table from a SQL string, handling CTEs.
+// A leading `WITH cte AS (...)` clause is stripped first (so the FROM/INTO/UPDATE of the
+// MAIN statement wins, not the CTE's inner table), and any captured name that is itself a
+// CTE alias is skipped. Returns "" when no table can be resolved. (P2-4a)
+func firstTableFromSQL(sql string) string {
+	mainSQL, aliases := stripLeadingCTE(sql)
+	for _, m := range tableFromSQL.FindAllStringSubmatch(mainSQL, -1) {
+		if len(m) > 1 && !aliases[strings.ToLower(m[1])] {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// stripLeadingCTE removes a leading `WITH ... AS (...)[, ... AS (...)]` common-table-
+// expression clause from a SQL string, returning the main statement plus the set of CTE
+// alias names (lowercased). If the SQL does not start with WITH it is returned unchanged.
+// The scan tracks parenthesis depth: CTE aliases are the identifiers at depth 0 (right
+// after WITH or a top-level comma); the main statement begins at the first depth-0 DML
+// keyword that appears after a CTE body paren has closed.
+func stripLeadingCTE(sql string) (string, map[string]bool) {
+	aliases := make(map[string]bool)
+	trimmed := strings.TrimLeft(sql, " \t\r\n")
+	if len(trimmed) < 5 || !strings.EqualFold(trimmed[:4], "WITH") || !isSQLSpace(trimmed[4]) {
+		return sql, aliases
+	}
+
+	runes := []rune(trimmed)
+	n := len(runes)
+	depth := 0
+	closedAny := false  // at least one CTE body paren has closed
+	expectAlias := true // next depth-0 identifier is a CTE alias
+	i := 4              // just past "WITH"
+
+	for i < n {
+		c := runes[i]
+		switch {
+		case c == '(':
+			depth++
+			expectAlias = false
+			i++
+		case c == ')':
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					closedAny = true
+				}
+			}
+			i++
+		case depth == 0 && c == ',':
+			expectAlias = true
+			i++
+		case depth == 0 && closedAny && isSQLMainKeywordAt(runes, i):
+			return string(runes[i:]), aliases
+		case depth == 0 && expectAlias && isIdentStartRune(c):
+			start := i
+			for i < n && isIdentRune(runes[i]) {
+				i++
+			}
+			word := string(runes[start:i])
+			// "RECURSIVE" is a modifier, not an alias; the real alias follows it.
+			if !strings.EqualFold(word, "RECURSIVE") {
+				aliases[strings.ToLower(word)] = true
+				expectAlias = false
+			}
+		default:
+			i++
+		}
+	}
+	// No main statement found (malformed) — fall back to the original string.
+	return sql, aliases
+}
+
+// isSQLMainKeywordAt reports whether a top-level DML keyword (SELECT/INSERT/UPDATE/DELETE)
+// starts at position i, on a word boundary.
+func isSQLMainKeywordAt(runes []rune, i int) bool {
+	for _, kw := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
+		kr := []rune(kw)
+		if i+len(kr) > len(runes) {
+			continue
+		}
+		if !strings.EqualFold(string(runes[i:i+len(kr)]), kw) {
+			continue
+		}
+		// Word boundary: the char after the keyword must not be an identifier char.
+		if i+len(kr) == len(runes) || !isIdentRune(runes[i+len(kr)]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSQLSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
+}
+
+func isIdentStartRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
+}
+
+func isIdentRune(r rune) bool {
+	return isIdentStartRune(r) || (r >= '0' && r <= '9')
+}
+
+// sprintfFormatLiteral returns the format-string literal of a fmt.Sprintf(<lit>, ...) call
+// expression, or ("", false) if expr is not such a call. Used so SQL built with Sprintf
+// (27 pgx files across the fleet) resolves to a table via its static format string. (P2-4b)
+func sprintfFormatLiteral(expr ast.Expr) (string, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return "", false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Sprintf" {
+		return "", false
+	}
+	if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "fmt" {
+		return "", false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	val := lit.Value
+	if len(val) >= 2 && (val[0] == '"' || val[0] == '`') {
+		return val[1 : len(val)-1], true
+	}
+	return "", false
+}
+
 // dbQueryMethods are method names on DB client variables that take a SQL string.
 // Maps method name → argument index of the SQL string (-1 means no direct SQL arg).
 var dbQueryMethods = map[string]int{
@@ -55,18 +185,18 @@ var dbQueryMethods = map[string]int{
 	"Updates": -1,
 	"Update":  -1,
 	// MongoDB driver methods on *mongo.Collection — no SQL arg
-	"FindOne":        -1,
-	"InsertOne":      -1,
-	"InsertMany":     -1,
-	"UpdateOne":      -1,
-	"UpdateMany":     -1,
-	"ReplaceOne":     -1,
-	"DeleteOne":      -1,
-	"DeleteMany":     -1,
-	"Aggregate":      -1,
-	"CountDocuments": -1,
-	"FindOneAndUpdate": -1,
-	"FindOneAndDelete": -1,
+	"FindOne":           -1,
+	"InsertOne":         -1,
+	"InsertMany":        -1,
+	"UpdateOne":         -1,
+	"UpdateMany":        -1,
+	"ReplaceOne":        -1,
+	"DeleteOne":         -1,
+	"DeleteMany":        -1,
+	"Aggregate":         -1,
+	"CountDocuments":    -1,
+	"FindOneAndUpdate":  -1,
+	"FindOneAndDelete":  -1,
 	"FindOneAndReplace": -1,
 }
 
@@ -100,6 +230,12 @@ type DBCallDetector struct {
 	// varStringValue: local var name → raw string value.
 	// Used to track SQL strings assigned to local variables.
 	varStringValue map[string]string
+
+	// mongoFileCollection is the single MongoDB collection name resolved for the file
+	// currently being scanned, or "" when none/ambiguous. Populated by BeginFile.
+	// File-scoped (NOT reset per function) because ops-dashboard keeps one collection
+	// per file: the struct + constructor + methods all live together. (P2-6)
+	mongoFileCollection string
 }
 
 // NewDBCallDetector creates a detector scoped to a single service indexing run.
@@ -122,6 +258,72 @@ func NewDBCallDetector(client *neo4j.Client, serviceName string, scopeCtx models
 // SetCallNodeBuffer configures an optional shared call node buffer.
 func (d *DBCallDetector) SetCallNodeBuffer(buf *callNodeBuffer) {
 	d.callBuffer = buf
+}
+
+// BeginFile resolves the MongoDB collection for the file about to be scanned and
+// caches it in mongoFileCollection. It walks for `<x>.Database(...).Collection(<name>)`
+// constructor calls (the mongo-driver idiom) and resolves <name> either from a string
+// literal or, best-effort, from a `<pkg>.Get<Xxx>Collection()` env getter by stripping
+// the Get/Collection affixes. If the file resolves to exactly one collection it is used;
+// zero or multiple (ambiguous) → "". Call once per file before DetectInFunction. (P2-6)
+func (d *DBCallDetector) BeginFile(astFile *ast.File) {
+	d.mongoFileCollection = ""
+	if astFile == nil {
+		return
+	}
+	found := make(map[string]bool)
+	ast.Inspect(astFile, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Collection" || len(call.Args) == 0 {
+			return true
+		}
+		// Require the receiver to be a `.Database(...)` call so `options.Collection()`
+		// (the options builder, not a real collection handle) is not mistaken for one.
+		inner, ok := sel.X.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		innerSel, ok := inner.Fun.(*ast.SelectorExpr)
+		if !ok || innerSel.Sel.Name != "Database" {
+			return true
+		}
+		if name := resolveCollectionName(call.Args[0]); name != "" {
+			found[name] = true
+		}
+		return true
+	})
+	if len(found) == 1 {
+		for name := range found {
+			d.mongoFileCollection = name
+		}
+	}
+}
+
+// resolveCollectionName best-effort resolves a mongo collection name from the first
+// argument of a `.Collection(<arg>)` call: a string literal is used verbatim; a
+// `<pkg>.Get<Xxx>Collection()` getter yields snake_case("<Xxx>") (e.g.
+// GetSettlementTransactionCollection → settlement_transaction). Anything else → "".
+func resolveCollectionName(arg ast.Expr) string {
+	if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		v := lit.Value
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '`') {
+			return v[1 : len(v)-1]
+		}
+		return v
+	}
+	if call, ok := arg.(*ast.CallExpr); ok {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+			g := sel.Sel.Name
+			if strings.HasPrefix(g, "Get") && strings.HasSuffix(g, "Collection") && len(g) > len("GetCollection") {
+				return camelToSnake(g[len("Get") : len(g)-len("Collection")])
+			}
+		}
+	}
+	return ""
 }
 
 // DetectInFunction walks funcDecl looking for outbound DB call sites and writes
@@ -262,6 +464,10 @@ func (d *DBCallDetector) processStringAssignment(assign *ast.AssignStmt) {
 				if len(val) >= 2 && (val[0] == '"' || val[0] == '`') {
 					d.varStringValue[ident.Name] = val[1 : len(val)-1]
 				}
+			} else if format, ok := sprintfFormatLiteral(assign.Rhs[i]); ok {
+				// P2-4b: query := fmt.Sprintf("UPDATE collection_account SET %s ...", ...)
+				// — track the static format string so the table still resolves.
+				d.varStringValue[ident.Name] = format
 			}
 		}
 	}
@@ -400,9 +606,7 @@ func (d *DBCallDetector) processCallExpr(
 			sqlStr := d.extractStringArgWithVars(callExpr, 3)
 			table := ""
 			if sqlStr != "" {
-				if m := tableFromSQL.FindStringSubmatch(sqlStr); len(m) > 1 {
-					table = m[1]
-				}
+				table = firstTableFromSQL(sqlStr)
 			}
 			return d.writeRawDBCall(ctx, callerFuncID, filePath, line, "SELECT", table, sqlStr, "pgxscan")
 		}
@@ -429,8 +633,7 @@ func (d *DBCallDetector) processCallExpr(
 	// Secondary path: struct field access like r.db.Query(...) or s.pool.Exec(...).
 	if !detected {
 		if fieldSel, ok := sel.X.(*ast.SelectorExpr); ok {
-			fieldLower := strings.ToLower(fieldSel.Sel.Name)
-			if isDBFieldName(fieldLower) {
+			if isDBFieldName(fieldSel.Sel.Name) {
 				dbKind = "unknown"
 				detected = true
 			}
@@ -462,7 +665,20 @@ func (d *DBCallDetector) processCallExpr(
 		return nil // not a recognisable DB call
 	}
 
-	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, line)
+	// P2-6: a mongo-specific method on a struct-field receiver is a MongoDB call.
+	// Tag dbKind="mongo" and fill table with the file's resolved collection (mongo
+	// method names other than the gorm-ambiguous "Find" are unambiguous).
+	mongoKind := false
+	if methodName != "Find" && mongoMethodToOperation(methodName) != "" && dbKind == "unknown" {
+		mongoKind = true
+		if table == "" {
+			table = d.mongoFileCollection
+		}
+	}
+
+	// P2-5: include method+table so two distinct DB calls on one source line
+	// (e.g. a ternary or chained statement) do not MERGE into a single node.
+	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d:%s:%s", d.scopeCtx.ScopeID, filePath, d.serviceName, line, methodName, table)
 
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
@@ -476,6 +692,9 @@ func (d *DBCallDetector) processCallExpr(
 		"line":         line,
 		"createdAt":    time.Now().UTC().Unix(),
 		"updatedAt":    time.Now().UTC().Unix(),
+	}
+	if mongoKind {
+		setProps["dbKind"] = "mongo"
 	}
 	maps.Copy(setProps, d.scopeCtx.Props())
 
@@ -502,14 +721,31 @@ func (d *DBCallDetector) processCallExpr(
 	return nil
 }
 
-// isDBFieldName returns true if a struct field name looks like a DB client field.
-func isDBFieldName(lower string) bool {
-	for _, kw := range []string{"db", "pool", "repo", "store", "conn", "gorm", "sqlx", "col"} {
-		if strings.Contains(lower, kw) {
+// dbFieldTokens are the exact identifier tokens that mark a struct field as a DB
+// client / collection handle. Matched token-exactly (not substring) so "collection",
+// "protocol", "columnName" no longer false-positive on "col", and "database" does not
+// hit "db". (P2-6)
+var dbFieldTokens = map[string]bool{
+	"db": true, "pool": true, "repo": true, "store": true,
+	"conn": true, "gorm": true, "sqlx": true, "col": true,
+}
+
+// isDBFieldName returns true if a struct field name (original case) contains a DB-field
+// token as a whole camelCase/underscore-delimited word — e.g. "db", "colSecondary"
+// (→ col), "userStore" (→ store) match; "collectionAccount", "protocol" do not.
+func isDBFieldName(name string) bool {
+	for _, tok := range splitIdentTokens(name) {
+		if dbFieldTokens[tok] {
 			return true
 		}
 	}
 	return false
+}
+
+// splitIdentTokens splits an identifier into lowercased word tokens on camelCase and
+// underscore boundaries, reusing the acronym-aware camelToSnake rule.
+func splitIdentTokens(name string) []string {
+	return strings.Split(camelToSnake(name), "_")
 }
 
 // parseSQL extracts the SQL operation and table name from a SQL string literal.
@@ -517,9 +753,7 @@ func isDBFieldName(lower string) bool {
 func parseSQL(sqlStr, methodName string, callExpr *ast.CallExpr, dbKind string) (operation, table string) {
 	if sqlStr != "" {
 		operation = inferOperationFromSQL(sqlStr)
-		if m := tableFromSQL.FindStringSubmatch(sqlStr); len(m) > 1 {
-			table = m[1]
-		}
+		table = firstTableFromSQL(sqlStr)
 		if operation != "" {
 			return
 		}
@@ -629,7 +863,8 @@ func (d *DBCallDetector) writeTazapayRepoCall(
 		repositoryFilePath = info.FilePath
 	}
 
-	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, line)
+	// P2-5: include repo+method so two repo calls on one source line stay distinct.
+	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%d:%s:%s", d.scopeCtx.ScopeID, filePath, d.serviceName, line, repoName, methodName)
 
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
@@ -751,7 +986,8 @@ func (d *DBCallDetector) writeRawDBCall(
 	line int,
 	operation, table, queryPattern, dbKind string,
 ) error {
-	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%s:%d", d.scopeCtx.ScopeID, filePath, d.serviceName, dbKind, line)
+	// P2-5: include operation+table so two raw calls on one source line stay distinct.
+	nodeKey := fmt.Sprintf("dbcall:%s:%s:%s:%s:%d:%s:%s", d.scopeCtx.ScopeID, filePath, d.serviceName, dbKind, line, operation, table)
 
 	mergeProps := map[string]any{"nodeKey": nodeKey}
 	setProps := map[string]any{
@@ -812,6 +1048,11 @@ func (d *DBCallDetector) extractStringArgWithVars(callExpr *ast.CallExpr, n int)
 		if val, exists := d.varStringValue[ident.Name]; exists {
 			return val
 		}
+	}
+
+	// Case 3: Inline fmt.Sprintf("SELECT ... FROM x ...", ...) — use the format literal. (P2-4b)
+	if format, ok := sprintfFormatLiteral(arg); ok {
+		return format
 	}
 
 	return ""
