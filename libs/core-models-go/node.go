@@ -23,6 +23,7 @@ const (
 	OutboxCallNode     NodeType = "OutboxCall"
 	EventTypeNode      NodeType = "EventType"
 	DBCallNode         NodeType = "DBCall"
+	CacheCallNode      NodeType = "CacheCall"
 	ExternalCallNode   NodeType = "ExternalCall"
 	ExternalServiceNode NodeType = "ExternalService"
 	CommentNode          NodeType = "Comment"
@@ -290,6 +291,21 @@ type DBCall struct {
 	RepositoryMethod    string `json:"repositoryMethod" neo4j:"repositoryMethod"`       // e.g. "GetByID", "Save"
 }
 
+// CacheCall represents a Redis/cache client call site within a function body
+// (e.g. cache.Get / cache.Set / cache.Del from grpc-framework/client/cache).
+// Mirrors DBCall: one node per call site, linked from the caller via CALLS_CACHE.
+// NodeKey pattern: cachecall:{scopeId}:{serviceName}:{filePath}:{operation}:{line}
+type CacheCall struct {
+	BaseNode
+	Name        string `json:"name" neo4j:"name"`               // wrapper func name, e.g. "Get", "Set", "Del"
+	Operation   string `json:"operation" neo4j:"operation"`     // READ, WRITE, DELETE, INCR, EXPIRE, LOCK, UNLOCK
+	Provider    string `json:"provider" neo4j:"provider"`       // always "redis"
+	KeyExpr     string `json:"keyExpr" neo4j:"keyExpr"`         // best-effort source expr of the cache key arg
+	ServiceName string `json:"serviceName" neo4j:"serviceName"`
+	FilePath    string `json:"filePath" neo4j:"filePath"`
+	Line        int    `json:"line" neo4j:"line"`
+}
+
 // Comment represents code comments and docstrings
 type Comment struct {
 	BaseNode
@@ -500,6 +516,10 @@ func NodeFactory(nodeType NodeType, props map[string]any) interface{} {
 		}
 	case DBCallNode:
 		return &DBCall{
+			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
+		}
+	case CacheCallNode:
+		return &CacheCall{
 			BaseNode: BaseNode{Props: props, CreatedAt: now, UpdatedAt: now},
 		}
 	case ExternalCallNode:

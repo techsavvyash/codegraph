@@ -37,11 +37,13 @@ type callNodeBuffer struct {
 	outboxCalls      map[string]map[string]any
 	eventTypes       map[string]map[string]any // nodeKey -> set props (shared channel hubs)
 	dbCalls          map[string]map[string]any
+	cacheCalls       map[string]map[string]any // nodeKey -> set props (Redis/cache call sites)
 	externalCalls    map[string]map[string]any // nodeKey -> set props (service-scoped)
 	externalServices map[string]map[string]any // nodeKey -> set props (shared hub)
 
 	callsAPI    map[string]bufferedNodeEdge        // fromID + toNodeKey
 	callsDB     map[string]bufferedNodeEdge        // fromID + toNodeKey
+	callsCache  map[string]bufferedNodeEdge        // fromID + toNodeKey
 	callsSvc    map[string]bufferedServiceEdge     // fromNodeKey + toID
 	emitsEvent  map[string]bufferedBothNodeKeyEdge // OutboxCall nodeKey → EventType nodeKey
 	usesService map[string]bufferedBothNodeKeyEdge // ExternalCall nodeKey → ExternalService nodeKey
@@ -55,10 +57,12 @@ func newCallNodeBuffer(scopeID string) *callNodeBuffer {
 		outboxCalls:      make(map[string]map[string]any),
 		eventTypes:       make(map[string]map[string]any),
 		dbCalls:          make(map[string]map[string]any),
+		cacheCalls:       make(map[string]map[string]any),
 		externalCalls:    make(map[string]map[string]any),
 		externalServices: make(map[string]map[string]any),
 		callsAPI:         make(map[string]bufferedNodeEdge),
 		callsDB:          make(map[string]bufferedNodeEdge),
+		callsCache:       make(map[string]bufferedNodeEdge),
 		callsSvc:         make(map[string]bufferedServiceEdge),
 		emitsEvent:       make(map[string]bufferedBothNodeKeyEdge),
 		usesService:      make(map[string]bufferedBothNodeKeyEdge),
@@ -96,6 +100,10 @@ func (b *callNodeBuffer) addEmitsEventEdge(fromNodeKey, toNodeKey string, props 
 
 func (b *callNodeBuffer) addDBCall(nodeKey string, props map[string]any) {
 	b.addNode(b.dbCalls, nodeKey, props)
+}
+
+func (b *callNodeBuffer) addCacheCall(nodeKey string, props map[string]any) {
+	b.addNode(b.cacheCalls, nodeKey, props)
 }
 
 func (b *callNodeBuffer) addExternalCall(nodeKey string, props map[string]any) {
@@ -150,6 +158,18 @@ func (b *callNodeBuffer) addCallsDBEdge(fromID, toNodeKey string, props map[stri
 	}
 }
 
+func (b *callNodeBuffer) addCallsCacheEdge(fromID, toNodeKey string, props map[string]any) {
+	if b == nil || fromID == "" || toNodeKey == "" {
+		return
+	}
+	key := fromID + "->" + toNodeKey
+	b.callsCache[key] = bufferedNodeEdge{
+		fromID:    fromID,
+		toNodeKey: toNodeKey,
+		props:     maps.Clone(props),
+	}
+}
+
 func (b *callNodeBuffer) addCallsServiceEdge(fromNodeKey, toID string, props map[string]any) {
 	if b == nil || fromNodeKey == "" || toID == "" {
 		return
@@ -182,6 +202,9 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 	if err := b.flushNodes(ctx, client, "DBCall", b.dbCalls); err != nil {
 		return err
 	}
+	if err := b.flushNodes(ctx, client, "CacheCall", b.cacheCalls); err != nil {
+		return err
+	}
 	// ExternalCall and ExternalService nodes must be flushed BEFORE the CALLS_API
 	// edge flush below — flushRelsByTargetNodeKey matches the target by nodeKey, so
 	// the node must already exist when the edge MERGE runs.
@@ -195,6 +218,9 @@ func (b *callNodeBuffer) flush(ctx context.Context, client *neo4j.Client) error 
 		return err
 	}
 	if err := b.flushRelsByTargetNodeKey(ctx, client, models.CallsDBRel, b.callsDB); err != nil {
+		return err
+	}
+	if err := b.flushRelsByTargetNodeKey(ctx, client, models.CallsCacheRel, b.callsCache); err != nil {
 		return err
 	}
 	if err := b.flushCallsServiceRels(ctx, client, b.callsSvc); err != nil {
@@ -346,10 +372,12 @@ func (b *callNodeBuffer) reset() {
 	b.outboxCalls = make(map[string]map[string]any)
 	b.eventTypes = make(map[string]map[string]any)
 	b.dbCalls = make(map[string]map[string]any)
+	b.cacheCalls = make(map[string]map[string]any)
 	b.externalCalls = make(map[string]map[string]any)
 	b.externalServices = make(map[string]map[string]any)
 	b.callsAPI = make(map[string]bufferedNodeEdge)
 	b.callsDB = make(map[string]bufferedNodeEdge)
+	b.callsCache = make(map[string]bufferedNodeEdge)
 	b.callsSvc = make(map[string]bufferedServiceEdge)
 	b.emitsEvent = make(map[string]bufferedBothNodeKeyEdge)
 	b.usesService = make(map[string]bufferedBothNodeKeyEdge)

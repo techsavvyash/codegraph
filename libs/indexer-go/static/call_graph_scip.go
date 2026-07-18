@@ -577,6 +577,12 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	// OS page cache means this is effectively free after parseFuncRanges already read it.
 	fileSource, _ := os.ReadFile(fullPath)
 
+	// Imported package identifiers for this file. Lets the receiver-type plausibility
+	// check below tell a package-qualified cross-package call (cache.PSPErrorCache.Get —
+	// receiver type defined in another package, never named here) apart from a call on a
+	// local variable (req.GetEmail()), so only the latter is subject to the drop.
+	importNames := fileImportNames(fullPath)
+
 	created := 0
 	seen := map[string]bool{}
 
@@ -614,8 +620,18 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 				if rt := cg.elementIDToReceiverType[calleeID]; rt != "" {
 					typeName := strings.TrimPrefix(rt, "*")
 					if len(fileSource) > 0 && !strings.Contains(string(fileSource), typeName) {
-						cg.wrongTypeDrops++
-						calleeID = ""
+						// The resolved receiver type is not named anywhere in this file. Usually
+						// that signals a wrong same-name resolution (e.g. req.GetEmail() bound to
+						// *SubmitEntityFields.GetEmail). BUT a package-qualified call such as
+						// cache.PSPErrorCache.Get() legitimately targets a method whose receiver
+						// type is declared in another package and never textually appears here —
+						// dropping those is a false negative. Only apply the drop when the call
+						// is rooted at a local variable/param, not an imported package.
+						cm := callMetadata[fmt.Sprintf("%d:%s", call.Line, call.TargetName)]
+						if !isPackageQualifiedCall(cm, importNames) {
+							cg.wrongTypeDrops++
+							calleeID = ""
+						}
 					}
 				}
 			}
@@ -838,6 +854,40 @@ func buildImportMap(f *ast.File) map[string]string {
 		}
 	}
 	return m
+}
+
+// fileImportNames parses only the import block of the Go file at fullPath and
+// returns the set of local package identifiers it introduces (the alias when
+// present, otherwise the import path's last segment). Returns nil on parse error.
+// Used by the receiver-type plausibility check to recognise package-qualified calls.
+func fileImportNames(fullPath string) map[string]bool {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, fullPath, nil, parser.ImportsOnly)
+	if err != nil {
+		return nil
+	}
+	m := buildImportMap(f)
+	names := make(map[string]bool, len(m))
+	for name := range m {
+		names[name] = true
+	}
+	return names
+}
+
+// isPackageQualifiedCall reports whether the call described by cm is rooted at an
+// imported package — e.g. cache.PSPErrorCache.Get, whose receiver chain root "cache"
+// is an import. Such calls target a receiver type declared in another package, which
+// legitimately never appears in the calling file's source, so the receiver-type
+// plausibility check must not drop them. A call rooted at a local variable/param
+// (req.GetEmail(), root "req") is not package-qualified and remains subject to the check.
+func isPackageQualifiedCall(cm callMeta, importNames map[string]bool) bool {
+	if len(cm.ReceiverChain) < 2 || len(importNames) == 0 {
+		return false
+	}
+	// A call-valued root carries a "()" marker (e.g. "getCache()"); strip it so a
+	// package identifier still matches, while a locally-produced value will not.
+	root := strings.TrimSuffix(cm.ReceiverChain[0], "()")
+	return importNames[root]
 }
 
 // resolveTypeName resolves an AST type expression to a qualified type string,

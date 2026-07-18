@@ -119,6 +119,12 @@ func SDKCallNodeKey(target string) string {
 	return "sdkcall:" + target
 }
 
+// CacheCallNodeKey returns "cachecall:{service}:{filePath}:{operation}:{line}".
+// Service-scoped, one node per Redis/cache call site. Mirrors DBCall keying.
+func CacheCallNodeKey(service, filePath, operation string, line int) string {
+	return fmt.Sprintf("cachecall:%s:%s:%s:%d", service, filePath, operation, line)
+}
+
 // ExternalCallNodeKey returns "externalcall:{service}:{filePath}:{provider}:{externalService}:{operation}:{line}".
 // Service-scoped, mirrors OutboxCallNodeKey.
 func ExternalCallNodeKey(service, filePath, provider, extService, operation string, line int) string {

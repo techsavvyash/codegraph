@@ -198,6 +198,94 @@ func TestIsExternalSymbolUnknownModule(t *testing.T) {
 	}
 }
 
+func TestIsPackageQualifiedCall(t *testing.T) {
+	importNames := map[string]bool{"cache": true, "repository": true}
+
+	tests := []struct {
+		name  string
+		chain []string
+		want  bool
+	}{
+		{
+			name:  "package-qualified method on global var (cache.PSPErrorCache.Get)",
+			chain: []string{"cache", "PSPErrorCache", "Get"},
+			want:  true,
+		},
+		{
+			name:  "call on local variable/param (req.GetEmail)",
+			chain: []string{"req", "GetEmail"},
+			want:  false,
+		},
+		{
+			name:  "call-valued root is not a package (getCache().Get)",
+			chain: []string{"getCache()", "Get"},
+			want:  false,
+		},
+		{
+			name:  "empty chain",
+			chain: nil,
+			want:  false,
+		},
+		{
+			name:  "single-element chain (bare free function)",
+			chain: []string{"Helper"},
+			want:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := callMeta{ReceiverChain: tc.chain}
+			if got := isPackageQualifiedCall(cm, importNames); got != tc.want {
+				t.Errorf("isPackageQualifiedCall(%v) = %v, want %v", tc.chain, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsPackageQualifiedCallNoImports guards the empty-import-set case: with no
+// known imports we cannot classify a root as a package, so nothing is treated as
+// package-qualified (the plausibility check keeps its original behaviour).
+func TestIsPackageQualifiedCallNoImports(t *testing.T) {
+	cm := callMeta{ReceiverChain: []string{"cache", "PSPErrorCache", "Get"}}
+	if isPackageQualifiedCall(cm, nil) {
+		t.Error("with no imports, isPackageQualifiedCall should report false")
+	}
+}
+
+func TestFileImportNames(t *testing.T) {
+	dir := t.TempDir()
+	src := `package p
+
+import (
+	"context"
+	"github.com/tazapay/settlement-orchestration/service/cache"
+	svcresponse "github.com/tazapay/settlement-orchestration/response"
+	_ "embed"
+)
+
+func f(ctx context.Context) {}
+`
+	tmpFile := filepath.Join(dir, "f.go")
+	if err := os.WriteFile(tmpFile, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	names := fileImportNames(tmpFile)
+	if !names["context"] {
+		t.Error("expected 'context' import name")
+	}
+	if !names["cache"] {
+		t.Error("expected 'cache' (last path segment) import name")
+	}
+	if !names["svcresponse"] {
+		t.Error("expected 'svcresponse' alias import name")
+	}
+	if names["_"] {
+		t.Error("blank import '_' must be excluded")
+	}
+}
+
 func TestParseFuncRangesInvalidFile(t *testing.T) {
 	_, err := parseFuncRanges("/nonexistent/path.go")
 	if err == nil {

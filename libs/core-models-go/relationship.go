@@ -56,6 +56,10 @@ const (
 	// DB Relationships
 	CallsDBRel RelationshipType = "CALLS_DB"
 
+	// Cache Relationships
+	// CallsCacheRel connects a Function/Method to a CacheCall node (Redis op site).
+	CallsCacheRel RelationshipType = "CALLS_CACHE"
+
 	// Control-flow reification relationships (Change #2)
 	UnderControlFlowRel RelationshipType = "UNDER_CONTROL_FLOW"
 
@@ -184,6 +188,12 @@ type MentionsRelationship struct {
 
 // CallsDBRelationship connects a function to a DBCall node.
 type CallsDBRelationship struct {
+	BaseRelationship
+	Line int `json:"line" neo4j:"line"`
+}
+
+// CallsCacheRelationship connects a function to a CacheCall node.
+type CallsCacheRelationship struct {
 	BaseRelationship
 	Line int `json:"line" neo4j:"line"`
 }
@@ -317,6 +327,8 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &MentionsRelationship{BaseRelationship: base}
 	case CallsDBRel:
 		return &CallsDBRelationship{BaseRelationship: base}
+	case CallsCacheRel:
+		return &CallsCacheRelationship{BaseRelationship: base}
 	case UnderControlFlowRel:
 		return &UnderControlFlowRelationship{BaseRelationship: base}
 	case InParallelWithRel:

@@ -72,6 +72,12 @@ func GetConstraints() []Constraint {
 			Type:      "UNIQUE",
 		},
 		{
+			Name:      "cachecall_nodekey_unique",
+			NodeLabel: "CacheCall",
+			Property:  "nodeKey",
+			Type:      "UNIQUE",
+		},
+		{
 			Name:      "externalcall_nodekey_unique",
 			NodeLabel: "ExternalCall",
 			Property:  "nodeKey",
@@ -591,6 +597,19 @@ func GetIndexes() []Index {
 			Name:       "dbcall_operation_idx",
 			NodeLabel:  "DBCall",
 			Properties: []string{"operation"},
+			Type:       "BTREE",
+		},
+		// CacheCall indexes (mirrors DBCall — Redis/cache call sites)
+		{
+			Name:       "cachecall_nodekey_scope_idx",
+			NodeLabel:  "CacheCall",
+			Properties: []string{"nodeKey", "scopeId"},
+			Type:       "BTREE",
+		},
+		{
+			Name:       "cachecall_operation_service_idx",
+			NodeLabel:  "CacheCall",
+			Properties: []string{"operation", "serviceName"},
 			Type:       "BTREE",
 		},
 		// ControlFlowScope indexes (Change #2 — control-flow reification)

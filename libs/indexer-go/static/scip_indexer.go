@@ -1434,6 +1434,9 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	extDet := NewExternalCallDetector(si.serviceName, si.scopeCtx)
 	extDet.SetCallNodeBuffer(callBuffer)
 
+	cacheDet := NewCacheCallDetector(si.serviceName, si.scopeCtx)
+	cacheDet.SetCallNodeBuffer(callBuffer)
+
 	// Repo-level constant + event-emission pre-passes power semantic async event indexing:
 	// they turn "EventGroupSettlement + CharDot + EventActionFailed" into "settlement.failed"
 	// and bridge the switch-relay split between trigger functions and their SQS-send helpers.
@@ -1492,6 +1495,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 			_ = eventDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
 			_ = dbDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
 			extDet.DetectInFunction(funcDecl, funcID, importMap, relPath, fset)
+			cacheDet.DetectInFunction(funcDecl, funcID, importMap, relPath, fset)
 			detected++
 		}
 		return nil
