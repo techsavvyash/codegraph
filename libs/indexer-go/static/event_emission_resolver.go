@@ -126,12 +126,13 @@ func (r *EventEmissionResolver) parseFiles() []parsedFile {
 // destination queue/service and whether the event name is supplied by a parameter (relay).
 func (r *EventEmissionResolver) passAClassifyEmitters(files []parsedFile) {
 	for _, pf := range files {
+		queueAliases := queueReceiverAliases(pf.file)
 		for _, decl := range pf.file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
 				continue
 			}
-			send := r.firstAsyncSend(fn)
+			send := r.firstAsyncSend(fn, queueAliases)
 			if send == nil {
 				continue
 			}
@@ -229,6 +230,7 @@ func (r *EventEmissionResolver) forwardsToRelay(fn *ast.FuncDecl) (emitterMeta, 
 // the emitter index from Pass A.
 func (r *EventEmissionResolver) passBAttributeEmissions(files []parsedFile) {
 	for _, pf := range files {
+		queueAliases := queueReceiverAliases(pf.file)
 		for _, decl := range pf.file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -239,9 +241,26 @@ func (r *EventEmissionResolver) passBAttributeEmissions(files []parsedFile) {
 			var out []eventEmission
 
 			// (a) Functions that both choose the name and send it themselves.
-			for _, send := range r.allAsyncSends(fn) {
+			for _, send := range r.allAsyncSends(fn, queueAliases) {
 				destQueue := r.resolveQueueArg(send.Args[1])
 				line := pf.fset.Position(send.Pos()).Line
+
+				// P1-2: create-then-restamp producer — an EventType set on a following line via
+				// `msg.EventType = <expr>` before a direct send. This is attributed regardless
+				// of whether the composite literal ALSO set a (default) EventType: conditional
+				// restamps (TriggerPayinSQS: literal 'pat_webhook.status' + `if …` overrides to
+				// 'pat_webhook.pmt_method_details' / '…tax_invoice_generated') each add another
+				// possible event for the same send. Each RHS resolves like a normal EventType
+				// expression: a fully static value yields a concrete event; a partially static
+				// one degrades to a group.* hub — never a silent drop. The literal's own
+				// EventType (a KeyValueExpr, not an assignment) is excluded here and handled
+				// via evExpr below, so there is no double attribution.
+				for _, rhs := range r.restampEventExprs(fn, send.Args[2]) {
+					if ev, ok := r.resolveEventExpr(rhs); ok {
+						out = append(out, ev.withDest(destQueue, line))
+					}
+				}
+
 				evExpr := r.asyncEventTypeExpr(fn, send)
 				if evExpr == nil {
 					continue
@@ -261,11 +280,26 @@ func (r *EventEmissionResolver) passBAttributeEmissions(files []parsedFile) {
 				}
 			}
 
-			// (b) Relay callers: this function assigns the name(s) then calls a relay helper.
+			// (b) Relay callers: this function chooses the event name(s) then calls a relay
+			// helper that performs the actual send (the sendXxxEvent / triggerXxxEvent split).
 			for _, call := range r.callsToRelayEmitters(fn, pf.fset) {
 				meta := r.emitters[call.name]
+
+				// (b1) name assigned to a local var in this function before the relay call.
 				for _, evs := range localEvents {
 					for _, ev := range evs {
+						out = append(out, ev.withDest(meta.destQueue, call.line))
+					}
+				}
+
+				// (b2, P1-1) name passed DIRECTLY as a constant in the relay's event-name
+				// argument position — e.g. triggerAdjustmentEvent(ctx,
+				// constants.EventAdjustmentCreated, id) — with no intervening local
+				// assignment, so (b1) sees nothing. Resolve that argument concretely. A
+				// forwarded parameter yields no const (resolveEventExpr fails) and is left to
+				// the transitive-relay machinery, so a pure forwarder is never double-counted.
+				if idx := meta.eventParamIdx; idx >= 0 && call.expr != nil && idx < len(call.expr.Args) {
+					if ev, ok := r.resolveEventExpr(call.expr.Args[idx]); ok {
 						out = append(out, ev.withDest(meta.destQueue, call.line))
 					}
 				}
@@ -366,27 +400,30 @@ func (r *EventEmissionResolver) recordEventAssign(
 	}
 }
 
-// mapAssignSwitchContext maps each assignment statement inside a value `switch` (one with a
-// simple identifier tag) to the tag + labels of the case clause it belongs to. Nested switches
-// resolve to the innermost enclosing case: because ast.Inspect visits nodes in preorder, an inner
-// switch is processed after the outer one and overwrites the shared assignment entries.
+// mapAssignSwitchContext maps each assignment statement inside a value `switch` to the tag key +
+// labels of the case clause it belongs to. Nested switches resolve to the innermost enclosing
+// case: because ast.Inspect visits nodes in preorder, an inner switch is processed after the outer
+// one and overwrites the shared assignment entries.
+//
+// P1-3: the tag need not be a bare identifier. A selector tag (`switch payout.status`) binds by
+// the selector name so a `<group> + CharDot + payout.status` case body still enumerates; a call
+// tag (`switch v.GetLabel()`) has no bindable name and yields an opaque key ("") — the case-label
+// context is still recorded, but enumeration is a no-op for it, matching prior behaviour while no
+// longer excluding these switches wholesale.
 func (r *EventEmissionResolver) mapAssignSwitchContext(body *ast.BlockStmt) map[*ast.AssignStmt]*switchCaseCtx {
 	m := map[*ast.AssignStmt]*switchCaseCtx{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		sw, ok := n.(*ast.SwitchStmt)
-		if !ok {
+		if !ok || sw.Body == nil || sw.Tag == nil {
 			return true
 		}
-		tagIdent, ok := sw.Tag.(*ast.Ident)
-		if !ok || sw.Body == nil {
-			return true
-		}
+		tagKey := switchTagKey(sw.Tag)
 		for _, stmt := range sw.Body.List {
 			cc, ok := stmt.(*ast.CaseClause)
 			if !ok || len(cc.List) == 0 {
 				continue // default clause carries no labels to enumerate
 			}
-			ctx := &switchCaseCtx{tag: tagIdent.Name, labels: cc.List}
+			ctx := &switchCaseCtx{tag: tagKey, labels: cc.List}
 			for _, bodyStmt := range cc.Body {
 				ast.Inspect(bodyStmt, func(bn ast.Node) bool {
 					if as, isAssign := bn.(*ast.AssignStmt); isAssign {
@@ -399,6 +436,21 @@ func (r *EventEmissionResolver) mapAssignSwitchContext(body *ast.BlockStmt) map[
 		return true
 	})
 	return m
+}
+
+// switchTagKey returns the constResolver binding key for a switch tag expression: an identifier's
+// name, or a selector's selector name (`payout.status` → "status", matching how resolve() keys
+// selector references). A call tag (`v.GetLabel()`) or any other shape has no bindable name and
+// returns "" — enumeration binding is then a no-op, but the case-label context is still recorded.
+func switchTagKey(tag ast.Expr) string {
+	switch t := tag.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	default:
+		return ""
+	}
 }
 
 // resolveEventExpr resolves an expression to a partial eventEmission (group/action/event/
@@ -420,10 +472,11 @@ func (r *EventEmissionResolver) resolveEventExpr(expr ast.Expr) (eventEmission, 
 type relayCall struct {
 	name string
 	line int
+	expr *ast.CallExpr // the call site, so the event-name argument can be read directly
 }
 
 // callsToRelayEmitters returns calls this function makes to functions classified as relay
-// emitters in Pass A.
+// emitters in Pass A. The first call to each relay wins (bare-name dedup).
 func (r *EventEmissionResolver) callsToRelayEmitters(fn *ast.FuncDecl, fset *token.FileSet) []relayCall {
 	var out []relayCall
 	seen := map[string]bool{}
@@ -438,7 +491,7 @@ func (r *EventEmissionResolver) callsToRelayEmitters(fn *ast.FuncDecl, fset *tok
 		}
 		if meta, ok := r.emitters[name]; ok && meta.relay {
 			seen[name] = true
-			out = append(out, relayCall{name: name, line: fset.Position(call.Pos()).Line})
+			out = append(out, relayCall{name: name, line: fset.Position(call.Pos()).Line, expr: call})
 		}
 		return true
 	})
@@ -446,17 +499,21 @@ func (r *EventEmissionResolver) callsToRelayEmitters(fn *ast.FuncDecl, fset *tok
 }
 
 // firstAsyncSend returns the first queue.SendSQSMsg / queue.SendDelaySQSMsg call in the body.
-func (r *EventEmissionResolver) firstAsyncSend(fn *ast.FuncDecl) *ast.CallExpr {
-	sends := r.allAsyncSends(fn)
+// queueAliases is the set of package identifiers that refer to the grpc-framework queue client
+// in the enclosing file (see queueReceiverAliases).
+func (r *EventEmissionResolver) firstAsyncSend(fn *ast.FuncDecl, queueAliases map[string]bool) *ast.CallExpr {
+	sends := r.allAsyncSends(fn, queueAliases)
 	if len(sends) == 0 {
 		return nil
 	}
 	return sends[0]
 }
 
-// allAsyncSends returns every queue.SendSQSMsg / queue.SendDelaySQSMsg call in the body that
-// carries at least a URL and a message argument.
-func (r *EventEmissionResolver) allAsyncSends(fn *ast.FuncDecl) []*ast.CallExpr {
+// allAsyncSends returns every SendSQSMsg / SendDelaySQSMsg call in the body that carries at least
+// a URL and a message argument. The receiver identifier must resolve to the grpc-framework queue
+// client via queueAliases — so an aliased import such as `sqsqueue "…/client/queue"` used as
+// `sqsqueue.SendSQSMsg(…)` is recognised exactly like the canonical `queue.SendSQSMsg` (P1-1).
+func (r *EventEmissionResolver) allAsyncSends(fn *ast.FuncDecl, queueAliases map[string]bool) []*ast.CallExpr {
 	var out []*ast.CallExpr
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -468,7 +525,7 @@ func (r *EventEmissionResolver) allAsyncSends(fn *ast.FuncDecl) []*ast.CallExpr 
 			return true
 		}
 		recv, ok := sel.X.(*ast.Ident)
-		if !ok || recv.Name != "queue" {
+		if !ok || !queueAliases[recv.Name] {
 			return true
 		}
 		if sel.Sel.Name != "SendSQSMsg" && sel.Sel.Name != "SendDelaySQSMsg" {
@@ -480,6 +537,39 @@ func (r *EventEmissionResolver) allAsyncSends(fn *ast.FuncDecl) []*ast.CallExpr 
 		return true
 	})
 	return out
+}
+
+// queueClientPkgPath is the grpc-framework queue client whose SendSQSMsg / SendDelaySQSMsg
+// functions publish AsyncMessages. Consumers import it under many aliases (queue, sqsqueue,
+// sqsclient, …); a send is a send regardless of the alias, so receiver matching is by import
+// path, not by a hard-coded `queue` token.
+const queueClientPkgPath = "github.com/tazapay/grpc-framework/client/queue"
+
+// queueReceiverAliases returns the set of package identifiers in the file that refer to the
+// grpc-framework queue client. An unaliased import contributes its default name "queue"; an
+// explicitly aliased import contributes the alias. Dot- and blank-imports are ignored (they
+// cannot appear as a `<recv>.SendSQSMsg` receiver).
+func queueReceiverAliases(file *ast.File) map[string]bool {
+	aliases := map[string]bool{}
+	if file == nil {
+		return aliases
+	}
+	for _, imp := range file.Imports {
+		if imp.Path == nil {
+			continue
+		}
+		if strings.Trim(imp.Path.Value, `"`) != queueClientPkgPath {
+			continue
+		}
+		if imp.Name != nil {
+			if n := imp.Name.Name; n != "." && n != "_" {
+				aliases[n] = true
+			}
+			continue
+		}
+		aliases["queue"] = true
+	}
+	return aliases
 }
 
 // asyncEventTypeExpr resolves the EventType field expression of the AsyncMessage that a send
@@ -517,6 +607,39 @@ func (r *EventEmissionResolver) asyncEventTypeExpr(fn *ast.FuncDecl, send *ast.C
 		return true
 	})
 	return found
+}
+
+// restampEventExprs returns the RHS expressions of every `<msgvar>.EventType = <rhs>` field
+// re-assignment applied within fn to the message referred to by arg (the send's message
+// argument). This is the create-then-restamp shape of a direct producer: a fresh
+// `&queue.AsyncMessage{Data: …}` (or a `*qMsg` clone) whose EventType is stamped on a later line
+// and then published directly via queue.SendSQSMsg. Composite-literal EventType fields are
+// deliberately excluded — those are already handled by asyncEventTypeExpr, and this path only
+// runs when that returned nil.
+func (r *EventEmissionResolver) restampEventExprs(fn *ast.FuncDecl, arg ast.Expr) []ast.Expr {
+	name := identOf(arg)
+	if name == "" {
+		return nil
+	}
+	var out []ast.Expr
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			if i >= len(assign.Rhs) {
+				continue
+			}
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "EventType" || identOf(sel.X) != name {
+				continue
+			}
+			out = append(out, assign.Rhs[i])
+		}
+		return true
+	})
+	return out
 }
 
 // resolveQueueArg resolves a send's URL argument to a queue string, unwrapping env.Get(...).

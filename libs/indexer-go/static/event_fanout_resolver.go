@@ -63,6 +63,7 @@ func (m msgRelayMeta) destsForAction(action string) []fanoutDest {
 // destination queue is resolved from the send's URL argument.
 func (r *EventEmissionResolver) classifyMsgRelays(files []parsedFile) {
 	for _, pf := range files {
+		queueAliases := queueReceiverAliases(pf.file)
 		for _, decl := range pf.file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -70,7 +71,7 @@ func (r *EventEmissionResolver) classifyMsgRelays(files []parsedFile) {
 			}
 			var dests []fanoutDest
 			msgIdx := -1
-			for _, send := range r.allAsyncSends(fn) {
+			for _, send := range r.allAsyncSends(fn, queueAliases) {
 				argName := identOf(send.Args[2])
 				if argName == "" {
 					continue

@@ -75,7 +75,9 @@ func emissionEvents(emissions []eventEmission) []string {
 func TestFanout_ReStampedLiteral(t *testing.T) {
 	r := newFanoutTestResolver(t)
 	files := parseFanoutFiles(t, map[string]string{
+		// import required: sends are matched by import path now (P1-1), not a bare `queue` token.
 		"sqs.go": `package p
+import "github.com/tazapay/grpc-framework/client/queue"
 func SendToBalanceConsumer(ctx c, qMsg *queue.AsyncMessage) error {
 	return queue.SendSQSMsg(ctx, fenv.Get(env.BalanceQueue), qMsg)
 }
@@ -102,7 +104,9 @@ func sendToBalanceConsumerForPayout(ctx c, qMsg *queue.AsyncMessage) error {
 func TestFanout_ForwardedThroughWrapper(t *testing.T) {
 	r := newFanoutTestResolver(t)
 	files := parseFanoutFiles(t, map[string]string{
+		// import required: sends are matched by import path now (P1-1), not a bare `queue` token.
 		"sqs.go": `package p
+import "github.com/tazapay/grpc-framework/client/queue"
 func SendToBalanceConsumer(ctx c, qMsg *queue.AsyncMessage) error {
 	return queue.SendSQSMsg(ctx, fenv.Get(env.BalanceQueue), qMsg)
 }
@@ -161,7 +165,9 @@ func TestFanout_PerActionGuard(t *testing.T) {
 	r.consts.values["EmailQueue"] = mustParseExpr(t, `"queue.notification.email"`)
 
 	files := parseFanoutFiles(t, map[string]string{
+		// import required: sends are matched by import path now (P1-1), not a bare `queue` token.
 		"sqs.go": `package p
+import "github.com/tazapay/grpc-framework/client/queue"
 func SendToBalanceConsumer(ctx c, qMsg *queue.AsyncMessage) error {
 	return queue.SendSQSMsg(ctx, fenv.Get(env.BalanceQueue), qMsg)
 }
