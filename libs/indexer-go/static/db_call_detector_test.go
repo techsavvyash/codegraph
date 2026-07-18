@@ -1,6 +1,10 @@
 package static
 
 import (
+	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -78,6 +82,103 @@ func f() {
 	}
 	if d.varDBType["db"] != "sql" {
 		t.Errorf("expected db → sql, got %q", d.varDBType["db"])
+	}
+}
+
+// ── P0-2: *repository.PgxRepo parameter binding ───────────────────────────────
+
+// runDBDetectorOverFile parses src, runs DetectInFunction over every function, and
+// returns the buffered DBCall props. Used for full-pipeline (param-binding) tests.
+func runDBDetectorOverFile(t *testing.T, src string) []map[string]any {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "test.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	buf := newCallNodeBuffer(models.DefaultScope().ScopeID)
+	d := newTestDBDetector()
+	d.SetCallNodeBuffer(buf)
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if err := d.DetectInFunction(context.Background(), fn, "caller-elem-id", "utils/settlement.go", fset); err != nil {
+				t.Fatalf("DetectInFunction: %v", err)
+			}
+		}
+	}
+	out := make([]map[string]any, 0, len(buf.dbCalls))
+	for _, props := range buf.dbCalls {
+		out = append(out, props)
+	}
+	return out
+}
+
+func TestDBDetector_PgxRepoParam_Pointer(t *testing.T) {
+	// The settlement/utils/settlement.go:66 shape: repo *repository.PgxRepo passed
+	// in, used as repo.<Repo>.<Method> with no in-function BeginTx binding.
+	src := `package p
+import (
+	"context"
+	"github.com/tazapay/settlement/repository"
+)
+func DeleteQueueRecord(ctx context.Context, repo *repository.PgxRepo, ids []string) error {
+	_ = repo.QueueRemark.DeleteByIDs(ctx, ids)
+	_ = repo.Queue.DeleteByIDs(ctx, ids)
+	return nil
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 DBCall nodes for repo.<Repo>.<Method>, got %d", len(calls))
+	}
+	repos := map[string]bool{}
+	for _, c := range calls {
+		repos[c["repositoryInterface"].(string)] = true
+		if c["repositoryMethod"] != "DeleteByIDs" {
+			t.Errorf("repositoryMethod = %v, want DeleteByIDs", c["repositoryMethod"])
+		}
+	}
+	if !repos["QueueRemark"] || !repos["Queue"] {
+		t.Errorf("expected QueueRemark and Queue repositories, got %v", repos)
+	}
+}
+
+func TestDBDetector_PgxRepoParam_NonPointerAndAliased(t *testing.T) {
+	// Non-pointer repository.PgxRepo and an aliased import must both bind — the
+	// match is on the type NAME PgxRepo, not the package alias.
+	src := `package p
+import (
+	"context"
+	repo2 "github.com/tazapay/account/repository"
+)
+func f(ctx context.Context, r repo2.PgxRepo, id string) {
+	_ = r.Account.GetByID(ctx, id)
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 DBCall node for aliased non-pointer PgxRepo, got %d", len(calls))
+	}
+	if calls[0]["repositoryInterface"] != "Account" {
+		t.Errorf("repositoryInterface = %v, want Account", calls[0]["repositoryInterface"])
+	}
+}
+
+func TestDBDetector_PgxRepoParam_NoLeakAcrossFunctions(t *testing.T) {
+	// Binding must not leak: a function WITHOUT a PgxRepo param that reuses the
+	// name `repo` for something else must produce no DBCall.
+	src := `package p
+import (
+	"context"
+	"github.com/tazapay/settlement/repository"
+)
+func withRepo(ctx context.Context, repo *repository.PgxRepo) {
+	_ = repo.Queue.DeleteByIDs(ctx)
+}
+func withoutRepo(ctx context.Context, repo string) {
+	_ = repo
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 DBCall (only withRepo), got %d", len(calls))
 	}
 }
 

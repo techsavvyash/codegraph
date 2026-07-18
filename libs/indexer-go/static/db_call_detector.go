@@ -143,6 +143,13 @@ func (d *DBCallDetector) DetectInFunction(
 	d.varDBType = make(map[string]string)
 	d.varStringValue = make(map[string]string)
 
+	// Pass 0 — bind *repository.PgxRepo parameters as tazapay-tx receivers.
+	// 263+ non-test functions across the fleet take `repo *repository.PgxRepo` as a
+	// parameter (settlement/utils, payment-router, account, payin, event, ...) and
+	// call repo.<Repo>.<Method>() without ever binding it via BeginTx in-function.
+	// Matched by TYPE NAME (PgxRepo), not the package alias, so aliased imports work.
+	d.bindPgxRepoParams(funcDecl)
+
 	// Pass 1 — collect variable → DB client type bindings and string variables.
 	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
 		if assign, ok := n.(*ast.AssignStmt); ok {
@@ -289,6 +296,42 @@ func isRepositoryPgxCall(expr *ast.CallExpr) bool {
 		return x.Sel.Name == "repository"
 	}
 	return false
+}
+
+// bindPgxRepoParams binds every function parameter typed *<pkg>.PgxRepo (or the
+// non-pointer <pkg>.PgxRepo) as a "tazapay-tx" receiver so that repo.<Repo>.<Method>
+// calls inside the function are recognised, exactly as if the repo had been bound
+// via repository.Pgx().BeginTx(...) in-function. Match is on the type NAME PgxRepo,
+// not the package alias, so aliased repository imports are still caught.
+func (d *DBCallDetector) bindPgxRepoParams(funcDecl *ast.FuncDecl) {
+	if funcDecl.Type == nil || funcDecl.Type.Params == nil {
+		return
+	}
+	for _, field := range funcDecl.Type.Params.List {
+		if !isPgxRepoType(field.Type) {
+			continue
+		}
+		// A single field may declare multiple names: (a, b *repository.PgxRepo).
+		for _, name := range field.Names {
+			if name.Name == "_" {
+				continue
+			}
+			d.varDBType[name.Name] = "tazapay-tx"
+		}
+	}
+}
+
+// isPgxRepoType reports whether expr is *<pkg>.PgxRepo or <pkg>.PgxRepo, matching
+// on the selector's type name only (package alias is irrelevant).
+func isPgxRepoType(expr ast.Expr) bool {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	return sel.Sel.Name == "PgxRepo"
 }
 
 // detectTazapayRepoCall checks whether callExpr matches the Tazapay repository chain pattern:
