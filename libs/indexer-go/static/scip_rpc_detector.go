@@ -199,6 +199,15 @@ func (d *SCIPRPCDetector) queryHTTPRefs(ctx context.Context) ([]scipCallRef, err
 		      sym.symbol CONTAINS '.Head#' OR
 		      sym.symbol CONTAINS '.Do#'
 		    ))
+		    OR (sym.symbol CONTAINS 'grpc-framework/client/api' AND (
+		      sym.symbol CONTAINS 'Get().' OR
+		      sym.symbol CONTAINS 'Post().' OR
+		      sym.symbol CONTAINS 'Put().' OR
+		      sym.symbol CONTAINS 'Patch().' OR
+		      sym.symbol CONTAINS 'Delete().' OR
+		      sym.symbol CONTAINS 'Do().' OR
+		      sym.symbol CONTAINS 'Stream().'
+		    ))
 		    OR sym.symbol CONTAINS 'resty'
 		    OR sym.symbol CONTAINS 'axios'
 		    OR sym.symbol CONTAINS 'node-fetch'

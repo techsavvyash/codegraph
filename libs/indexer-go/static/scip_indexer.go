@@ -1444,6 +1444,11 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	eventDet.SetConstResolver(constRes)
 	eventDet.SetEmissionResolver(NewEventEmissionResolver(projectPath, constRes))
 
+	apiDet := NewAPIClientCallDetector(si.serviceName, si.scopeCtx)
+	apiDet.SetCallNodeBuffer(callBuffer)
+	apiDet.SetConstResolver(constRes)
+	apiDet.SetServiceIndex(svcIdx)
+
 	repoSQLMap, sqlScanErr := ScanRepositorySQL(projectPath)
 	if sqlScanErr != nil {
 		fmt.Printf("Warning: repository SQL scan failed: %v\n", sqlScanErr)
@@ -1477,6 +1482,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 		}
 
 		importMap := buildImportMap(astFile)
+		apiDet.BeginFile(astFile, importMap)
 
 		for _, decl := range astFile.Decls {
 			funcDecl, ok := decl.(*ast.FuncDecl)
@@ -1496,6 +1502,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 			_ = dbDet.DetectInFunction(ctx, funcDecl, funcID, relPath, fset)
 			extDet.DetectInFunction(funcDecl, funcID, importMap, relPath, fset)
 			cacheDet.DetectInFunction(funcDecl, funcID, importMap, relPath, fset)
+			apiDet.DetectInFunction(funcDecl, funcID, importMap, relPath, fset)
 			detected++
 		}
 		return nil
