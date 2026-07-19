@@ -181,6 +181,32 @@ func TestSplitSignature_args(t *testing.T) {
 	}
 }
 
+// TestNormalizeIdent pins the canonical-name contract that scip_indexer relies on
+// at ingest: SCIP display names for functions/methods carry a descriptor suffix
+// ("EditSettlement().") which must be stripped so `name` is a clean identifier.
+// If this breaks, node names revert to carrying "()." and every exact-match query
+// (analyze_function, rpc_anatomy) silently returns "not found" again.
+func TestNormalizeIdent(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"EditSettlement().", "EditSettlement"},   // method descriptor
+		{"UpdateMerchantBank().", "UpdateMerchantBank"},
+		{"Upsert()", "Upsert"},                    // no trailing dot
+		{"BankModel#Save().", "BankModel"},        // '#' member separator: everything after '#' dropped
+		{"AlreadyClean", "AlreadyClean"},          // no-op on clean names
+		{"  Padded().  ", "Padded"},               // surrounding whitespace
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := normalizeIdent(tc.in); got != tc.want {
+				t.Errorf("normalizeIdent(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGenerateNodeSummary_setupNotShadowedBySet(t *testing.T) {
 	// Longest-prefix-first ordering: "Setup" must win over "Set".
 	got := GenerateNodeSummary(NodeSummaryInput{Name: "SetupRoutes"})

@@ -858,8 +858,19 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		nodeKey = models.VariableNodeKey(si.serviceName, symbolInfo.FilePath, symbolInfo.DisplayName, symbolInfo.StartLine)
 	}
 
+	// Canonicalize the name at ingest. SCIP display names for functions and
+	// methods carry a descriptor suffix (e.g. "EditSettlement()."). Normalizing
+	// it once here makes `name` the single canonical identifier, so exact-match
+	// queries (analyze_function, rpc_anatomy, IMPLEMENTED_BY linking) resolve
+	// without a per-query replace(name,'().','') workaround. normalizeIdent is a
+	// no-op on already-clean names, so it is safe for non-function labels too.
+	nodeName := symbolInfo.DisplayName
+	if label == "Function" || label == "Method" {
+		nodeName = normalizeIdent(symbolInfo.DisplayName)
+	}
+
 	props = map[string]any{
-		"name":             symbolInfo.DisplayName,
+		"name":             nodeName,
 		"nodeKey":          nodeKey,
 		"signature":        symbolInfo.Signature,
 		"filePath":         symbolInfo.FilePath,

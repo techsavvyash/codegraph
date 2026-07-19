@@ -940,7 +940,7 @@ func (s *CodeGraphMCPServer) handleGetSourceTool(ctx context.Context, args map[s
 	cypher := fmt.Sprintf(`
 		MATCH (f)
 		WHERE (f:Function OR f:Method)
-		  AND (f.name = $functionName OR replace(f.name,'().','') = $functionName)
+		  AND f.name = $functionName
 		%s
 		OPTIONAL MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
 		RETURN DISTINCT f.filePath AS filePath, coalesce(f.startLine,0) AS startLine,
@@ -3354,8 +3354,7 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		WHERE svc.scopeId = $scope OR svc.scopeId = 'main'
 		MATCH (svc)-[:CONTAINS*1..4]->(handler)
 		WHERE (handler:Function OR handler:Method)
-		  AND (handler.name = $rpc OR handler.exposedAs = $rpc
-		       OR replace(handler.name,'().','') = $rpc)
+		  AND (handler.name = $rpc OR handler.exposedAs = $rpc)
 		WITH handler ORDER BY coalesce(handler.isRPCHandler,false) DESC LIMIT 1
 
 		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c1)-[:CALLS_DB]->(db:DBCall)
@@ -3869,8 +3868,8 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		MATCH (f)
 		WHERE (f:Function OR f:Method)
 		  AND (f.scopeId = $scopeId OR f.scopeId = 'main')
-		  AND (toLower(replace(f.name,'().','')) = toLower($rpcName)
-		       OR toLower(replace(f.name,'().','')) ENDS WITH ('.' + toLower($rpcName)))
+		  AND (toLower(f.name) = toLower($rpcName)
+		       OR toLower(f.name) ENDS WITH ('.' + toLower($rpcName)))
 		` + serviceFilter + `
 		RETURN elementId(f) AS fId, f.name AS fName, f.filePath AS fFile,
 		       coalesce(f.startLine, 0) AS startLine
@@ -4235,7 +4234,7 @@ func (s *CodeGraphMCPServer) handleAPICallersTool(ctx context.Context, args map[
 	}
 	isRoute := strings.HasPrefix(rpc, "/")
 	// SCIP-indexed names carry a "()." suffix (e.g. "FundPayout()."); normalize before comparing.
-	nameClause := `(toLower(replace(h.name,'().','')) = toLower($rpc) OR toLower(replace(h.name,'().','')) ENDS WITH ('.' + toLower($rpc)))`
+	nameClause := `(toLower(h.name) = toLower($rpc) OR toLower(h.name) ENDS WITH ('.' + toLower($rpc)))`
 	if isRoute {
 		// Route form: find handlers reached by a RESOLVES_TO from an HTTPCall whose URL contains the route.
 		nameClause = `EXISTS { MATCH (rc:HTTPCall)-[:RESOLVES_TO]->(h) WHERE toLower(rc.url) CONTAINS toLower($rpc) }`
@@ -4343,7 +4342,7 @@ func (s *CodeGraphMCPServer) handleAPICallersTool(ctx context.Context, args map[
 			UNION
 			WITH h
 			MATCH (call:GRPCCall)
-			WHERE toLower(coalesce(call.protoMethod, call.targetMethod)) = toLower(replace(h.name,'().',''))
+			WHERE toLower(coalesce(call.protoMethod, call.targetMethod)) = toLower(h.name)
 			  AND NOT (call)-[:RESOLVES_TO]->()
 			RETURN call, 0.5 AS confidence, 'proto_name_fallback' AS how
 		}

@@ -220,7 +220,7 @@ func (d *APISurfaceDetector) linkProtoImplementations(ctx context.Context) (int,
 		  AND coalesce(fn.isTestFunction, false) = false
 		  AND fn.receiverType IS NOT NULL
 		  AND fn.receiverType ENDS WITH 'Server'
-		  AND replace(last(split(fn.name, '.')), '().', '') = pm.name
+		  AND last(split(fn.name, '.')) = pm.name
 		MERGE (pm)-[:IMPLEMENTED_BY]->(fn)
 		SET fn.isRPCHandler = true
 		RETURN count(DISTINCT fn) AS cnt
