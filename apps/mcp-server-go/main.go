@@ -126,10 +126,19 @@ func main() {
 	docIndexer := documents.NewDocumentIndexer(client)
 	commentSearch := search.NewCommentEmbeddingService(client, embeddingService)
 
-	workspaceRoot, err := os.Getwd()
-	if err != nil {
-		workspaceRoot = "."
+	// workspaceRoot decides which stored file paths count as "in workspace". It must be the
+	// parent directory that holds all indexed service repos (e.g. ~/Workspace/Tazapay), which
+	// is NOT necessarily the process cwd — Claude Code spawns MCP servers with the active
+	// project dir as cwd. Prefer the explicit env override; fall back to cwd only if unset.
+	workspaceRoot := getEnvOrDefault("CODEGRAPH_WORKSPACE_ROOT", "")
+	if workspaceRoot == "" {
+		var err error
+		workspaceRoot, err = os.Getwd()
+		if err != nil {
+			workspaceRoot = "."
+		}
 	}
+	log.Printf("workspace root: %s", workspaceRoot)
 
 	server := &CodeGraphMCPServer{
 		client:           client,
@@ -227,13 +236,17 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_get_source",
-			Description: "Retrieve the exact source code for a specific function or method",
+			Description: "Retrieve the exact source code for a specific function or method. If the name exists in multiple services/files, candidates are listed — re-call with the service parameter.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"function_name": map[string]interface{}{
 						"type":        "string",
 						"description": "Name of the function or method to retrieve source code for",
+					},
+					"service": map[string]interface{}{
+						"type":        "string",
+						"description": "Service name to disambiguate when the same function name exists in multiple services",
 					},
 				},
 				"required": []string{"function_name"},
@@ -701,6 +714,34 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 				"required": []string{"event_name"},
 			},
 		},
+		{
+			Name:        "codegraph_api_callers",
+			Description: "Answer 'who calls this API?' across service boundaries in one call. Given an RPC handler (name, proto method, or HTTP route), returns every inbound call site in other services (gRPC/HTTP, with file:line and resolution confidence), folds each caller back to the calling service's own API endpoint, and lists async triggers (events routed to this handler plus their producers). Use this instead of codegraph_trace_call_graph upstream when the question crosses services.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"rpc": map[string]interface{}{
+						"type":        "string",
+						"description": "Handler function name (e.g. 'FundPayout'), proto method name, or HTTP route substring (starts with '/')",
+					},
+					"service": map[string]interface{}{
+						"type":        "string",
+						"description": "Service that OWNS the handler — required when the name exists in multiple services",
+					},
+					"max_depth": map[string]interface{}{
+						"type":        "number",
+						"description": "How far to walk up the calling service's internal call chain to find its entry API (default: 5)",
+						"default":     5,
+					},
+					"scope_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Scope ID to query (default: main)",
+						"default":     "main",
+					},
+				},
+				"required": []string{"rpc"},
+			},
+		},
 	}
 
 	result := map[string]interface{}{
@@ -772,6 +813,8 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleRPCAnatomyTool(ctx, toolCall.Arguments)
 	case "codegraph_event_flow":
 		response = s.handleEventFlowTool(ctx, toolCall.Arguments)
+	case "codegraph_api_callers":
+		response = s.handleAPICallersTool(ctx, toolCall.Arguments)
 	default:
 		s.sendError(request.ID, -32601, "Unknown tool")
 		return
@@ -848,6 +891,9 @@ func (s *CodeGraphMCPServer) handleSearchTool(ctx context.Context, args map[stri
 				if signature != "" {
 					output.WriteString(fmt.Sprintf("  Signature: %s\n", signature))
 				}
+				if summary := getStringProp(props, "summary"); summary != "" {
+					output.WriteString(fmt.Sprintf("  Does: %s\n", summary))
+				}
 
 				// Add specific info based on node type
 				switch nodeType {
@@ -884,15 +930,26 @@ func (s *CodeGraphMCPServer) handleGetSourceTool(ctx context.Context, args map[s
 		}
 	}
 
-	// Get function metadata including file path
-	cypher := `
+	// Get all candidate matches so a cross-service name collision never silently
+	// returns the wrong function's source.
+	service := getOptionalStringArg(args, "service")
+	serviceFilter := ""
+	if service != "" {
+		serviceFilter = `AND EXISTS { MATCH (svc:Service)-[:CONTAINS*1..5]->(f) WHERE toLower(svc.name) = toLower($service) }`
+	}
+	cypher := fmt.Sprintf(`
 		MATCH (f)
-		WHERE (f:Function OR f:Method) AND f.name = $functionName
-		RETURN f.filePath AS filePath
-		LIMIT 1
-	`
+		WHERE (f:Function OR f:Method)
+		  AND (f.name = $functionName OR replace(f.name,'().','') = $functionName)
+		%s
+		OPTIONAL MATCH (svc:Service)-[:CONTAINS*1..5]->(f)
+		RETURN DISTINCT f.filePath AS filePath, coalesce(f.startLine,0) AS startLine,
+		       coalesce(f.endLine,0) AS endLine, coalesce(svc.name,'') AS serviceName,
+		       coalesce(f.summary,'') AS summary
+		LIMIT 10
+	`, serviceFilter)
 
-	result, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"functionName": functionName})
+	result, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"functionName": functionName, "service": service})
 	if err != nil || len(result) == 0 {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error finding function '%s': %v", functionName, err)}},
@@ -900,11 +957,34 @@ func (s *CodeGraphMCPServer) handleGetSourceTool(ctx context.Context, args map[s
 		}
 	}
 
+	// Distinct file paths → ambiguous match; list candidates instead of guessing.
+	distinctFiles := map[string]bool{}
+	for _, r := range result {
+		distinctFiles[getStringFromRecord(r.AsMap(), "filePath")] = true
+	}
+	if len(distinctFiles) > 1 {
+		var out strings.Builder
+		out.WriteString(fmt.Sprintf("'%s' matches %d locations — re-call with the `service` parameter:\n\n", functionName, len(distinctFiles)))
+		for _, r := range result {
+			m := r.AsMap()
+			out.WriteString(fmt.Sprintf("- **%s** %s:%d-%d", getStringFromRecord(m, "serviceName"),
+				getStringFromRecord(m, "filePath"), getIntFromRecord(m, "startLine"), getIntFromRecord(m, "endLine")))
+			if summary := getStringFromRecord(m, "summary"); summary != "" {
+				out.WriteString(" — " + summary)
+			}
+			out.WriteString("\n")
+		}
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: out.String()}}}
+	}
+
 	// Detect language from file path
 	filePath := getStringFromRecord(result[0].AsMap(), "filePath")
 	language := detectLanguageFromPath(filePath)
 
-	sourceCode, err := s.queryBuilder.GetFunctionSourceCode(ctx, functionName)
+	sourceCode, err := s.getSourceByLocation(result[0].AsMap(), functionName)
+	if err != nil {
+		sourceCode, err = s.queryBuilder.GetFunctionSourceCode(ctx, functionName)
+	}
 	if err != nil {
 		return ToolCallResponse{
 			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error retrieving source for '%s': %v", functionName, err)}},
@@ -978,11 +1058,13 @@ func (s *CodeGraphMCPServer) handleAnalyzeFunctionTool(ctx context.Context, args
 
 	// Get function metadata
 	cypher := `
-		MATCH (f:Function {name: $name})
+		MATCH (f)
+		WHERE (f:Function OR f:Method) AND f.name = $name
 		RETURN f.name as name, f.signature as signature, f.filePath as filePath,
 			   f.startLine as startLine, f.endLine as endLine, f.linesOfCode as linesOfCode,
 			   f.returnType as returnType, f.isExported as isExported,
-			   f.complexity as complexity, f.docstring as docstring
+			   f.complexity as complexity, f.docstring as docstring,
+			   coalesce(f.summary, '') as summary
 		LIMIT 1
 	`
 
@@ -1008,6 +1090,9 @@ func (s *CodeGraphMCPServer) handleAnalyzeFunctionTool(ctx context.Context, args
 
 	// Basic info
 	output.WriteString("### Basic Information\n")
+	if summary := getStringFromRecord(record, "summary"); summary != "" {
+		output.WriteString(fmt.Sprintf("- **Does**: %s\n", summary))
+	}
 	if signature := getStringFromRecord(record, "signature"); signature != "" {
 		output.WriteString(fmt.Sprintf("- **Signature**: %s\n", signature))
 	}
@@ -1034,7 +1119,8 @@ func (s *CodeGraphMCPServer) handleAnalyzeFunctionTool(ctx context.Context, args
 
 	// Find callers (functions that call this function)
 	callersQuery := `
-		MATCH (caller)-[:CALLS]->(f:Function {name: $name})
+		MATCH (caller)-[:CALLS]->(f)
+		WHERE (f:Function OR f:Method) AND f.name = $name
 		RETURN caller.name as callerName, caller.filePath as callerFile
 		LIMIT 10
 	`
@@ -1056,7 +1142,8 @@ func (s *CodeGraphMCPServer) handleAnalyzeFunctionTool(ctx context.Context, args
 
 	// Find callees (functions this function calls)
 	calleesQuery := `
-		MATCH (f:Function {name: $name})-[:CALLS]->(callee)
+		MATCH (f)-[:CALLS]->(callee)
+		WHERE (f:Function OR f:Method) AND f.name = $name
 		RETURN callee.name as calleeName, callee.filePath as calleeFile
 		LIMIT 10
 	`
@@ -2753,6 +2840,7 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 		NodeKey   string
 		Name      string
 		FilePath  string
+		Summary   string
 		Exact     bool
 		Workspace bool
 	}
@@ -2767,6 +2855,7 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
                   %s
                 RETURN DISTINCT root.nodeKey AS nodeKey, root.name AS name,
                        coalesce(root.filePath, '') AS filePath,
+                       coalesce(root.summary, '') AS summary,
                        CASE WHEN toLower(root.name) = toLower($name) THEN true ELSE false END AS exact
                 ORDER BY exact DESC, root.name ASC
                 LIMIT 50`, serviceFilterClause("root"))
@@ -2790,6 +2879,7 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 			NodeKey:  getStringFromRecord(m, "nodeKey"),
 			Name:     getStringFromRecord(m, "name"),
 			FilePath: getStringFromRecord(m, "filePath"),
+			Summary:  getStringFromRecord(m, "summary"),
 			Exact:    getBoolFromRecord(m, "exact"),
 		}
 		if c.NodeKey == "" || c.Name == "" {
@@ -2834,6 +2924,9 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 	if root.FilePath != "" {
 		output.WriteString(fmt.Sprintf("Selected root: `%s` (%s)\n\n", root.Name, root.FilePath))
 	}
+	if root.Summary != "" {
+		output.WriteString(fmt.Sprintf("_Does_: %s\n\n", root.Summary))
+	}
 	if len(serviceNames) > 0 {
 		output.WriteString(fmt.Sprintf("_Workspace service filter:_ `%s`\n\n", strings.Join(serviceNames, "`, `")))
 	}
@@ -2852,7 +2945,8 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 			WITH root, callee, length(path) AS depth,
 			     callee.nodeKey AS nodeKey,
 			     callee.filePath AS filePath
-			RETURN DISTINCT nodeKey, callee.name AS name, filePath, depth
+			RETURN DISTINCT nodeKey, callee.name AS name, filePath, depth,
+			       coalesce(callee.summary, '') AS summary
 			ORDER BY depth, callee.name
 			LIMIT 100`, maxDepth, serviceFilterClause("callee"))
 
@@ -2877,11 +2971,14 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 				}
 
 				indent := strings.Repeat("  ", depth)
+				line := fmt.Sprintf("%s→ `%s`", indent, name)
 				if file != "" {
-					output.WriteString(fmt.Sprintf("%s→ `%s` (%s)\n", indent, name, file))
-				} else {
-					output.WriteString(fmt.Sprintf("%s→ `%s`\n", indent, name))
+					line += fmt.Sprintf(" (%s)", file)
 				}
+				if summary := getStringFromRecord(m, "summary"); summary != "" {
+					line += " — " + summary
+				}
+				output.WriteString(line + "\n")
 				count++
 			}
 			if count == 0 {
@@ -2949,7 +3046,7 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 
 	// Upstream: what calls this function?
 	if direction == "upstream" || direction == "both" {
-		output.WriteString("### Upstream (callers)\n\n")
+		output.WriteString("### Upstream (callers)\n\n_Upstream traversal stays within one service. For cross-service inbound callers of an RPC, use codegraph_api_callers._\n\n")
 		cypher := fmt.Sprintf(`
 			MATCH (target {nodeKey: $rootKey})
 			MATCH path = (caller)-[:CALLS*1..%d]->(target)
@@ -2961,7 +3058,9 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 			WITH target, caller, length(path) AS depth,
 			     caller.nodeKey AS nodeKey,
 			     caller.filePath AS filePath
-			RETURN DISTINCT nodeKey, caller.name AS name, filePath, depth
+			RETURN DISTINCT nodeKey, caller.name AS name, filePath, depth,
+			       coalesce(caller.summary, '') AS summary,
+			       coalesce(caller.isRPCHandler, false) AS isHandler
 			ORDER BY depth, caller.name
 			LIMIT 100`, maxDepth, serviceFilterClause("caller"))
 
@@ -2986,11 +3085,17 @@ func (s *CodeGraphMCPServer) handleTraceCallGraphTool(ctx context.Context, args 
 				}
 
 				indent := strings.Repeat("  ", depth)
-				if file != "" {
-					output.WriteString(fmt.Sprintf("%s← `%s` (%s)\n", indent, name, file))
-				} else {
-					output.WriteString(fmt.Sprintf("%s← `%s`\n", indent, name))
+				line := fmt.Sprintf("%s← `%s`", indent, name)
+				if getBoolFromRecord(m, "isHandler") {
+					line += " (API endpoint)"
 				}
+				if file != "" {
+					line += fmt.Sprintf(" (%s)", file)
+				}
+				if summary := getStringFromRecord(m, "summary"); summary != "" {
+					line += " — " + summary
+				}
+				output.WriteString(line + "\n")
 				count++
 			}
 			if count == 0 {
@@ -3247,14 +3352,16 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 	cypher := `
 		MATCH (svc:Service {name: $service})
 		WHERE svc.scopeId = $scope OR svc.scopeId = 'main'
-		MATCH (svc)-[:CONTAINS*1..4]->(handler:Function)
-		WHERE handler.name = $rpc OR handler.exposedAs = $rpc
-		WITH handler LIMIT 1
+		MATCH (svc)-[:CONTAINS*1..4]->(handler)
+		WHERE (handler:Function OR handler:Method)
+		  AND (handler.name = $rpc OR handler.exposedAs = $rpc
+		       OR replace(handler.name,'().','') = $rpc)
+		WITH handler ORDER BY coalesce(handler.isRPCHandler,false) DESC LIMIT 1
 
-		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c1:Function)-[:CALLS_DB]->(db:DBCall)
-		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c2:Function)-[:CALLS_API]->(grpc:GRPCCall)-[:CALLS_SERVICE]->(tGRPC:Service)
-		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c3:Function)-[:CALLS_API]->(http:HTTPCall)-[:CALLS_SERVICE]->(tHTTP:Service)
-		OPTIONAL MATCH (handler)-[:CALLS*0..3]->(c4:Function)-[:CALLS_API]->(event:OutboxCall)
+		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c1)-[:CALLS_DB]->(db:DBCall)
+		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c2)-[:CALLS_API]->(grpc:GRPCCall)-[:CALLS_SERVICE]->(tGRPC:Service)
+		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c3)-[:CALLS_API]->(http:HTTPCall)-[:CALLS_SERVICE]->(tHTTP:Service)
+		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c4)-[:CALLS_API]->(event:OutboxCall)
 
 		RETURN
 		  handler.name AS handlerName,
@@ -3569,39 +3676,87 @@ func (s *CodeGraphMCPServer) fileInWorkspace(filePath string) bool {
 	}
 
 	clean := filepath.Clean(filePath)
-	if filepath.IsAbs(clean) {
-		rel, err := filepath.Rel(s.workspaceRoot, clean)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return false
+
+	// Try both the configured workspace root AND its parent. In a multi-repo layout
+	// (…/Tazapay/settlement, …/Tazapay/account, …), the MCP server is often spawned with
+	// cwd = one repo (…/Tazapay/codegraph) rather than the shared parent. Stored paths are
+	// relative to each service repo, so a sibling service resolves only against the parent.
+	roots := []string{s.workspaceRoot}
+	if parent := filepath.Dir(s.workspaceRoot); parent != "" && parent != s.workspaceRoot {
+		roots = append(roots, parent)
+	}
+	for _, root := range roots {
+		if fileUnderRoot(root, clean) {
+			return true
 		}
-		_, err = os.Stat(clean)
-		return err == nil
+	}
+	return false
+}
+
+// resolveWorkspaceFile locates filePath on disk and returns its absolute path.
+// It mirrors fileInWorkspace's search — the configured workspace root AND its
+// parent (multi-repo layout) — so any file the MCP considers "in workspace" can
+// also be read back, including sibling service repos. Returns ("", false) if the
+// file cannot be located.
+func (s *CodeGraphMCPServer) resolveWorkspaceFile(filePath string) (string, bool) {
+	if filePath == "" {
+		return "", false
+	}
+	clean := filepath.Clean(filePath)
+	roots := []string{s.workspaceRoot}
+	if parent := filepath.Dir(s.workspaceRoot); parent != "" && parent != s.workspaceRoot {
+		roots = append(roots, parent)
+	}
+	for _, root := range roots {
+		if p, ok := resolveUnderRoot(root, clean); ok {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// fileUnderRoot reports whether clean (absolute, or relative to root or one of root's
+// immediate/second-level subdirectories) resolves to an existing file.
+func fileUnderRoot(root, clean string) bool {
+	_, ok := resolveUnderRoot(root, clean)
+	return ok
+}
+
+// resolveUnderRoot resolves clean against root, trying: the path as-is under root,
+// then each of root's immediate and second-level subdirectories (a service repo, or
+// "libs/query-go" when a submodule was indexed in isolation). Returns the resolved
+// absolute path when it names an existing file.
+func resolveUnderRoot(root, clean string) (string, bool) {
+	if filepath.IsAbs(clean) {
+		rel, err := filepath.Rel(root, clean)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", false
+		}
+		if _, err := os.Stat(clean); err == nil {
+			return clean, true
+		}
+		return "", false
 	}
 
 	// 1) Path already rooted at repo root.
-	abs := filepath.Join(s.workspaceRoot, clean)
-	if _, err := os.Stat(abs); err == nil {
-		return true
+	if p := filepath.Join(root, clean); statIsFile(p) {
+		return p, true
 	}
 
-	// 2) Path rooted at module directories (e.g. "flow_spine.go" under
-	// "libs/query-go" when a submodule was indexed in isolation).
-	entries, err := os.ReadDir(s.workspaceRoot)
+	// 2) Path rooted at module directories (e.g. a service repo, or "libs/query-go"
+	// when a submodule was indexed in isolation).
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return false
+		return "", false
 	}
-
 	for _, e1 := range entries {
 		if !e1.IsDir() {
 			continue
 		}
-
-		cand := filepath.Join(s.workspaceRoot, e1.Name(), clean)
-		if _, err := os.Stat(cand); err == nil {
-			return true
+		l1 := filepath.Join(root, e1.Name())
+		if p := filepath.Join(l1, clean); statIsFile(p) {
+			return p, true
 		}
-
-		l1 := filepath.Join(s.workspaceRoot, e1.Name())
 		subEntries, err := os.ReadDir(l1)
 		if err != nil {
 			continue
@@ -3610,14 +3765,18 @@ func (s *CodeGraphMCPServer) fileInWorkspace(filePath string) bool {
 			if !e2.IsDir() {
 				continue
 			}
-			cand2 := filepath.Join(l1, e2.Name(), clean)
-			if _, err := os.Stat(cand2); err == nil {
-				return true
+			if p := filepath.Join(l1, e2.Name(), clean); statIsFile(p) {
+				return p, true
 			}
 		}
 	}
+	return "", false
+}
 
-	return false
+// statIsFile reports whether p exists as a regular (non-directory) file.
+func statIsFile(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 func (s *CodeGraphMCPServer) filterFlowsToWorkspace(ctx context.Context, scopeID string, flows []query.FlowSpineResult) []query.FlowSpineResult {
@@ -3700,20 +3859,22 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 	service := getOptionalStringArg(args, "service")
 	scopeCtx := parseScopeContextArg(args)
 
-	// Locate the handler function.
+	// Locate the handler function/method. Names carry a SCIP "()." suffix, so normalize
+	// before comparing; RPC handlers are usually receiver methods (:Method).
 	serviceFilter := ""
 	if service != "" {
 		serviceFilter = `AND EXISTS { MATCH (svc:Service {name: $service})-[:CONTAINS*1..5]->(f) }`
 	}
 	locateCypher := `
-		MATCH (f:Function)
-		WHERE (f.scopeId = $scopeId OR f.scopeId = 'main')
-		  AND (toLower(f.name) = toLower($rpcName)
-		       OR toLower(f.name) ENDS WITH ('.' + toLower($rpcName)))
+		MATCH (f)
+		WHERE (f:Function OR f:Method)
+		  AND (f.scopeId = $scopeId OR f.scopeId = 'main')
+		  AND (toLower(replace(f.name,'().','')) = toLower($rpcName)
+		       OR toLower(replace(f.name,'().','')) ENDS WITH ('.' + toLower($rpcName)))
 		` + serviceFilter + `
 		RETURN elementId(f) AS fId, f.name AS fName, f.filePath AS fFile,
 		       coalesce(f.startLine, 0) AS startLine
-		ORDER BY startLine
+		ORDER BY coalesce(f.isRPCHandler,false) DESC, startLine
 		LIMIT 1
 	`
 	params := map[string]any{
@@ -3733,21 +3894,22 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 	fName := getStringFromRecord(rm, "fName")
 	fFile := getStringFromRecord(rm, "fFile")
 
-	// Gather all call sites reachable within 3 hops.
+	// Gather all call sites reachable within 6 hops (deep handlers like PayoutAction
+	// reach their DB/gRPC sites via performX → processY → repo chains ~5 hops down).
 	anatomyCypher := `
 		MATCH (root) WHERE elementId(root) = $rootId
 
 		// DB calls
-		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn:Function)-[:CALLS_DB]->(db:DBCall)
+		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn)-[:CALLS_DB]->(db:DBCall)
 		// gRPC calls
-		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn2:Function)-[:CALLS_API]->(grpc:GRPCCall)
+		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn2)-[:CALLS_API]->(grpc:GRPCCall)
 		OPTIONAL MATCH (grpc)-[:CALLS_SERVICE]->(tGRPC:Service)
-		OPTIONAL MATCH (grpc)-[:RESOLVES_TO]->(handler:Function)
+		OPTIONAL MATCH (grpc)-[:RESOLVES_TO]->(handler)
 		// HTTP calls
-		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn3:Function)-[:CALLS_API]->(http:HTTPCall)
+		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn3)-[:CALLS_API]->(http:HTTPCall)
 		OPTIONAL MATCH (http)-[:CALLS_SERVICE]->(tHTTP:Service)
 		// Events
-		OPTIONAL MATCH (root)-[:CALLS*0..3]->(fn4:Function)-[:CALLS_API]->(event:OutboxCall)
+		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn4)-[:CALLS_API]->(event:OutboxCall)
 
 		RETURN
 		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {
@@ -4042,4 +4204,304 @@ func (s *CodeGraphMCPServer) handleEventFlowTool(ctx context.Context, args map[s
 	return ToolCallResponse{
 		Content: []ToolContent{{Type: "text", Text: output.String()}},
 	}
+}
+
+// handleAPICallersTool answers "who calls this API?" across service boundaries in one call:
+// inbound gRPC/HTTP call sites (RESOLVES_TO reverse + proto-name fallback), each folded back
+// to the calling service's own entry API, plus async triggers (ROUTED_TO events + producers).
+func (s *CodeGraphMCPServer) handleAPICallersTool(ctx context.Context, args map[string]interface{}) ToolCallResponse {
+	rpc, ok := args["rpc"].(string)
+	if !ok || rpc == "" {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: "Error: rpc parameter is required"}},
+			IsError: true,
+		}
+	}
+	service := getOptionalStringArg(args, "service")
+	scopeCtx := parseScopeContextArg(args)
+
+	maxDepth := 5
+	if d, ok := args["max_depth"].(float64); ok && d > 0 {
+		maxDepth = int(d)
+	}
+	if maxDepth > 10 {
+		maxDepth = 10
+	}
+
+	// --- 1. Resolve the handler node (exact name first, service-disambiguated) ---
+	serviceFilter := ""
+	if service != "" {
+		serviceFilter = `AND EXISTS { MATCH (svc:Service)-[:CONTAINS*1..5]->(h) WHERE toLower(svc.name) = toLower($service) }`
+	}
+	isRoute := strings.HasPrefix(rpc, "/")
+	// SCIP-indexed names carry a "()." suffix (e.g. "FundPayout()."); normalize before comparing.
+	nameClause := `(toLower(replace(h.name,'().','')) = toLower($rpc) OR toLower(replace(h.name,'().','')) ENDS WITH ('.' + toLower($rpc)))`
+	if isRoute {
+		// Route form: find handlers reached by a RESOLVES_TO from an HTTPCall whose URL contains the route.
+		nameClause = `EXISTS { MATCH (rc:HTTPCall)-[:RESOLVES_TO]->(h) WHERE toLower(rc.url) CONTAINS toLower($rpc) }`
+	}
+	locateCypher := fmt.Sprintf(`
+		MATCH (h)
+		WHERE (h:Function OR h:Method)
+		  AND (h.scopeId = $scopeId OR h.scopeId = 'main')
+		  AND coalesce(h.isTestFunction, false) = false
+		  AND %s
+		  %s
+		OPTIONAL MATCH (svc:Service)-[:CONTAINS*1..5]->(h)
+		RETURN h.nodeKey AS nodeKey, h.name AS name, coalesce(h.filePath,'') AS filePath,
+		       coalesce(h.startLine, 0) AS startLine, coalesce(h.summary,'') AS summary,
+		       coalesce(h.isRPCHandler, false) AS isHandler, coalesce(svc.name,'') AS serviceName
+		ORDER BY isHandler DESC, name ASC
+		LIMIT 10`, nameClause, serviceFilter)
+
+	rows, err := s.client.ExecuteQuery(ctx, locateCypher, map[string]any{
+		"scopeId": scopeCtx.ScopeID,
+		"rpc":     rpc,
+		"service": service,
+	})
+	if err != nil {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("Error locating handler: %v", err)}},
+			IsError: true,
+		}
+	}
+	if len(rows) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No handler found matching %q. Try codegraph_search to find the exact handler name.", rpc)}},
+		}
+	}
+
+	type handlerInfo struct {
+		NodeKey, Name, FilePath, Summary, Service string
+		StartLine                                 int
+	}
+	var handlers []handlerInfo
+	seenSvc := map[string]bool{}
+	for _, r := range rows {
+		m := r.AsMap()
+		h := handlerInfo{
+			NodeKey:   getStringFromRecord(m, "nodeKey"),
+			Name:      getStringFromRecord(m, "name"),
+			FilePath:  getStringFromRecord(m, "filePath"),
+			Summary:   getStringFromRecord(m, "summary"),
+			Service:   getStringFromRecord(m, "serviceName"),
+			StartLine: getIntFromRecord(m, "startLine"),
+		}
+		if h.NodeKey == "" {
+			continue
+		}
+		if h.FilePath != "" && !s.fileInWorkspace(h.FilePath) {
+			continue
+		}
+		handlers = append(handlers, h)
+		seenSvc[h.Service] = true
+	}
+	if len(handlers) == 0 {
+		return ToolCallResponse{
+			Content: []ToolContent{{Type: "text", Text: fmt.Sprintf("No workspace handler found matching %q.", rpc)}},
+		}
+	}
+	// Ambiguity across services with no service filter: list candidates instead of guessing.
+	if service == "" && len(seenSvc) > 1 {
+		var out strings.Builder
+		out.WriteString(fmt.Sprintf("Multiple services define %q — re-call with the `service` parameter:\n\n", rpc))
+		for _, h := range handlers {
+			out.WriteString(fmt.Sprintf("- `%s` in **%s** (%s:%d)", h.Name, h.Service, h.FilePath, h.StartLine))
+			if h.Summary != "" {
+				out.WriteString(" — " + h.Summary)
+			}
+			out.WriteString("\n")
+		}
+		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: out.String()}}}
+	}
+
+	target := handlers[0]
+
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("## Who calls `%s`", target.Name))
+	if target.Service != "" {
+		output.WriteString(fmt.Sprintf(" (%s)", target.Service))
+	}
+	output.WriteString("\n\n")
+	output.WriteString(fmt.Sprintf("**Handler**: `%s` — %s:%d", target.Name, target.FilePath, target.StartLine))
+	if target.Summary != "" {
+		output.WriteString("\n**Does**: " + target.Summary)
+	}
+	output.WriteString("\n\n")
+
+	// --- 2. Inbound sync call sites: RESOLVES_TO reverse, plus proto-name fallback for
+	// call sites the resolution stage didn't link (e.g. partial index). Each caller is
+	// folded back to its own service's entry API via an upstream CALLS walk.
+	inboundCypher := fmt.Sprintf(`
+		MATCH (h {nodeKey: $handlerKey})
+		CALL {
+			WITH h
+			MATCH (call)-[r:RESOLVES_TO]->(h)
+			WHERE call:GRPCCall OR call:HTTPCall
+			RETURN call, coalesce(r.confidence, 0.0) AS confidence,
+			       coalesce(r.resolutionMethod, '') AS how
+			UNION
+			WITH h
+			MATCH (call:GRPCCall)
+			WHERE toLower(coalesce(call.protoMethod, call.targetMethod)) = toLower(replace(h.name,'().',''))
+			  AND NOT (call)-[:RESOLVES_TO]->()
+			RETURN call, 0.5 AS confidence, 'proto_name_fallback' AS how
+		}
+		OPTIONAL MATCH (fn)-[:CALLS_API]->(call) WHERE fn:Function OR fn:Method
+		OPTIONAL MATCH p = (entry)-[:CALLS*1..%d]->(fn)
+		WHERE (entry:Function OR entry:Method)
+		  AND coalesce(entry.isRPCHandler, false) = true
+		  AND coalesce(entry.isTestFunction, false) = false
+		WITH call, confidence, how, fn, entry, length(p) AS hops
+		ORDER BY hops ASC
+		WITH call, confidence, how, fn,
+		     collect(DISTINCT {name: entry.name, file: entry.filePath,
+		                       line: entry.startLine, summary: coalesce(entry.summary,''), hops: hops})[0..3] AS entries
+		RETURN coalesce(call.callerService,'') AS callerService,
+		       CASE WHEN call:GRPCCall THEN 'gRPC' ELSE 'HTTP' END AS protocol,
+		       coalesce(call.filePath,'') AS callFile, coalesce(call.line,0) AS callLine,
+		       confidence, how,
+		       coalesce(fn.name,'') AS fnName, coalesce(fn.summary,'') AS fnSummary,
+		       coalesce(fn.isRPCHandler, false) AS fnIsHandler,
+		       coalesce(fn.filePath,'') AS fnFile, coalesce(fn.startLine,0) AS fnLine,
+		       entries
+		ORDER BY callerService, callFile, callLine
+		LIMIT 60`, maxDepth)
+
+	inRows, err := s.client.ExecuteQuery(ctx, inboundCypher, map[string]any{"handlerKey": target.NodeKey})
+	if err != nil {
+		output.WriteString(fmt.Sprintf("_Error querying inbound calls: %v_\n\n", err))
+	} else if len(inRows) == 0 {
+		output.WriteString("### Inbound API calls\n\n_None found. Either nothing calls this RPC, or the calling services are not indexed (check codegraph_list_services)._\n\n")
+	} else {
+		output.WriteString("### Inbound API calls\n\n")
+		for _, r := range inRows {
+			m := r.AsMap()
+			callerSvc := getStringFromRecord(m, "callerService")
+			protocol := getStringFromRecord(m, "protocol")
+			callFile := getStringFromRecord(m, "callFile")
+			callLine := getIntFromRecord(m, "callLine")
+			fnName := getStringFromRecord(m, "fnName")
+			fnSummary := getStringFromRecord(m, "fnSummary")
+			fnIsHandler := getBoolFromRecord(m, "fnIsHandler")
+			fnFile := getStringFromRecord(m, "fnFile")
+			fnLine := getIntFromRecord(m, "fnLine")
+			conf := 0.0
+			if v, ok := m["confidence"].(float64); ok {
+				conf = v
+			}
+			how := getStringFromRecord(m, "how")
+
+			output.WriteString(fmt.Sprintf("- **%s** [%s, %.1f %s] call at %s:%d\n", callerSvc, protocol, conf, how, callFile, callLine))
+			if fnName != "" {
+				marker := ""
+				if fnIsHandler {
+					marker = " (API endpoint)"
+				}
+				output.WriteString(fmt.Sprintf("  - in `%s`%s — %s:%d", fnName, marker, fnFile, fnLine))
+				if fnSummary != "" {
+					output.WriteString(" — " + fnSummary)
+				}
+				output.WriteString("\n")
+			}
+			if entries, ok := m["entries"].([]interface{}); ok && !fnIsHandler {
+				for _, e := range entries {
+					em, isMap := e.(map[string]any)
+					if !isMap || em["name"] == nil {
+						continue
+					}
+					name, _ := em["name"].(string)
+					file, _ := em["file"].(string)
+					line, _ := em["line"].(int64)
+					summ, _ := em["summary"].(string)
+					hops, _ := em["hops"].(int64)
+					if name == "" {
+						continue
+					}
+					output.WriteString(fmt.Sprintf("  - entry API: `%s` — %s:%d (%d hops up)", name, file, line, hops))
+					if summ != "" {
+						output.WriteString(" — " + summ)
+					}
+					output.WriteString("\n")
+				}
+			}
+		}
+		if len(inRows) == 60 {
+			output.WriteString("\n_Truncated at 60 inbound call sites._\n")
+		}
+		output.WriteString("\n")
+	}
+
+	// --- 3. Async triggers: events routed to this handler, and who produces them ---
+	asyncCypher := `
+		MATCH (et:EventType)-[rt:ROUTED_TO]->(h {nodeKey: $handlerKey})
+		OPTIONAL MATCH (oc:OutboxCall)-[:EMITS_EVENT]->(et)
+		OPTIONAL MATCH (pfn)-[:CALLS_API]->(oc) WHERE pfn:Function OR pfn:Method
+		RETURN et.eventType AS event, rt.tier AS tier, coalesce(rt.confidence,0.0) AS confidence,
+		       coalesce(oc.callerService,'') AS producerSvc, coalesce(oc.filePath,'') AS producerFile,
+		       coalesce(oc.line,0) AS producerLine, coalesce(pfn.name,'') AS producerFn
+		ORDER BY event, producerSvc
+		LIMIT 40`
+	asyncRows, err := s.client.ExecuteQuery(ctx, asyncCypher, map[string]any{"handlerKey": target.NodeKey})
+	if err == nil && len(asyncRows) > 0 {
+		output.WriteString("### Async triggers (events routed to this handler)\n\n")
+		for _, r := range asyncRows {
+			m := r.AsMap()
+			conf := 0.0
+			if v, ok := m["confidence"].(float64); ok {
+				conf = v
+			}
+			event := getStringFromRecord(m, "event")
+			producerSvc := getStringFromRecord(m, "producerSvc")
+			producerFn := getStringFromRecord(m, "producerFn")
+			producerFile := getStringFromRecord(m, "producerFile")
+			producerLine := getIntFromRecord(m, "producerLine")
+			entry := fmt.Sprintf("- `%s` [%s, %.1f]", event, getStringFromRecord(m, "tier"), conf)
+			if producerSvc != "" {
+				entry += fmt.Sprintf(" ← produced by **%s**", producerSvc)
+				if producerFn != "" {
+					entry += fmt.Sprintf(" `%s`", producerFn)
+				}
+				if producerFile != "" {
+					entry += fmt.Sprintf(" (%s:%d)", producerFile, producerLine)
+				}
+			}
+			output.WriteString(entry + "\n")
+		}
+		if len(asyncRows) == 40 {
+			output.WriteString("\n_Truncated at 40 async trigger rows._\n")
+		}
+		output.WriteString("\n")
+	}
+
+	return ToolCallResponse{
+		Content: []ToolContent{{Type: "text", Text: output.String()}},
+	}
+}
+
+// getSourceByLocation extracts a function body by the exact filePath + line range of the
+// already-disambiguated graph record, so a name collision can never return the wrong body.
+func (s *CodeGraphMCPServer) getSourceByLocation(record map[string]interface{}, functionName string) (string, error) {
+	filePath := getStringFromRecord(record, "filePath")
+	startLine := getIntFromRecord(record, "startLine")
+	endLine := getIntFromRecord(record, "endLine")
+	if filePath == "" || startLine <= 0 || endLine < startLine {
+		return "", fmt.Errorf("no precise location for %s", functionName)
+	}
+	// Resolve against every workspace root (incl. sibling service repos) so source
+	// from a repo other than the MCP's cwd — e.g. settlement while cwd=codegraph —
+	// can still be read back.
+	resolved, ok := s.resolveWorkspaceFile(filePath)
+	if !ok {
+		return "", fmt.Errorf("failed to locate %s in workspace", filePath)
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", resolved, err)
+	}
+	lines := strings.Split(string(content), "\n")
+	if endLine > len(lines) {
+		endLine = len(lines)
+	}
+	return strings.Join(lines[startLine-1:endLine], "\n"), nil
 }
