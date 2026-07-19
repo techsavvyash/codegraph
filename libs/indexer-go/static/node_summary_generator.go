@@ -114,7 +114,9 @@ SET n.summary = item.summary`
 		return 0, fmt.Errorf("GenerateAndStoreNodeSummaries: batch write failed: %w", err)
 	}
 
-	log.Printf("[NodeSummaries] wrote summaries for %d/%d nodes", len(updates), len(rows))
+	if indexVerbose {
+		log.Printf("[NodeSummaries] wrote summaries for %d/%d nodes", len(updates), len(rows))
+	}
 	return len(updates), nil
 }
 

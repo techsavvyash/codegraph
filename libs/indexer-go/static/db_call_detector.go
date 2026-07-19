@@ -237,6 +237,22 @@ type DBCallDetector struct {
 	// per file: the struct + constructor + methods all live together. (P2-6)
 	mongoFileCollection string
 
+	// filePgxRepoFields holds struct field NAMES typed *<pkg>.PgxRepo (or the
+	// non-pointer form) declared in the file currently being scanned. Populated by
+	// BeginFile so repo chains rooted at a struct field —
+	// sw.Repo.SettlementAttempt.UpdateByID(...) — resolve like param/var-bound
+	// repos. Matched by the TYPE fact, never by the bare field name "Repo". (P0-6)
+	filePgxRepoFields map[string]bool
+
+	// repoPgxRepoFields is the REPO-WIDE equivalent of filePgxRepoFields, populated
+	// once via SetPgxRepoFields from ScanPgxRepoFields. It catches the case where a
+	// worker struct's PgxRepo field is declared in a different file from the methods
+	// that use it (onboarding Worker: struct in kyb.go, w.Repo.* calls in
+	// update_kyb.go). Ambiguity-guarded at scan time: a field name also used for a
+	// non-PgxRepo field anywhere is excluded, so an unrelated `.Repo.` chain is
+	// never mis-attributed. (P0-6)
+	repoPgxRepoFields map[string]bool
+
 	// P3-1 coverage telemetry. Accumulated across the whole run (NOT reset per function)
 	// so the end-of-run report can show how many recognised DB query-method call sites
 	// were dropped, and why — the P0-2/P0-3 silent-drop class made visible.
@@ -271,12 +287,13 @@ func NewDBCallDetector(client *neo4j.Client, serviceName string, scopeCtx models
 		repoSQLMap = RepoSQLMap{}
 	}
 	return &DBCallDetector{
-		client:         client,
-		serviceName:    serviceName,
-		scopeCtx:       scopeCtx,
-		repoSQLMap:     repoSQLMap,
-		varDBType:      make(map[string]string),
-		varStringValue: make(map[string]string),
+		client:            client,
+		serviceName:       serviceName,
+		scopeCtx:          scopeCtx,
+		repoSQLMap:        repoSQLMap,
+		varDBType:         make(map[string]string),
+		varStringValue:    make(map[string]string),
+		filePgxRepoFields: make(map[string]bool),
 	}
 }
 
@@ -285,19 +302,49 @@ func (d *DBCallDetector) SetCallNodeBuffer(buf *callNodeBuffer) {
 	d.callBuffer = buf
 }
 
+// SetPgxRepoFields installs the repo-wide set of struct field names typed
+// *<pkg>.PgxRepo (from ScanPgxRepoFields), so struct-field repo chains resolve
+// even when the struct and its methods live in different files. (P0-6)
+func (d *DBCallDetector) SetPgxRepoFields(fields map[string]bool) {
+	d.repoPgxRepoFields = fields
+}
+
 // BeginFile resolves the MongoDB collection for the file about to be scanned and
 // caches it in mongoFileCollection. It walks for `<x>.Database(...).Collection(<name>)`
 // constructor calls (the mongo-driver idiom) and resolves <name> either from a string
 // literal or, best-effort, from a `<pkg>.Get<Xxx>Collection()` env getter by stripping
 // the Get/Collection affixes. If the file resolves to exactly one collection it is used;
 // zero or multiple (ambiguous) → "". Call once per file before DetectInFunction. (P2-6)
+//
+// It also collects the file's struct field names typed *<pkg>.PgxRepo into
+// filePgxRepoFields, so field-rooted repo chains resolve. (P0-6)
 func (d *DBCallDetector) BeginFile(astFile *ast.File) {
 	d.mongoFileCollection = ""
+	d.filePgxRepoFields = make(map[string]bool)
 	if astFile == nil {
 		return
 	}
 	found := make(map[string]bool)
 	ast.Inspect(astFile, func(n ast.Node) bool {
+		// P0-6: record struct fields typed *<pkg>.PgxRepo / <pkg>.PgxRepo. An
+		// embedded (unnamed) field is addressed by its type name, "PgxRepo".
+		if st, ok := n.(*ast.StructType); ok && st.Fields != nil {
+			for _, field := range st.Fields.List {
+				if !isPgxRepoType(field.Type) {
+					continue
+				}
+				if len(field.Names) == 0 {
+					d.filePgxRepoFields["PgxRepo"] = true
+					continue
+				}
+				for _, name := range field.Names {
+					if name.Name != "_" {
+						d.filePgxRepoFields[name.Name] = true
+					}
+				}
+			}
+			return true
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -576,6 +623,8 @@ func isPgxRepoType(expr ast.Expr) bool {
 // detectTazapayRepoCall checks whether callExpr matches the Tazapay repository chain pattern:
 //   - repository.Pgx().<RepoName>.<MethodName>(ctx, ...)
 //   - repo.<RepoName>.<MethodName>(ctx, ...)  where repo is tracked as "tazapay-tx"
+//   - sw.Repo.<RepoName>.<MethodName>(ctx, ...)  where Repo is a struct field
+//     typed *<pkg>.PgxRepo declared in this file (filePgxRepoFields, P0-6)
 //
 // Returns repo name, method name, and whether the pattern matched.
 func (d *DBCallDetector) detectTazapayRepoCall(sel *ast.SelectorExpr) (repoName, methodName string, ok bool) {
@@ -597,6 +646,13 @@ func (d *DBCallDetector) detectTazapayRepoCall(sel *ast.SelectorExpr) (repoName,
 	case *ast.Ident:
 		// repo.<RepoName>.<MethodName> where repo was bound via BeginTx
 		if d.varDBType[inner.Name] == "tazapay-tx" {
+			ok = true
+		}
+	case *ast.SelectorExpr:
+		// sw.Repo.<RepoName>.<MethodName> — the repo is a struct field typed
+		// *<pkg>.PgxRepo. Matched by the collected type fact only (file-local first,
+		// then the repo-wide set for cross-file struct declarations). (P0-6)
+		if d.filePgxRepoFields[inner.Sel.Name] || d.repoPgxRepoFields[inner.Sel.Name] {
 			ok = true
 		}
 	}

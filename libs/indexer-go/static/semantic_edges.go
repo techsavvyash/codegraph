@@ -65,7 +65,7 @@ func (sed *SemanticEdgeDetector) DetectSemanticEdges(ctx context.Context) error 
 		fmt.Printf("  Warning: message consumer detection failed: %v\n", err)
 		errs = append(errs, err)
 	} else {
-		fmt.Printf("  Enriched %d functions as message-broker consumers\n", consumers)
+		vprintf("  Enriched %d functions as message-broker consumers\n", consumers)
 	}
 
 	scheduled, err := sed.DetectScheduledFunctions(ctx)
@@ -73,7 +73,7 @@ func (sed *SemanticEdgeDetector) DetectSemanticEdges(ctx context.Context) error 
 		fmt.Printf("  Warning: scheduled function detection failed: %v\n", err)
 		errs = append(errs, err)
 	} else {
-		fmt.Printf("  Enriched %d functions as scheduled/cron tasks\n", scheduled)
+		vprintf("  Enriched %d functions as scheduled/cron tasks\n", scheduled)
 	}
 
 	if len(errs) == 2 {

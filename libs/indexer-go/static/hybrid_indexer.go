@@ -90,7 +90,7 @@ func runASTPass(ctx context.Context, cfg IndexConfig) error {
 	// Use the full constructor so langConfig and all derived fields are initialised.
 	astHost := NewSCIPIndexerWithLanguage(cfg.Client, cfg.ServiceName, cfg.Version, cfg.RepoURL, LanguageGo)
 	astHost.SetScope(cfg.ScopeCtx)
-	if err := astHost.runASTRPCDetection(ctx, cfg.ProjectPath); err != nil {
+	if _, err := astHost.runASTRPCDetection(ctx, cfg.ProjectPath); err != nil {
 		fmt.Printf("Warning: AST RPC/DB/event detection failed: %v\n", err)
 	}
 

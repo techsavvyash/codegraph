@@ -124,9 +124,12 @@ func (s *IndexStats) coverageWarnings() []string {
 	return warns
 }
 
-// Report prints the per-run coverage summary and any coverage WARNs to stdout.
+// Report prints the full per-run coverage telemetry block. It is verbose-only:
+// the block is large, and the load-bearing part — the "a whole wrapper class is
+// invisible" alarms — is surfaced separately (and always) via coverageWarnings,
+// which the SCIP indexer routes into the summary block's footer.
 func (s *IndexStats) Report() {
-	if s == nil {
+	if s == nil || !indexVerbose {
 		return
 	}
 	fmt.Printf("\n  === Coverage telemetry: %s ===\n", s.serviceName)
@@ -166,8 +169,7 @@ func (s *IndexStats) Report() {
 			s.constAmbiguous)
 	}
 
-	for _, w := range s.coverageWarnings() {
-		fmt.Printf("  WARN: %s\n", w)
-	}
+	// Coverage WARNs are surfaced (always, non-verbose too) via reportCoverageWarnings
+	// into the summary block, so they are intentionally not re-printed here.
 	fmt.Printf("  === end telemetry ===\n")
 }

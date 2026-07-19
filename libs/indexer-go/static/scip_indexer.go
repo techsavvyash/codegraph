@@ -57,7 +57,16 @@ type SCIPIndexer struct {
 	skipRPCDetection  bool
 	skipAPIAnalysis   bool
 	skipSemanticEdges bool
+
+	// verbose enables the deep line-by-line diagnostics; default prints only the
+	// phased summary block. report accumulates per-stage timing for that block.
+	verbose bool
+	report  *indexReport
 }
+
+// SetVerbose toggles deep line-by-line indexing diagnostics. When false (the
+// default), only the phased summary block is printed.
+func (si *SCIPIndexer) SetVerbose(v bool) { si.verbose = v }
 
 // NewSCIPIndexer creates a new SCIP-based indexer
 func NewSCIPIndexer(client *neo4j.Client, serviceName, version, repoURL string) *SCIPIndexer {
@@ -87,7 +96,11 @@ func NewSCIPIndexerWithLanguage(client *neo4j.Client, serviceName, version, repo
 
 // IndexProject indexes a project using SCIP
 func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) error {
-	fmt.Printf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
+	setIndexVerbose(si.verbose)
+	if si.report == nil {
+		si.report = newIndexReport(si.serviceName)
+	}
+	vprintf("Starting SCIP indexing for %s project at %s\n", si.langConfig.DisplayName, projectPath)
 
 	// Resolve to absolute so absoluteFilePath can join relative SCIP paths.
 	if absPath, err := filepath.Abs(projectPath); err == nil {
@@ -96,7 +109,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.projectPath = projectPath
 	}
 
-	// Step 1: Generate SCIP index file
+	// Step 1-4: Generate + parse the SCIP index, create the service node, index files.
+	si.report.begin("SCIP")
 	if si.timer != nil {
 		si.timer.Start("SCIP generation")
 	}
@@ -112,9 +126,8 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		defer os.Remove(scipFile) // Clean up temporary file
 	}
 
-	fmt.Printf("Using SCIP index file: %s\n", scipFile)
+	vprintf("Using SCIP index file: %s\n", scipFile)
 
-	// Step 2: Parse the SCIP file
 	if si.timer != nil {
 		si.timer.Start("Parse SCIP file")
 	}
@@ -126,12 +139,11 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(0, "")
 	}
 
-	// Debug: Print SCIP file contents
+	// Debug: Print SCIP file contents (verbose only — DebugPrintSCIPFile self-gates).
 	if err := parser.DebugPrintSCIPFile(); err != nil {
-		fmt.Printf("Warning: failed to debug print SCIP file: %v\n", err)
+		si.report.warn("failed to debug print SCIP file: %v", err)
 	}
 
-	// Step 3: Create service node
 	if si.timer != nil {
 		si.timer.Start("Create service node")
 	}
@@ -143,7 +155,6 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(1, "")
 	}
 
-	// Step 4: Index files
 	if si.timer != nil {
 		si.timer.Start("Index files")
 	}
@@ -159,7 +170,7 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		fileID, err := si.createFileNode(ctx, file, serviceID)
 		if err != nil {
-			fmt.Printf("Warning: failed to create file node for %s: %v\n", file.Path, err)
+			si.report.warn("failed to create file node for %s: %v", file.Path, err)
 			continue
 		}
 		fileNodes[file.Path] = fileID
@@ -167,10 +178,10 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	if si.timer != nil {
 		si.timer.Stop(len(fileNodes), fmt.Sprintf("%d files", len(fileNodes)))
 	}
+	si.report.end(fmt.Sprintf("%d docs → %d files", len(files), len(fileNodes)))
 
-	fmt.Printf("Created %d file nodes\n", len(fileNodes))
-
-	// Step 5: Extract symbols
+	// Step 5-7: Extract + index symbols (defs then refs) and IMPLEMENTS relationships.
+	si.report.begin("Symbols")
 	if si.timer != nil {
 		si.timer.Start("Extract symbols")
 	}
@@ -184,37 +195,34 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		si.timer.Stop(len(symbolDefs), fmt.Sprintf("%d symbols", len(symbolDefs)))
 	}
 
-	// Step 6 & 7: Index symbols (defs then refs) — instrumented inside indexSymbols
 	symIdx, err := si.indexSymbols(ctx, symbolDefs, fileNodes)
 	if err != nil {
 		return fmt.Errorf("failed to index symbols: %w", err)
 	}
+	vprintf("Successfully indexed %d symbols from SCIP data\n", len(symbolDefs))
 
-	fmt.Printf("Successfully indexed %d symbols from SCIP data\n", len(symbolDefs))
-
-	// Step 6b: Extract and index IMPLEMENTS relationships from SCIP
 	if si.timer != nil {
 		si.timer.Start("IMPLEMENTS relationships")
 	}
+	implCount := 0
 	scipRels, err := parser.ExtractRelationships()
 	if err != nil {
-		fmt.Printf("Warning: failed to extract SCIP relationships: %v\n", err)
+		si.report.warn("failed to extract SCIP relationships: %v", err)
 	} else {
-		implCount := 0
 		for _, r := range scipRels {
 			if r.IsImplementation {
 				implCount++
 			}
 		}
-		fmt.Printf("Extracted %d SCIP relationships (%d implementation)\n", len(scipRels), implCount)
+		vprintf("Extracted %d SCIP relationships (%d implementation)\n", len(scipRels), implCount)
 
 		if implCount > 0 && !isNoiseRelType(models.ImplementsRel) {
 			batch := buildImplementsBatch(scipRels, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey)
 			if len(batch) > 0 {
 				if err := si.client.CreateRelsBatch(ctx, string(models.ImplementsRel), batch, batchSize); err != nil {
-					fmt.Printf("Warning: failed to create IMPLEMENTS relationships: %v\n", err)
+					si.report.warn("failed to create IMPLEMENTS relationships: %v", err)
 				} else {
-					fmt.Printf("Created %d IMPLEMENTS relationships\n", len(batch))
+					vprintf("Created %d IMPLEMENTS relationships\n", len(batch))
 				}
 			}
 		}
@@ -226,18 +234,21 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		si.timer.Stop(relCount, "")
 	}
+	si.report.end(fmt.Sprintf("%d syms · %d defs · %d impl", len(symbolDefs), len(symIdx.defIDs), implCount))
 
 	// Step 8: Package dependencies
+	si.report.begin("Deps")
 	if si.timer != nil {
 		si.timer.Start("Package dependencies")
 	}
+	depsCreated, depsSkipped := 0, 0
 	imports, err := parser.ExtractImports(projectPath)
 	if err != nil {
-		fmt.Printf("Warning: failed to extract imports: %v\n", err)
+		si.report.warn("failed to extract imports: %v", err)
 	} else {
-		fmt.Printf("Extracted %d import statements\n", len(imports))
-		if err := si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
-			fmt.Printf("Warning: failed to index package dependencies: %v\n", err)
+		vprintf("Extracted %d import statements\n", len(imports))
+		if depsCreated, depsSkipped, err = si.indexPackageDependencies(ctx, imports, serviceID); err != nil {
+			si.report.warn("failed to index package dependencies: %v", err)
 		}
 	}
 	if si.timer != nil {
@@ -247,17 +258,19 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		}
 		si.timer.Stop(importCount, "")
 	}
+	si.report.end(fmt.Sprintf("%d internal · %d ext/stdlib", depsCreated, depsSkipped))
 
 	// Step 9: Symbol-based API analysis
 	// Step 10: Build call graph (Go only, requires AST for function body ranges).
 	// Must run before API analysis so that Function/Method nodes have correct
 	// startLine/endLine body ranges for findContainingFunction lookups.
 	if !si.skipCallGraph {
+		si.report.begin("Calls")
 		if si.timer != nil {
 			si.timer.Start("Call graph")
 		}
 		if si.language == LanguageGo {
-			fmt.Println("Building call graph from SCIP references + Go AST...")
+			vprintln("Building call graph from SCIP references + Go AST...")
 			cgBuilder := NewSCIPCallGraphBuilder(si.client, projectPath)
 			cgBuilder.SetScope(si.scopeCtx)
 			cgBuilder.SetServiceName(si.serviceName)
@@ -265,10 +278,12 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			// symbol rather than an arbitrary bare-name match.
 			cgBuilder.LoadSCIPResolution(ctx, symbolDefs, symIdx)
 			if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-				fmt.Printf("Warning: call graph construction failed: %v\n", err)
+				si.report.warn("call graph construction failed: %v", err)
 			}
+			si.report.end(fmt.Sprintf("%d CALLS · %d precise/%d bare",
+				cgBuilder.totalCalls, cgBuilder.preciseHits, cgBuilder.fallbackHits))
 		} else {
-			fmt.Println("Building call graph from SCIP references (language-agnostic)...")
+			vprintln("Building call graph from SCIP references (language-agnostic)...")
 			cgBuilder := NewGenericCallGraphBuilder(si.client)
 			cgBuilder.SetScope(si.scopeCtx)
 			cgBuilder.SetServiceName(si.serviceName)
@@ -279,59 +294,68 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			}
 			cgBuilder.SetPackageName(pkgName)
 			if err := cgBuilder.BuildCallGraph(ctx); err != nil {
-				fmt.Printf("Warning: call graph construction failed: %v\n", err)
+				si.report.warn("call graph construction failed: %v", err)
 			}
+			si.report.end("built")
 		}
 		if si.timer != nil {
 			si.timer.Stop(0, "")
 		}
 	}
 
-	// Step 9b: Detect cross-service RPC call sites.
+	// Step 9b: Detect cross-service RPC call sites + outbound DB/HTTP/event/cache.
 	// For Go: use AST-based detection (fast, no Reference nodes needed).
 	// For other languages: fall back to SCIP graph traversal (needs Reference nodes).
 	if !si.skipRPCDetection {
+		si.report.begin("Detectors")
 		if si.language == LanguageGo {
-			fmt.Println("Detecting cross-service RPC call sites via Go AST...")
-			if err := si.runASTRPCDetection(ctx, projectPath); err != nil {
-				fmt.Printf("Warning: AST RPC detection failed: %v\n", err)
+			vprintln("Detecting cross-service RPC call sites via Go AST...")
+			stats, err := si.runASTRPCDetection(ctx, projectPath)
+			if err != nil {
+				si.report.warn("AST RPC detection failed: %v", err)
 			}
+			si.report.end(detectorDetail(stats))
+			si.reportCoverageWarnings(stats)
 		} else {
-			fmt.Println("Detecting cross-service RPC call sites via SCIP symbols...")
+			vprintln("Detecting cross-service RPC call sites via SCIP symbols...")
 			rpcDetector := NewSCIPRPCDetector(si.client, si.serviceName, si.scopeCtx)
 			if svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID); idxErr == nil {
 				rpcDetector.SetServiceIndex(svcIdx)
 			} else {
-				fmt.Printf("Warning: failed to preload service index for SCIP detector: %v\n", idxErr)
+				si.report.warn("failed to preload service index for SCIP detector: %v", idxErr)
 			}
 			if err := rpcDetector.DetectRPCCalls(ctx); err != nil {
-				fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+				si.report.warn("SCIP RPC detection failed: %v", err)
 			}
+			si.report.end("SCIP symbol traversal")
 		}
 	}
 
 	// Step 10b: API analysis (depends on body ranges from call graph step above)
 	if !si.skipAPIAnalysis {
+		si.report.begin("API")
 		if si.timer != nil {
 			si.timer.Start("API analysis")
 		}
 		if si.language == LanguageGo {
 			// Structural API surface detection — zero framework catalogs.
-			fmt.Println("Detecting API surface via graph-structural signals...")
+			vprintln("Detecting API surface via graph-structural signals...")
 			modulePath := readModulePath(projectPath)
 			apiDetector := NewAPISurfaceDetector(si.client, modulePath)
 			apiDetector.SetScope(si.scopeCtx)
 			if err := apiDetector.Detect(ctx); err != nil {
-				fmt.Printf("Warning: structural API surface detection failed: %v\n", err)
+				si.report.warn("structural API surface detection failed: %v", err)
 			}
+			si.report.end("structural surface")
 		} else {
 			// Fallback: framework-pattern-based detection for non-Go languages.
-			fmt.Println("Analyzing API patterns via SCIP symbol matching...")
+			vprintln("Analyzing API patterns via SCIP symbol matching...")
 			symAnalyzer := NewSymbolAnalyzer(si.client, si.serviceName, si.langConfig.DisplayName, projectPath)
 			symAnalyzer.SetScope(si.scopeCtx)
 			if err := symAnalyzer.AnalyzeBySymbols(ctx); err != nil {
-				fmt.Printf("Warning: symbol-based API analysis failed: %v\n", err)
+				si.report.warn("symbol-based API analysis failed: %v", err)
 			}
+			si.report.end("symbol matching")
 		}
 		if si.timer != nil {
 			si.timer.Stop(0, "")
@@ -340,25 +364,29 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 	// Step 10a: Detect semantic edges (message consumers, scheduled functions)
 	if !si.skipSemanticEdges {
-		fmt.Println("Detecting semantic edges...")
+		si.report.begin("Semantic")
+		vprintln("Detecting semantic edges...")
 		sed := NewSemanticEdgeDetector(si.client)
 		sed.SetScope(si.scopeCtx)
 		if err := sed.DetectSemanticEdges(ctx); err != nil {
-			fmt.Printf("Warning: semantic edge detection failed: %v\n", err)
+			si.report.warn("semantic edge detection failed: %v", err)
 		}
+		si.report.end("consumers + cron")
 	}
 
 	// Step 10b: Populate secondary stores (Qdrant + OpenSearch)
 	if !si.skipSecondaryStores && si.embeddingService != nil && si.vectorStore != nil {
+		si.report.begin("Stores")
 		if si.timer != nil {
 			si.timer.Start("Secondary stores")
 		}
-		fmt.Println("Populating secondary stores (Qdrant + OpenSearch)...")
+		vprintln("Populating secondary stores (Qdrant + OpenSearch)...")
 		si.ensureSecondaryStoreIndexes(ctx)
 		si.populateSecondaryStores(ctx)
 		if si.timer != nil {
 			si.timer.Stop(0, "")
 		}
+		si.report.end("Qdrant + OpenSearch")
 	}
 
 	// Step 11: Create PullRequest node for PR overlays (generated-doc creation
@@ -373,12 +401,35 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		if _, err := ctxGen.CreatePullRequestNode(ctx, prID,
 			fmt.Sprintf("PR %s: %s indexing", prID, si.serviceName),
 			"", "", "", ""); err != nil {
-			fmt.Printf("Warning: failed to create PullRequest node: %v\n", err)
+			si.report.warn("failed to create PullRequest node: %v", err)
 		}
 	}
 
-	fmt.Println("SCIP indexing completed successfully")
+	si.report.finish()
 	return nil
+}
+
+// detectorDetail renders the per-detector node-count summary line for the block
+// (DB/Cache/Event/External/GRPC/HTTP/Outbox), from a run's IndexStats.
+func detectorDetail(stats *IndexStats) string {
+	if stats == nil {
+		return "no stats"
+	}
+	w := stats.written
+	return fmt.Sprintf("DB=%d Cache=%d Evt=%d Ext=%d GRPC=%d HTTP=%d Outbox=%d",
+		w["DBCall"], w["CacheCall"], w["EventType"], w["ExternalCall"],
+		w["GRPCCall"], w["HTTPCall"], w["OutboxCall"])
+}
+
+// reportCoverageWarnings routes the P3-1 "a whole wrapper class is invisible"
+// alarms into the report footer so they survive the non-verbose summary.
+func (si *SCIPIndexer) reportCoverageWarnings(stats *IndexStats) {
+	if stats == nil || si.report == nil {
+		return
+	}
+	for _, w := range stats.coverageWarnings() {
+		si.report.warn("%s", w)
+	}
 }
 
 // IndexProjectPolyglot detects all languages present under projectPath, installs
@@ -449,7 +500,7 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 
 		cfg, _ := GetLanguageConfig(r.Language)
 		rel := relLabel(r.Path)
-		fmt.Printf("\n=== Indexing %s at %s ===\n", cfg.DisplayName, rel)
+		vprintf("\n=== Indexing %s at %s ===\n", cfg.DisplayName, rel)
 
 		// Derive a unique service name: serviceName for the project root,
 		// serviceName/rel-path for every sub-module.
@@ -460,6 +511,7 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 
 		sub := NewSCIPIndexerWithLanguage(si.client, subServiceName, si.version, si.repoURL, r.Language)
 		sub.SetScope(si.scopeCtx)
+		sub.SetVerbose(si.verbose)
 		if si.timer != nil {
 			sub.SetBenchmarkTimer(si.timer)
 		}
@@ -492,9 +544,11 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 
 	// Populate secondary stores once after all roots are indexed.
 	if si.embeddingService != nil && si.vectorStore != nil {
-		fmt.Println("\nPopulating secondary stores (Qdrant + OpenSearch)...")
+		t := time.Now()
+		vprintln("\nPopulating secondary stores (Qdrant + OpenSearch)...")
 		si.ensureSecondaryStoreIndexes(ctx)
 		si.populateSecondaryStores(ctx)
+		fmt.Printf(" ▸ %-16s %s\n", "Secondary stores", fmtDur(time.Since(t)))
 	}
 
 	if len(errs) == len(roots) {
@@ -503,11 +557,11 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 
 	// Generate and store one-line summaries for all Function/Method nodes that
 	// don't have one yet.  Two round-trips regardless of service size.
-	fmt.Println("Generating node summaries...")
+	t := time.Now()
 	if n, err := GenerateAndStoreNodeSummaries(ctx, si.client, si.scopeCtx); err != nil {
-		fmt.Printf("Warning: node summary generation failed: %v\n", err)
+		fmt.Printf(" ▸ %-16s failed: %v\n", "Node summaries", err)
 	} else {
-		fmt.Printf("✓ Node summaries generated for %d functions/methods\n", n)
+		fmt.Printf(" ▸ %-16s %d nodes  %s\n", "Node summaries", n, fmtDur(time.Since(t)))
 	}
 
 	return nil
@@ -620,13 +674,13 @@ func (si *SCIPIndexer) generateSCIPIndex(projectPath string) (string, error) {
 	cmd.Dir = absPath
 
 	// Run the command
-	fmt.Printf("Running: %s in %s\n", cmd.String(), absPath)
+	vprintf("Running: %s in %s\n", cmd.String(), absPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s command failed: %w\nOutput: %s", si.langConfig.SCIPBinary, err, string(output))
 	}
 
-	fmt.Printf("%s output: %s\n", si.langConfig.SCIPBinary, string(output))
+	vprintf("%s output: %s\n", si.langConfig.SCIPBinary, string(output))
 
 	// Verify the output file exists
 	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
@@ -1248,13 +1302,15 @@ func (si *SCIPIndexer) indexSymbols(ctx context.Context, symbolDefs []*models.Sy
 	}, nil
 }
 
-// indexPackageDependencies creates DEPENDS_ON relationships between services based on imports
-func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*models.PackageImport, serviceID string) error {
+// indexPackageDependencies creates DEPENDS_ON relationships between services based
+// on imports. It returns (created, skipped): created DEPENDS_ON edges to other
+// indexed services, and external/stdlib packages that resolved to no service.
+func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*models.PackageImport, serviceID string) (created, skipped int, err error) {
 	if len(imports) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 
-	fmt.Printf("Processing %d imports for dependency relationships...\n", len(imports))
+	vprintf("Processing %d imports for dependency relationships...\n", len(imports))
 
 	// Group imports by target package
 	packageMap := make(map[string]int)
@@ -1265,6 +1321,7 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	}
 
 	createdCount := 0
+	skippedCount := 0
 
 	// Create DEPENDS_ON relationships for each external package
 	for packageName, count := range packageMap {
@@ -1293,8 +1350,9 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			map[string]any{"packageName": packageName})
 
 		if err != nil || len(result) == 0 {
-			// Target service not indexed yet, log and skip
-			fmt.Printf("  No service found for package: %s\n", packageName)
+			// Target service not indexed yet (external dep or stdlib) — skip.
+			vprintf("  No service found for package: %s\n", packageName)
+			skippedCount++
 			continue
 		}
 
@@ -1320,15 +1378,15 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			string(models.DependsOnRel), relProps)
 
 		if err != nil {
-			fmt.Printf("Warning: failed to create DEPENDS_ON relationship to %s: %v\n", targetServiceName, err)
+			si.report.warn("failed to create DEPENDS_ON relationship to %s: %v", targetServiceName, err)
 		} else {
-			fmt.Printf("Created DEPENDS_ON: %s -> %s (%d imports)\n", si.serviceName, targetServiceName, count)
+			vprintf("Created DEPENDS_ON: %s -> %s (%d imports)\n", si.serviceName, targetServiceName, count)
 			createdCount++
 		}
 	}
 
-	fmt.Printf("Created %d DEPENDS_ON relationships\n", createdCount)
-	return nil
+	vprintf("Created %d DEPENDS_ON relationships\n", createdCount)
+	return createdCount, skippedCount, nil
 }
 
 // SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
@@ -1410,17 +1468,20 @@ func (si *SCIPIndexer) GetLanguage() Language {
 // function's AST, and runs the AST-based RPC detector. This requires Function
 // nodes to already exist in Neo4j (created during symbol indexing) but does NOT
 // require Reference nodes — making it fast and timeout-proof.
-func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath string) error {
+// runASTRPCDetection walks the Go AST detecting outbound RPC/DB/HTTP/event/cache
+// call sites and returns the run's coverage IndexStats (may be non-nil even on
+// error, e.g. a flush failure, so callers can still surface counts).
+func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath string) (*IndexStats, error) {
 	// Batch-load all Function/Method node IDs for this service into memory.
 	funcIDs, err := si.loadFunctionIDs(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to load function IDs: %w", err)
+		return nil, fmt.Errorf("failed to load function IDs: %w", err)
 	}
-	fmt.Printf("  Loaded %d function/method IDs from Neo4j\n", len(funcIDs))
+	vprintf("  Loaded %d function/method IDs from Neo4j\n", len(funcIDs))
 
 	svcIdx, idxErr := loadServiceIndex(ctx, si.client, si.scopeCtx.ScopeID)
 	if idxErr != nil {
-		fmt.Printf("Warning: failed to preload service index for AST detector: %v\n", idxErr)
+		si.report.warn("failed to preload service index for AST detector: %v", idxErr)
 	}
 
 	callBuffer := newCallNodeBuffer(si.scopeCtx.ScopeID)
@@ -1432,10 +1493,10 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	// package. Overrides fuzzy getter-name derivation (GetPaymentService → payin).
 	getterMap, getterErr := ScanGRPCClientGetters(projectPath)
 	if getterErr != nil {
-		fmt.Printf("Warning: grpcclient getter scan failed: %v\n", getterErr)
+		si.report.warn("grpcclient getter scan failed: %v", getterErr)
 		getterMap = GetterServiceMap{}
 	}
-	fmt.Printf("  grpcclient getter pre-scan: %d getters mapped\n", len(getterMap))
+	vprintf("  grpcclient getter pre-scan: %d getters mapped\n", len(getterMap))
 	rpcDet.SetGetterServiceMap(getterMap)
 
 	eventDet := NewEventCallDetector(si.client, si.serviceName, si.scopeCtx)
@@ -1461,13 +1522,16 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 
 	repoSQLMap, sqlScanErr := ScanRepositorySQL(projectPath)
 	if sqlScanErr != nil {
-		fmt.Printf("Warning: repository SQL scan failed: %v\n", sqlScanErr)
+		si.report.warn("repository SQL scan failed: %v", sqlScanErr)
 		repoSQLMap = RepoSQLMap{}
 	}
-	fmt.Printf("  Repository SQL pre-scan: %d methods resolved\n", len(repoSQLMap))
+	vprintf("  Repository SQL pre-scan: %d methods resolved\n", len(repoSQLMap))
 
 	dbDet := NewDBCallDetector(si.client, si.serviceName, si.scopeCtx, repoSQLMap)
 	dbDet.SetCallNodeBuffer(callBuffer)
+	// P0-6: repo-wide PgxRepo struct-field set so w.Repo.<Repo>.<Method> chains
+	// resolve when the struct is declared in a different file from its methods.
+	dbDet.SetPgxRepoFields(ScanPgxRepoFields(projectPath))
 
 	stats := newIndexStats(si.serviceName) // P3-1 coverage telemetry.
 	detected, skipped := 0, 0
@@ -1521,10 +1585,7 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 		return nil
 	})
 
-	fmt.Printf("  AST RPC scan complete: %d functions processed, %d skipped (no Neo4j ID)\n", detected, skipped)
-	if err != nil {
-		return err
-	}
+	vprintf("  AST RPC scan complete: %d functions processed, %d skipped (no Neo4j ID)\n", detected, skipped)
 
 	// P3-1: snapshot coverage counters BEFORE flush (flush resets the buffer), then report.
 	stats.functionsScanned = detected
@@ -1532,15 +1593,18 @@ func (si *SCIPIndexer) runASTRPCDetection(ctx context.Context, projectPath strin
 	stats.captureWritten(callBuffer)
 	stats.dbCandidatesSeen, stats.dbGenericWritten, stats.dbRejectedUntrackedRecv, stats.dbRejectedUnresolvedSQL = dbDet.Stats()
 	stats.constAmbiguous = constRes.AmbiguousCount()
-	stats.Report()
+	stats.Report() // full telemetry block — verbose only (self-gates)
 
+	if err != nil {
+		return stats, err
+	}
 	if flushErr := callBuffer.flush(ctx, si.client); flushErr != nil {
-		return fmt.Errorf("failed to flush call-node buffer: %w", flushErr)
+		return stats, fmt.Errorf("failed to flush call-node buffer: %w", flushErr)
 	}
 	if resolveErr := si.resolveDBCallMethods(ctx); resolveErr != nil {
-		fmt.Printf("Warning: DBCall→Method resolution failed: %v\n", resolveErr)
+		si.report.warn("DBCall→Method resolution failed: %v", resolveErr)
 	}
-	return nil
+	return stats, nil
 }
 
 // loadFunctionIDs returns a map of "filePath:funcName" → Neo4j elementId for all

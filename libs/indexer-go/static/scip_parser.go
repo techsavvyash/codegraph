@@ -233,7 +233,7 @@ func (sp *SCIPParser) ExtractDocuments() ([]*models.File, error) {
 	}
 
 	if excludedCount > 0 {
-		fmt.Printf("Filtered out %d/%d files from excluded directories (node_modules, vendor, etc.)\n", excludedCount, totalDocs)
+		vprintf("Filtered out %d/%d files from excluded directories (node_modules, vendor, etc.)\n", excludedCount, totalDocs)
 	}
 
 	return files, nil
@@ -449,10 +449,15 @@ func inferLanguage(filePath string) string {
 	}
 }
 
-// DebugPrintSCIPFile prints a human-readable representation of the SCIP file
+// DebugPrintSCIPFile prints a human-readable representation of the SCIP file.
+// It is a no-op unless verbose output is enabled (the dump is large — hundreds
+// of document/occurrence lines — and is diagnostic only).
 func (sp *SCIPParser) DebugPrintSCIPFile() error {
 	if sp.index == nil {
 		return fmt.Errorf("no SCIP index loaded")
+	}
+	if !indexVerbose {
+		return nil
 	}
 
 	fmt.Println("=== SCIP Index Debug Output ===")

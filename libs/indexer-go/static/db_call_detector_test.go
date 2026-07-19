@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"testing"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
@@ -99,6 +100,7 @@ func runDBDetectorOverFile(t *testing.T, src string) []map[string]any {
 	buf := newCallNodeBuffer(models.DefaultScope().ScopeID)
 	d := newTestDBDetector()
 	d.SetCallNodeBuffer(buf)
+	d.BeginFile(f) // file-level facts: mongo collection (P2-6), PgxRepo struct fields (P0-6)
 	for _, decl := range f.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
 			if err := d.DetectInFunction(context.Background(), fn, "caller-elem-id", "utils/settlement.go", fset); err != nil {
@@ -179,6 +181,187 @@ func withoutRepo(ctx context.Context, repo string) {
 	calls := runDBDetectorOverFile(t, src)
 	if len(calls) != 1 {
 		t.Fatalf("expected exactly 1 DBCall (only withRepo), got %d", len(calls))
+	}
+}
+
+// ── P0-6: struct-field PgxRepo receivers ──────────────────────────────────────
+
+func TestDBDetector_StructFieldPgxRepo(t *testing.T) {
+	// settlement/service/grpc/v1/settlement_action.go shape: the worker struct
+	// carries the repo as a field, calls look like sw.Repo.<Repo>.<Method>(...).
+	src := `package p
+import (
+	"context"
+	"github.com/tazapay/settlement/repository"
+)
+type settlementWorker struct {
+	Repo *repository.PgxRepo
+}
+func (sw *settlementWorker) run(ctx context.Context) {
+	_ = sw.Repo.SettlementAttempt.UpdateByID(ctx, "id")
+	_ = sw.Repo.Queue.GetPending(ctx)
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 DBCall nodes for struct-field repo chains, got %d", len(calls))
+	}
+	repos := map[string]bool{}
+	for _, c := range calls {
+		repos[c["repositoryInterface"].(string)] = true
+	}
+	if !repos["SettlementAttempt"] || !repos["Queue"] {
+		t.Errorf("expected SettlementAttempt and Queue repositories, got %v", repos)
+	}
+}
+
+func TestDBDetector_StructFieldPgxRepo_LowercaseNonPointer(t *testing.T) {
+	// account/service/http/v3/update_entity.go shape: lowercase non-pointer field.
+	src := `package p
+import (
+	"context"
+	"github.com/tazapay/account/repository"
+)
+type entityHandler struct {
+	repo repository.PgxRepo
+}
+func (e *entityHandler) update(ctx context.Context) {
+	_ = e.repo.Entity.UpdateByID(ctx, nil)
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 DBCall for lowercase field repo chain, got %d", len(calls))
+	}
+	if calls[0]["repositoryInterface"] != "Entity" {
+		t.Errorf("repositoryInterface = %v, want Entity", calls[0]["repositoryInterface"])
+	}
+}
+
+func TestDBDetector_StructFieldNotPgxRepo_NoMatch(t *testing.T) {
+	// A field named Repo but NOT typed PgxRepo must not bind — the match is the
+	// collected type fact, never the field name.
+	src := `package p
+import "context"
+type client struct{ Sub any }
+type worker struct {
+	Repo *client
+}
+func (w *worker) run(ctx context.Context) {
+	_ = w.Repo.Sub
+}`
+	calls := runDBDetectorOverFile(t, src)
+	if len(calls) != 0 {
+		t.Fatalf("expected 0 DBCalls for non-PgxRepo field, got %d", len(calls))
+	}
+	d := newTestDBDetector()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "test.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	d.BeginFile(f)
+	if d.filePgxRepoFields["Repo"] {
+		t.Errorf("field Repo (*client) must not be collected as a PgxRepo field")
+	}
+}
+
+// runDBDetectorWithRepoFields is runDBDetectorOverFile but injects a repo-wide
+// PgxRepo field set (as ScanPgxRepoFields would), WITHOUT the struct being
+// declared in the scanned file — models the onboarding cross-file layout.
+func runDBDetectorWithRepoFields(t *testing.T, src string, repoFields map[string]bool) []map[string]any {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "test.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	buf := newCallNodeBuffer(models.DefaultScope().ScopeID)
+	d := newTestDBDetector()
+	d.SetCallNodeBuffer(buf)
+	d.SetPgxRepoFields(repoFields)
+	d.BeginFile(f)
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if err := d.DetectInFunction(context.Background(), fn, "caller", "service/http/v3/update_kyb.go", fset); err != nil {
+				t.Fatalf("DetectInFunction: %v", err)
+			}
+		}
+	}
+	out := make([]map[string]any, 0, len(buf.dbCalls))
+	for _, props := range buf.dbCalls {
+		out = append(out, props)
+	}
+	return out
+}
+
+func TestDBDetector_StructFieldPgxRepo_CrossFile(t *testing.T) {
+	// onboarding shape: the Worker struct (with Repo *repository.PgxRepo) is
+	// declared in kyb.go; the w.Repo.<Repo>.<Method> calls are in update_kyb.go.
+	// The struct type is NOT in this file, so only the repo-wide set can bind it.
+	src := `package p
+import "context"
+func (w *Worker) deleteOldBusinessDetails(ctx context.Context) error {
+	_ = w.Repo.Business.Delete(ctx, "id")
+	_ = w.Repo.Address.Delete(ctx, "addr")
+	return nil
+}`
+	calls := runDBDetectorWithRepoFields(t, src, map[string]bool{"Repo": true})
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 cross-file struct-field DBCalls, got %d", len(calls))
+	}
+	repos := map[string]bool{}
+	for _, c := range calls {
+		repos[c["repositoryInterface"].(string)] = true
+	}
+	if !repos["Business"] || !repos["Address"] {
+		t.Errorf("expected Business and Address repositories, got %v", repos)
+	}
+}
+
+func TestDBDetector_StructFieldPgxRepo_CrossFile_NotInSet(t *testing.T) {
+	// If the field name is NOT in the repo-wide set (e.g. dropped as ambiguous, or
+	// simply not a PgxRepo field), a `.Repo.` chain must NOT be treated as a DB call.
+	src := `package p
+import "context"
+func (w *Worker) f(ctx context.Context) {
+	_ = w.Repo.Business.Delete(ctx, "id")
+}`
+	calls := runDBDetectorWithRepoFields(t, src, map[string]bool{}) // empty set
+	if len(calls) != 0 {
+		t.Fatalf("expected 0 DBCalls when field not in repo-wide set, got %d", len(calls))
+	}
+}
+
+func TestScanPgxRepoFields_AmbiguityGuard(t *testing.T) {
+	// A field name typed PgxRepo in one struct but as a different type in another
+	// is ambiguous → excluded, so unrelated `.Repo.` chains can't be mis-bound.
+	dir := t.TempDir()
+	mustWrite(t, dir+"/a.go", `package p
+import "github.com/tazapay/x/repository"
+type Worker struct { Repo *repository.PgxRepo }
+type Other struct { Repo *SomethingElse }
+type SomethingElse struct{}`)
+	got := ScanPgxRepoFields(dir)
+	if got["Repo"] {
+		t.Errorf("ambiguous field name Repo must be excluded, got included: %v", got)
+	}
+}
+
+func TestScanPgxRepoFields_UnambiguousIncluded(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir+"/a.go", `package p
+import "github.com/tazapay/x/repository"
+type Worker struct { Repo *repository.PgxRepo }
+type Handler struct { repo repository.PgxRepo }`)
+	got := ScanPgxRepoFields(dir)
+	if !got["Repo"] || !got["repo"] {
+		t.Errorf("expected Repo and repo in set, got %v", got)
+	}
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

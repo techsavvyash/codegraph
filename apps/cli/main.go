@@ -437,6 +437,11 @@ The language will be auto-detected from the project structure, or you can specif
 			scipIndexer = static.NewSCIPIndexer(client, serviceName, version, repoURL)
 		}
 
+		// Propagate --verbose so deep line-by-line diagnostics are gated; the
+		// default run prints only the phased summary block.
+		verboseFlag, _ := cmd.Flags().GetBool("verbose")
+		scipIndexer.SetVerbose(verboseFlag || verbose)
+
 		// Set scope if provided
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")

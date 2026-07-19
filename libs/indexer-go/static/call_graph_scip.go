@@ -72,6 +72,7 @@ type SCIPCallGraphBuilder struct {
 	fallbackHits   int
 	filteredSkips  int
 	wrongTypeDrops int // SCIP precise hits dropped due to receiver-type mismatch
+	totalCalls     int // CALLS relationships created (read by the index report)
 }
 
 // calleeFiltered is a sentinel returned by resolvePreciseCallee when SCIP resolved
@@ -186,7 +187,7 @@ func (cg *SCIPCallGraphBuilder) LoadSCIPResolution(ctx context.Context, symbolDe
 
 	cg.loadInterfaceImpls(ctx)
 
-	fmt.Printf("  Loaded SCIP resolution: %d symbol→node entries, %d call-site occurrences, %d interface→impl bridges, %d filtered symbols\n",
+	vprintf("  Loaded SCIP resolution: %d symbol→node entries, %d call-site occurrences, %d interface→impl bridges, %d filtered symbols\n",
 		len(cg.symbolToNodeID), len(cg.occIndex), len(cg.ifaceToImpl), len(cg.filteredSymbolKeys))
 }
 
@@ -342,7 +343,7 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 		fmt.Printf("Warning: failed to pre-load module nodes: %v\n", err)
 		cg.moduleNodes = make(map[string]string)
 	}
-	fmt.Printf("  Pre-loaded %d function/method nodes for cross-file resolution\n", len(cg.moduleNodes))
+	vprintf("  Pre-loaded %d function/method nodes for cross-file resolution\n", len(cg.moduleNodes))
 
 	// Get all Go source files in the graph.
 	files, err := cg.listGoFiles(ctx)
@@ -359,9 +360,10 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 		}
 		totalCalls += n
 	}
+	cg.totalCalls = totalCalls
 
-	fmt.Printf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
-	fmt.Printf("  Callee resolution: %d precise (SCIP symbol), %d bare-name fallback, %d filtered/skipped (proto/generated), %d dropped (wrong receiver type)\n",
+	vprintf("Call graph complete: created %d CALLS relationships across %d files\n", totalCalls, len(files))
+	vprintf("  Callee resolution: %d precise (SCIP symbol), %d bare-name fallback, %d filtered/skipped (proto/generated), %d dropped (wrong receiver type)\n",
 		cg.preciseHits, cg.fallbackHits, cg.filteredSkips, cg.wrongTypeDrops)
 
 	// Compute in/out degree properties on all Function/Method nodes in scope.
@@ -394,7 +396,7 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 	if err != nil {
 		return fmt.Errorf("degree computation: %w", err)
 	}
-	fmt.Println("Computed inDegree/outDegree for all Function/Method nodes")
+	vprintln("Computed inDegree/outDegree for all Function/Method nodes")
 	return nil
 }
 
