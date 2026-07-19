@@ -49,8 +49,22 @@ func (d *APISurfaceDetector) Detect(ctx context.Context) error {
 		fmt.Printf("Warning: cross-package detection failed: %v\n", err)
 	}
 
-	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg\n",
-		extCount, crossPkgCount)
+	// Strategy 3: Stamp RPC handlers (isRPCHandler) from the proto-generated
+	// method shape, and link ProtoMethod → handler (IMPLEMENTED_BY) when proto
+	// contracts are indexed. Without this, isRPCHandler is never populated and
+	// every navigation query that pivots on it (api_callers fold-up, flow spine,
+	// handler ranking, summaries) silently degrades.
+	handlerCount, err := d.detectRPCHandlers(ctx)
+	if err != nil {
+		fmt.Printf("Warning: RPC-handler detection failed: %v\n", err)
+	}
+	implCount, err := d.linkProtoImplementations(ctx)
+	if err != nil {
+		fmt.Printf("Warning: proto IMPLEMENTED_BY linking failed: %v\n", err)
+	}
+
+	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d rpc-handlers, %d proto-links\n",
+		extCount, crossPkgCount, handlerCount, implCount)
 	return nil
 }
 
@@ -134,6 +148,98 @@ func (d *APISurfaceDetector) detectCrossPackageTargets(ctx context.Context) (int
 		}
 	}
 	fmt.Printf("  Strategy 2: marked %d functions as cross-package call targets\n", cnt)
+	return cnt, nil
+}
+
+// detectRPCHandlers stamps isRPCHandler=true on gRPC / HTTP-v3 request handlers
+// using a purely structural signal — no framework catalog. Protobuf's Go code
+// generator emits every unary RPC handler as a method on a `…Server` receiver
+// with the fixed shape `func (s *XxxServiceServer) Method(ctx context.Context,
+// req *XxxRequest) (*XxxResponse, error)`. We key off that contract:
+//   - the node is a method (has a receiverType) ending in "Server"
+//   - it is exported and non-test
+//   - it takes exactly two params: a context first, a *…Request second
+//
+// returnType is not captured by the AST pass, so we deliberately do not gate on
+// the *…Response return; the (Server receiver + ctx + *Request) triple is
+// specific enough to avoid false positives from internal helpers, which take
+// domain structs rather than proto request messages.
+func (d *APISurfaceDetector) detectRPCHandlers(ctx context.Context) (int, error) {
+	cypher := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isExported, false) = true
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND fn.receiverType IS NOT NULL
+		  AND fn.receiverType ENDS WITH 'Server'
+		  AND fn.paramTypes IS NOT NULL
+		  AND size(fn.paramTypes) = 2
+		  AND toLower(fn.paramTypes[0]) CONTAINS 'context'
+		  AND fn.paramTypes[1] ENDS WITH 'Request'
+		SET fn.isRPCHandler = true
+		RETURN count(fn) AS cnt
+	`
+
+	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": d.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("rpc-handler detection: %w", err)
+	}
+
+	cnt := 0
+	if len(records) > 0 {
+		if v, ok := records[0].AsMap()["cnt"].(int64); ok {
+			cnt = int(v)
+		}
+	}
+	fmt.Printf("  Strategy 3a: stamped %d functions as RPC handlers\n", cnt)
+	return cnt, nil
+}
+
+// linkProtoImplementations connects each ProtoMethod to the concrete handler that
+// implements it (ProtoMethod)-[:IMPLEMENTED_BY]->(handler), and stamps the handler
+// as isRPCHandler as an authoritative side effect. This is the precise complement
+// to the structural pass above: when the proto contract repo is indexed, the RPC
+// name in the proto service is the ground truth for "this is a handler".
+//
+// It is a no-op when no ProtoMethod nodes exist (proto not yet indexed), so it is
+// safe to always run. Matching is by the bare RPC name (the node name carries a
+// receiver prefix "Recv.Method" and a SCIP "()." suffix, both stripped here),
+// constrained to "…Server" receivers so a same-named caller/helper is never
+// mistaken for the handler. ProtoMethod nodes are not scope-filtered because proto
+// contracts are cross-service rendezvous nodes (indexed under their own service).
+func (d *APISurfaceDetector) linkProtoImplementations(ctx context.Context) (int, error) {
+	cypher := `
+		MATCH (pm:ProtoMethod)
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND coalesce(fn.isExported, false) = true
+		  AND coalesce(fn.isTestFunction, false) = false
+		  AND fn.receiverType IS NOT NULL
+		  AND fn.receiverType ENDS WITH 'Server'
+		  AND replace(last(split(fn.name, '.')), '().', '') = pm.name
+		MERGE (pm)-[:IMPLEMENTED_BY]->(fn)
+		SET fn.isRPCHandler = true
+		RETURN count(DISTINCT fn) AS cnt
+	`
+
+	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": d.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("proto IMPLEMENTED_BY linking: %w", err)
+	}
+
+	cnt := 0
+	if len(records) > 0 {
+		if v, ok := records[0].AsMap()["cnt"].(int64); ok {
+			cnt = int(v)
+		}
+	}
+	fmt.Printf("  Strategy 3b: linked %d handlers to proto methods (IMPLEMENTED_BY)\n", cnt)
 	return cnt, nil
 }
 

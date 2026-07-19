@@ -2,6 +2,7 @@ package static
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -132,6 +133,84 @@ func (s *Server) Handle(path string) {}
 	}
 	if len(r.ParamTypes) != 1 || r.ParamTypes[0] != "string" {
 		t.Errorf("paramTypes = %v, want [string]", r.ParamTypes)
+	}
+}
+
+// TestParseFuncRanges_RPCHandlerShape guards the contract that APISurfaceDetector.
+// detectRPCHandlers relies on: the parser must emit, for a proto-generated RPC
+// handler, a receiverType ending in "Server" plus paramTypes of the form
+// [<context>, *<...>Request]. The isRPCHandler stamping is Cypher (needs Neo4j, so
+// it is not unit-tested here) — but that Cypher matches purely on these parser
+// outputs. If this test breaks, the Cypher predicate in api_surface.go must be
+// updated in lockstep, or isRPCHandler silently reverts to a dead field.
+func TestParseFuncRanges_RPCHandlerShape(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := tmpDir + "/handler.go"
+
+	src := `package test
+
+import (
+	"context"
+
+	v3 "github.com/tazapay/proto/gen/go/onboarding/http/v3"
+)
+
+type BankServiceServer struct{}
+
+// Real RPC handler: proto-generated shape.
+func (s *BankServiceServer) UpdateMerchantBank(ctx context.Context, req *v3.UpdateMerchantBankRequest) (*v3.UpdateMerchantBankResponse, error) {
+	return nil, nil
+}
+
+// Internal helper on the same receiver: takes a domain struct, not a proto
+// request — must NOT satisfy the handler shape.
+type BankModel struct{}
+
+func (s *BankServiceServer) mergeBankFields(ctx context.Context, existing *BankModel) error {
+	return nil
+}
+`
+	if err := writeTestFile(tmpFile, src); err != nil {
+		t.Fatal(err)
+	}
+
+	ranges, err := parseFuncRanges(tmpFile)
+	if err != nil {
+		t.Fatalf("parseFuncRanges: %v", err)
+	}
+	rangeMap := make(map[string]funcRange)
+	for _, r := range ranges {
+		rangeMap[r.Name] = r
+	}
+
+	// matchesHandlerShape mirrors the detectRPCHandlers Cypher predicate exactly:
+	// *…Server receiver, 2 params, param[0] contains "context", param[1] ends "Request".
+	matchesHandlerShape := func(r funcRange) bool {
+		return strings.HasSuffix(r.ReceiverType, "Server") &&
+			len(r.ParamTypes) == 2 &&
+			strings.Contains(strings.ToLower(r.ParamTypes[0]), "context") &&
+			strings.HasSuffix(r.ParamTypes[1], "Request")
+	}
+
+	// Positive: the real handler must match.
+	h, ok := rangeMap["BankServiceServer.UpdateMerchantBank"]
+	if !ok {
+		t.Fatal("handler BankServiceServer.UpdateMerchantBank not found in parsed ranges")
+	}
+	if h.ReceiverType != "*BankServiceServer" {
+		t.Errorf("handler receiverType = %q, want %q", h.ReceiverType, "*BankServiceServer")
+	}
+	if !matchesHandlerShape(h) {
+		t.Errorf("handler did not match RPC-handler shape: receiver=%q params=%v", h.ReceiverType, h.ParamTypes)
+	}
+
+	// Negative: the internal helper must NOT match (param[1] is a domain struct).
+	m, ok := rangeMap["BankServiceServer.mergeBankFields"]
+	if !ok {
+		t.Fatal("helper BankServiceServer.mergeBankFields not found in parsed ranges")
+	}
+	if matchesHandlerShape(m) {
+		t.Errorf("internal helper wrongly matched RPC-handler shape: params=%v", m.ParamTypes)
 	}
 }
 
