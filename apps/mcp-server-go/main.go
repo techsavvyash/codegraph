@@ -3358,16 +3358,16 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		WITH handler ORDER BY coalesce(handler.isRPCHandler,false) DESC LIMIT 1
 
 		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c1)-[:CALLS_DB]->(db:DBCall)
-		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c2)-[:CALLS_API]->(grpc:GRPCCall)-[:CALLS_SERVICE]->(tGRPC:Service)
-		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c3)-[:CALLS_API]->(http:HTTPCall)-[:CALLS_SERVICE]->(tHTTP:Service)
+		OPTIONAL MATCH (handler)-[rg:REACHES_CALL]->(grpc:GRPCCall)
+		OPTIONAL MATCH (handler)-[rh:REACHES_CALL]->(http:HTTPCall)
 		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c4)-[:CALLS_API]->(event:OutboxCall)
 
 		RETURN
 		  handler.name AS handlerName,
 		  handler.filePath AS handlerFile,
 		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, line: db.line} ELSE null END) AS dbCalls,
-		  COLLECT(DISTINCT CASE WHEN tGRPC IS NOT NULL THEN {service: tGRPC.name, method: grpc.targetMethod} ELSE null END) AS grpcCalls,
-		  COLLECT(DISTINCT CASE WHEN tHTTP IS NOT NULL THEN {service: tHTTP.name, url: http.url} ELSE null END) AS httpCalls,
+		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {service: grpc.targetService, method: grpc.targetMethod, hops: rg.hops, via: rg.viaFunction} ELSE null END) AS grpcCalls,
+		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {service: http.targetService, url: http.url, hops: rh.hops, via: rh.viaFunction} ELSE null END) AS httpCalls,
 		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {event: event.eventType, transport: event.transport} ELSE null END) AS events
 		LIMIT 1
 	`
@@ -3441,6 +3441,21 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		return fmt.Sprintf("`%s`", table)
 	})
 
+	// reachSuffix annotates a cross-service call with how deep in the call chain
+	// it sits, so a dependency reached 8 hops down through business logic is
+	// distinguishable from one the handler calls directly.
+	reachSuffix := func(r map[string]interface{}) string {
+		hops := getIntFromRecord(r, "hops")
+		via := getStringFromRecord(r, "via")
+		if hops <= 0 {
+			return ""
+		}
+		if via != "" {
+			return fmt.Sprintf(" _(%d hops deep, via `%s`)_", hops, via)
+		}
+		return fmt.Sprintf(" _(%d hops deep)_", hops)
+	}
+
 	grpcCalls, _ := m["grpcCalls"].([]interface{})
 	writeListSection("gRPC Calls", grpcCalls, func(r map[string]interface{}) string {
 		svcName := getStringFromRecord(r, "service")
@@ -3449,9 +3464,9 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		}
 		method := getStringFromRecord(r, "method")
 		if method != "" {
-			return fmt.Sprintf("**%s** — `%s`", svcName, method)
+			return fmt.Sprintf("**%s** — `%s`%s", svcName, method, reachSuffix(r))
 		}
-		return fmt.Sprintf("**%s**", svcName)
+		return fmt.Sprintf("**%s**%s", svcName, reachSuffix(r))
 	})
 
 	httpCalls, _ := m["httpCalls"].([]interface{})
@@ -3462,9 +3477,9 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		}
 		url := getStringFromRecord(r, "url")
 		if url != "" {
-			return fmt.Sprintf("**%s** — `%s`", svcName, url)
+			return fmt.Sprintf("**%s** — `%s`%s", svcName, url, reachSuffix(r))
 		}
-		return fmt.Sprintf("**%s**", svcName)
+		return fmt.Sprintf("**%s**%s", svcName, reachSuffix(r))
 	})
 
 	events, _ := m["events"].([]interface{})
@@ -3900,13 +3915,13 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 
 		// DB calls
 		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn)-[:CALLS_DB]->(db:DBCall)
-		// gRPC calls
-		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn2)-[:CALLS_API]->(grpc:GRPCCall)
-		OPTIONAL MATCH (grpc)-[:CALLS_SERVICE]->(tGRPC:Service)
+		// gRPC calls — cross-service, any depth, via precomputed reachability closure.
+		// Target read from the resolved targetService property (not a CALLS_SERVICE
+		// edge) so calls to un-indexed downstream services still surface.
+		OPTIONAL MATCH (root)-[rg:REACHES_CALL]->(grpc:GRPCCall)
 		OPTIONAL MATCH (grpc)-[:RESOLVES_TO]->(handler)
-		// HTTP calls
-		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn3)-[:CALLS_API]->(http:HTTPCall)
-		OPTIONAL MATCH (http)-[:CALLS_SERVICE]->(tHTTP:Service)
+		// HTTP calls — cross-service, any depth
+		OPTIONAL MATCH (root)-[rh:REACHES_CALL]->(http:HTTPCall)
 		// Events
 		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn4)-[:CALLS_API]->(event:OutboxCall)
 
@@ -3917,14 +3932,14 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		  } END) AS dbSteps,
 		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {
 		    kind: 'grpc', target: grpc.targetMethod, protoService: coalesce(grpc.protoService,''),
-		    protoMethod: coalesce(grpc.protoMethod,''), targetSvc: coalesce(tGRPC.name,''),
+		    protoMethod: coalesce(grpc.protoMethod,''), targetSvc: coalesce(grpc.targetService,''),
 		    handler: coalesce(handler.name,''), handlerFile: coalesce(handler.filePath,''),
-		    line: grpc.line, file: grpc.filePath, viaFn: fn2.name
+		    line: grpc.line, file: grpc.filePath, viaFn: rg.viaFunction, hops: rg.hops
 		  } END) AS grpcSteps,
 		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {
 		    kind: 'http', url: http.url, method: http.method,
-		    targetSvc: coalesce(tHTTP.name,''), line: http.line,
-		    file: http.filePath, viaFn: fn3.name
+		    targetSvc: coalesce(http.targetService,''), line: http.line,
+		    file: http.filePath, viaFn: rh.viaFunction, hops: rh.hops
 		  } END) AS httpSteps,
 		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {
 		    kind: 'outbox', event: event.eventType, transport: event.transport,

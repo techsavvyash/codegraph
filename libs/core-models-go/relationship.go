@@ -71,6 +71,16 @@ const (
 	// Written by HelperCollapseStage. Carries viaShim property naming the intermediate function.
 	TransitiveCallsAPIRel RelationshipType = "TRANSITIVE_CALLS_API"
 
+	// ReachesCallRel connects an RPC handler to a resolved cross-service call
+	// (GRPCCall/HTTPCall) reachable ANYWHERE in its downstream CALLS chain,
+	// regardless of depth. This is the transitive reachability closure — distinct
+	// from TransitiveCallsAPIRel, which only collapses thin single-RPC shims one
+	// hop. Written at index time by the API-surface enrichment pass so that
+	// handler-scoped tools enumerate deep cross-service dependencies (e.g. a call
+	// 8 hops deep through ordinary business functions) via one hop instead of a
+	// deep, noisy CALLS* walk. Carries hops + viaFunction (the containing fn).
+	ReachesCallRel RelationshipType = "REACHES_CALL" // Function/Method (handler) → GRPCCall/HTTPCall
+
 	// Proto contract relationships (Phase 1.4)
 	DefinesMethodRel RelationshipType = "DEFINES_METHOD"  // ProtoContract → ProtoMethod
 	ImplementedByRel RelationshipType = "IMPLEMENTED_BY"  // ProtoMethod → Function (handler)
@@ -224,6 +234,14 @@ type TransitiveCallsAPIRelationship struct {
 	ResolvedAt int64  `json:"resolvedAt" neo4j:"resolvedAt"`
 }
 
+// ReachesCallRelationship connects an RPC handler to a resolved cross-service
+// call reachable through its downstream CALLS chain (transitive closure).
+type ReachesCallRelationship struct {
+	BaseRelationship
+	Hops        int    `json:"hops" neo4j:"hops"`               // CALLS distance from handler to the containing function
+	ViaFunction string `json:"viaFunction" neo4j:"viaFunction"` // the function that directly makes the call
+}
+
 // DefinesMethodRelationship connects a ProtoContract to its ProtoMethod.
 type DefinesMethodRelationship struct {
 	BaseRelationship
@@ -347,6 +365,8 @@ func RelationshipFactory(relType RelationshipType, startID, endID string, props 
 		return &RoutedToRelationship{BaseRelationship: base}
 	case TransitiveCallsAPIRel:
 		return &TransitiveCallsAPIRelationship{BaseRelationship: base}
+	case ReachesCallRel:
+		return &ReachesCallRelationship{BaseRelationship: base}
 	case DefinesMethodRel:
 		return &DefinesMethodRelationship{BaseRelationship: base}
 	case ImplementedByRel:

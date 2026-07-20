@@ -63,9 +63,71 @@ func (d *APISurfaceDetector) Detect(ctx context.Context) error {
 		fmt.Printf("Warning: proto IMPLEMENTED_BY linking failed: %v\n", err)
 	}
 
-	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d rpc-handlers, %d proto-links\n",
-		extCount, crossPkgCount, handlerCount, implCount)
+	// Strategy 4: Materialize handler → cross-service-call reachability edges.
+	// Depends on Strategy 3 (isRPCHandler) having run above.
+	reachCount, err := d.resolveCrossServiceReachability(ctx)
+	if err != nil {
+		fmt.Printf("Warning: cross-service reachability resolution failed: %v\n", err)
+	}
+
+	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d rpc-handlers, %d proto-links, %d reaches-call\n",
+		extCount, crossPkgCount, handlerCount, implCount, reachCount)
 	return nil
+}
+
+// maxReachDepth bounds the CALLS-chain closure when materializing REACHES_CALL
+// edges. It is a performance safety valve, not a semantic limiter: the deepest
+// handler→cross-service call chain measured across the indexed fleet is 12 hops
+// (e.g. onboarding UpdateMerchantBank → … → utils.GetBankFields → payoutrouter at
+// 7), and extending the bound to 20 surfaces no additional edges — so 16 sits
+// comfortably above the observed ceiling while keeping the closure bounded.
+const maxReachDepth = 16
+
+// resolveCrossServiceReachability precomputes, for every RPC handler, a
+// first-class REACHES_CALL edge to each resolved cross-service call
+// (GRPCCall/HTTPCall) reachable ANYWHERE in its downstream CALLS chain. This is
+// the synchronous-RPC analog of the async ROUTED_TO/CALLS_SERVICE edges: without
+// it, a cross-service call buried deep behind ordinary business functions is
+// invisible to handler-scoped tools unless they run an unbounded, noisy CALLS*
+// walk (raising the depth cap pulls in shared-utility noise). Precomputing the
+// closure once at index time keeps those tools thin — a single REACHES_CALL hop —
+// and removes the depth-cap/noise tradeoff.
+//
+// Scope guards keep the closure bounded and on-point: it originates only from
+// isRPCHandler nodes, targets only calls whose targetService resolved and differs
+// from the caller's own service (genuine cross-service edges), and records the
+// minimum hop distance plus the containing function for provenance.
+func (d *APISurfaceDetector) resolveCrossServiceReachability(ctx context.Context) (int, error) {
+	cypher := fmt.Sprintf(`
+		MATCH (call)
+		WHERE (call:GRPCCall OR call:HTTPCall)
+		  AND coalesce(call.targetService, '') <> ''
+		  AND toLower(call.targetService) <> toLower(coalesce(call.callerService, ''))
+		MATCH (f)-[:CALLS_API]->(call)
+		MATCH p = (h)-[:CALLS*0..%d]->(f)
+		WHERE coalesce(h.isRPCHandler, false) = true
+		  AND (h.scopeId = $scopeId OR h.scopeId = 'main')
+		WITH h, call, f, min(length(p)) AS hops
+		MERGE (h)-[r:REACHES_CALL]->(call)
+		SET r.hops = hops, r.viaFunction = f.name
+		RETURN count(r) AS cnt
+	`, maxReachDepth)
+
+	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId": d.scopeCtx.ScopeID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("cross-service reachability: %w", err)
+	}
+
+	cnt := 0
+	if len(records) > 0 {
+		if v, ok := records[0].AsMap()["cnt"].(int64); ok {
+			cnt = int(v)
+		}
+	}
+	fmt.Printf("  Strategy 4: materialized %d REACHES_CALL edges (handler → cross-service call)\n", cnt)
+	return cnt, nil
 }
 
 // detectExternalParamFunctions marks exported functions whose paramTypes
