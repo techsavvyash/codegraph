@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/documents"
@@ -72,6 +73,11 @@ type CodeGraphMCPServer struct {
 	docIndexer       *documents.DocumentIndexer
 	commentSearch    *search.CommentEmbeddingService
 	workspaceRoot    string
+
+	// writeMu serializes writes to stdout. Required because requests are now
+	// dispatched concurrently (one goroutine per request); without it, two
+	// handlers could interleave bytes of their JSON-RPC responses on the pipe.
+	writeMu sync.Mutex
 }
 
 func main() {
@@ -157,25 +163,54 @@ func main() {
 
 func (s *CodeGraphMCPServer) run() {
 	scanner := bufio.NewScanner(os.Stdin)
+	// Lift the default 64KB line cap (bufio.MaxScanTokenSize). A single
+	// JSON-RPC request larger than 64KB would otherwise abort Scan(), exit the
+	// loop, and shut the server down — surfacing to the client as a disconnect.
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
+	var wg sync.WaitGroup
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
 
-		var request MCPRequest
-		if err := json.Unmarshal([]byte(line), &request); err != nil {
-			s.sendError(request.ID, -32700, "Parse error")
-			continue
-		}
-
-		s.handleRequest(request)
+		// Dispatch each request in its own goroutine so a slow handler (e.g. a
+		// multi-second Neo4j query) does not head-of-line-block subsequent
+		// requests. The client issues tool calls in parallel bursts; serializing
+		// them here made the queue exceed the client's per-request timeout and
+		// caused it to tear down the transport.
+		wg.Add(1)
+		go func(l string) {
+			defer wg.Done()
+			s.dispatch(l)
+		}(line)
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("Error reading input: %v", err)
 	}
+	wg.Wait()
+}
+
+// dispatch parses and handles a single request line, recovering from any panic
+// so one bad request cannot crash the whole server (which would kill the pipe
+// and disconnect the client from every in-flight request).
+func (s *CodeGraphMCPServer) dispatch(line string) {
+	var request MCPRequest
+	if err := json.Unmarshal([]byte(line), &request); err != nil {
+		s.sendError(request.ID, -32700, "Parse error")
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[panic] handling request id=%v method=%s: %v", request.ID, request.Method, r)
+			s.sendError(request.ID, -32603, fmt.Sprintf("Internal error: %v", r))
+		}
+	}()
+
+	s.handleRequest(request)
 }
 
 func (s *CodeGraphMCPServer) handleRequest(request MCPRequest) {
@@ -1354,7 +1389,9 @@ func (s *CodeGraphMCPServer) sendResponse(id interface{}, result interface{}) {
 	}
 
 	jsonBytes, _ := json.Marshal(response)
+	s.writeMu.Lock()
 	fmt.Println(string(jsonBytes))
+	s.writeMu.Unlock()
 }
 
 func (s *CodeGraphMCPServer) sendError(id interface{}, code int, message string) {
@@ -1368,7 +1405,9 @@ func (s *CodeGraphMCPServer) sendError(id interface{}, code int, message string)
 	}
 
 	jsonBytes, _ := json.Marshal(response)
+	s.writeMu.Lock()
 	fmt.Println(string(jsonBytes))
+	s.writeMu.Unlock()
 }
 
 // Helper functions
