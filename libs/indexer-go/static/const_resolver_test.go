@@ -105,7 +105,16 @@ func TestSplitEvent(t *testing.T) {
 		{"payout.auto_initiate", true, "payout", "auto_initiate", false, true},
 		{"settlement.", false, "settlement", "", true, true},
 		{"payout.", false, "payout", "", true, true},
-		{"nodot", true, "", "", false, false},
+		// Single-token events: a fully-static snake_case token in an event-name
+		// position is a concrete event with no group/action split ("quote_expiry"
+		// is a real settlement→fx event). Concrete → dynamic=false.
+		{"quote_expiry", true, "quote_expiry", "", false, true},
+		{"nodot", true, "nodot", "", false, true},
+		// Not fully static, or not a plausible event token → still rejected.
+		{"quote_expiry", false, "", "", false, false},
+		{"CamelCase", true, "", "", false, false},
+		{"ab", true, "", "", false, false},
+		{"has space", true, "", "", false, false},
 		{".action", true, "", "", false, false},
 	}
 	for _, tc := range tests {

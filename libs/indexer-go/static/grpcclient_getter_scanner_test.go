@@ -22,7 +22,10 @@ import (
 	payinsvcpb "github.com/tazapay/proto/gen/go/payin/grpc/v1"
 	solsvcpb "github.com/tazapay/proto/gen/go/sol/grpc/v1"
 	metadatahttpv3 "github.com/tazapay/proto/gen/go/metadata/http/v3"
+	mpdhttpv3 "github.com/tazapay/proto/gen/go/mpdashboard/http/v3"
+	settlementhttpv3 "github.com/tazapay/proto/gen/go/settlement/http/v3"
 	prsvcpb "github.com/tazapay/proto/gen/go/payment-router/grpc/v1"
+	wrapper "github.com/tazapay/grpc-framework/client/wrapper"
 )
 
 func GetPaymentService(ctx context.Context) (payinsvcpb.PaymentServiceClient, error) { return nil, nil }
@@ -31,6 +34,19 @@ func GetMetadataService(ctx context.Context) (metadatahttpv3.MetadataServiceClie
 func AccountHolderNameService(ctx context.Context) (solsvcpb.AccountHolderNameServiceClient, error) { return nil, nil }
 func GetRBACService(ctx context.Context) (accsvcpb.RBACServiceClient, error) { return nil, nil }
 func GetPaymentRouterService(ctx context.Context) (prsvcpb.PaymentRouterServiceClient, error) { return nil, nil }
+
+// PROXY IDIOM: declared return type is the proxy's own proto interface, but the body
+// constructs the TARGET service's generated client — the constructor is the wire truth.
+func GetPayoutServiceClient(ctx context.Context) (mpdhttpv3.PayoutProxyServiceClient, error) {
+	var conn any
+	return settlementhttpv3.NewPayoutServiceClient(conn), nil
+}
+
+// Constructor from a NON-proto package — must fall back to the declared return type.
+func GetSOLWrappedService(ctx context.Context) (solsvcpb.BalanceServiceClient, error) {
+	var conn any
+	return wrapper.NewInstrumentedClient(conn), nil
+}
 
 // Not a getter — must be ignored.
 func InitConnectionManager() {}
@@ -81,6 +97,10 @@ func TestScanGRPCClientGetters(t *testing.T) {
 		{"AccountHolderNameService", "sol", "AccountHolderNameService"},
 		{"GetRBACService", "account", "RBACService"},
 		{"GetPaymentRouterService", "paymentrouter", "PaymentRouterService"}, // hyphen collapsed
+		// Proxy idiom: constructor (settlement) beats declared return type (mpdashboard).
+		{"GetPayoutServiceClient", "settlement", "PayoutService"},
+		// Non-proto constructor: falls back to the declared return type.
+		{"GetSOLWrappedService", "sol", "BalanceService"},
 	}
 	for _, tc := range tests {
 		got, ok := m[tc.getter]

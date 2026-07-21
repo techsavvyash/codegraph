@@ -383,7 +383,7 @@ func (r *EventEmissionResolver) recordEventAssign(
 				continue
 			}
 			enumerated = append(enumerated, eventEmission{
-				event:  makeEventName(group, action),
+				event:  makeEventName(group, action, dynamic),
 				group:  group,
 				action: action,
 			})
@@ -462,7 +462,7 @@ func (r *EventEmissionResolver) resolveEventExpr(expr ast.Expr) (eventEmission, 
 		return eventEmission{}, false
 	}
 	return eventEmission{
-		event:   makeEventName(group, action),
+		event:   makeEventName(group, action, dynamic),
 		group:   group,
 		action:  action,
 		dynamic: dynamic,
@@ -725,9 +725,12 @@ func calleeName(call *ast.CallExpr) string {
 }
 
 // makeEventName joins group/action into an event name, using a "*" wildcard action for hubs.
-func makeEventName(group, action string) string {
+func makeEventName(group, action string, dynamic bool) string {
 	if action == "" {
-		return group + ".*"
+		if dynamic {
+			return group + ".*" // group-fallback hub: action unresolvable at index time
+		}
+		return group // single-token event ("quote_expiry") — the group IS the full name
 	}
 	return group + "." + action
 }

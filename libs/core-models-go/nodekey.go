@@ -148,6 +148,14 @@ func EventTypeNodeKey(group, action string) string {
 	return "eventtype:" + group + "." + action
 }
 
+// EventTypeNodeKeyFromName keys an EventType by its full rendered name. Equivalent to
+// EventTypeNodeKey for group.action and group.* names, but also correct for single-token
+// events ("quote_expiry"), which have an empty action yet are concrete — keying those
+// through the (group, action) form would mint a spurious "quote_expiry.*" hub key.
+func EventTypeNodeKeyFromName(event string) string {
+	return "eventtype:" + event
+}
+
 // OutboxCallNodeKey returns "outboxcall:{service}:{filePath}:{transport}:{event}:{destService}:{line}".
 // destService is part of the identity because a single call site can fan the same event out to
 // several destination services (e.g. the event service relaying to balance AND monitoring), and

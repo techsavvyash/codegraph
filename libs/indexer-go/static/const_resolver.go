@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -260,17 +261,32 @@ func isQueueServiceSegment(s string) bool {
 	return true
 }
 
+// singleTokenEvent matches dotless event names ("quote_expiry"): a lowercase snake_case
+// token. Guards against treating arbitrary resolved strings (URLs, env keys, IDs with
+// uppercase or punctuation) as events.
+var singleTokenEvent = regexp.MustCompile(`^[a-z][a-z0-9_]{2,}$`)
+
 // splitEvent decomposes a resolved event string into its group/action parts.
 //   - "settlement.failed"      → ("settlement", "failed", false, true)
 //   - "settlement." (dynamic)  → ("settlement", "",       true,  true)  // group-fallback hub
 //   - "payout.auto_initiate"   → ("payout", "auto_initiate", false, true)
+//   - "quote_expiry" (static)  → ("quote_expiry", "", false, true)      // single-token event
 //   - "noDotValue"             → ("", "", false, false)                 // not an event
 //
 // `dynamic` is true when the action could not be resolved statically. `ok` is false when the
 // value cannot form a group.action pair and should not produce an EventType node.
+//
+// The single-token case (concrete: dynamic=false with empty action) exists because real
+// event names are not always group.action shaped — settlement publishes "quote_expiry" to
+// the fx queue. It is accepted only for fully-static values: splitEvent's callers all sit
+// in event-name positions (EventType field, relay event argument, route label), so a
+// static snake_case token there is an event, not noise.
 func splitEvent(val string, fullyStatic bool) (group, action string, dynamic, ok bool) {
 	idx := strings.Index(val, ".")
 	if idx < 0 {
+		if fullyStatic && singleTokenEvent.MatchString(val) {
+			return val, "", false, true
+		}
 		return "", "", false, false
 	}
 	group = val[:idx]

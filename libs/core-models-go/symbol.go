@@ -29,10 +29,19 @@ func ParseSCIPSymbol(symbol string) (*SCIPSymbol, error) {
 	}
 
 	return &SCIPSymbol{
-		Scheme:     parts[0],
-		Manager:    parts[1],
-		Name:       parts[2],
-		Version:    parts[3],
+		Scheme:  parts[0],
+		Manager: parts[1],
+		Name:    parts[2],
+		// The package version is dropped ("." is SCIP's own no-version marker) so
+		// symbol identity — and every nodeKey derived from it — is stable across
+		// index runs. The version comes from the CLI --version flag via scip-go's
+		// module metadata; keeping it in the identity means reindexing under a
+		// different version silently DUPLICATES every definition node (observed
+		// live: two CreatePayout handler nodes, "v1.0.0" and "bench", with queries
+		// nondeterministically hitting the stale one). It also lets the same proto
+		// symbol referenced from services pinned to different proto module
+		// versions join on one node.
+		Version:    ".",
 		Descriptor: parts[4],
 	}, nil
 }

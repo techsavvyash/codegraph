@@ -502,6 +502,21 @@ The language will be auto-detected from the project structure, or you can specif
 			}
 			fmt.Println("✓ Polyglot indexing completed successfully")
 		}
+
+		// Cross-service resolution (RESOLVES_TO, ROUTED_TO, OutboxCall downstream
+		// links). Global and idempotent, so re-running after each service keeps the
+		// cross-service layer current — previously this only happened when someone
+		// remembered `codegraph resolve`, so a fresh graph had rich per-service data
+		// but ZERO cross-service edges until the manual step ran.
+		resolver := pipeline.NewCrossServiceHandlerResolver(client)
+		if resScope, scopeErr := models.ParseScopeFlags(scopeFlag, scopeIDFlag); scopeErr == nil {
+			resolver.SetScope(resScope)
+		}
+		if n, err := resolver.Resolve(ctx); err != nil {
+			fmt.Printf("Warning: cross-service resolution failed: %v\n", err)
+		} else {
+			fmt.Printf("✓ Cross-service resolution complete (%d RESOLVES_TO edges)\n", n)
+		}
 		return nil
 	},
 }

@@ -127,7 +127,21 @@ func scanGRPCClientFile(path string, m GetterServiceMap) {
 			continue
 		}
 
-		alias, typeName := firstResultPkgType(fn)
+		// The declared return type is only an interface the concrete client satisfies.
+		// In the proxy idiom the two disagree —
+		//
+		//	func GetPayoutServiceClient(ctx) (mpdashboardhttpv3.PayoutProxyServiceClient, error) {
+		//	    return settlementhttpv3.NewPayoutServiceClient(conn), nil
+		//	}
+		//
+		// — and the constructor names the generated client actually put on the wire,
+		// so the call targets settlement, not the proxy's own proto. Prefer the body's
+		// New<X>Client constructor; fall back to the declared type when the body has
+		// none (or it isn't a proto client).
+		alias, typeName := constructedClientPkgType(fn)
+		if alias == "" || !resolvesToProto(alias, importPaths) {
+			alias, typeName = firstResultPkgType(fn)
+		}
 		if alias == "" {
 			continue
 		}
@@ -145,6 +159,52 @@ func scanGRPCClientFile(path string, m GetterServiceMap) {
 			ProtoService: protoServiceFromType(typeName),
 		}
 	}
+}
+
+// resolvesToProto reports whether alias maps to a generated-proto import path.
+func resolvesToProto(alias string, importPaths map[string]string) bool {
+	p, ok := importPaths[alias]
+	return ok && protoServiceSegment.MatchString(p)
+}
+
+// constructedClientPkgType returns the package alias and client type of the proto
+// client the getter's body actually constructs, from a `return pkg.New<X>Client(…)`
+// statement (the value may also be assigned and returned via a variable-free single
+// return — only direct constructor returns are recognised, which is the Tazapay
+// grpcclient house style). Returns ("","") when no such constructor is found.
+func constructedClientPkgType(fn *ast.FuncDecl) (alias, typeName string) {
+	if fn.Body == nil {
+		return "", ""
+	}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if alias != "" {
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) == 0 {
+			return true
+		}
+		call, ok := ret.Results[0].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkgIdent, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		name := sel.Sel.Name
+		if !strings.HasPrefix(name, "New") || !strings.HasSuffix(name, "Client") {
+			return true
+		}
+		alias = pkgIdent.Name
+		typeName = strings.TrimPrefix(name, "New")
+		return false
+	})
+	return alias, typeName
 }
 
 // firstResultPkgType returns the package alias and type name of a getter's first

@@ -427,9 +427,10 @@ func (r *EventEmissionResolver) eventLiteralFromField(expr ast.Expr) []string {
 		return nil
 	}
 	val, static := r.consts.ResolveString(expr)
-	if !static || !strings.Contains(val, ".") {
+	if !static {
 		return nil
 	}
+	// splitEvent accepts both group.action and single-token ("quote_expiry") names.
 	if _, _, _, ok := splitEvent(val, true); !ok {
 		return nil
 	}
@@ -470,7 +471,7 @@ func emissionsForEvent(ev string, dests []fanoutDest, line int) []eventEmission 
 	out := make([]eventEmission, 0, len(dests))
 	for _, d := range dests {
 		out = append(out, eventEmission{
-			event:       makeEventName(group, action),
+			event:       makeEventName(group, action, dynamic),
 			group:       group,
 			action:      action,
 			dynamic:     dynamic,

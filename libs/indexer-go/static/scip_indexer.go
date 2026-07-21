@@ -14,6 +14,7 @@ import (
 	"time"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
+	"github.com/context-maximiser/code-graph/libs/indexer-go/contracts"
 	"github.com/context-maximiser/code-graph/libs/indexer-go/generated"
 	"github.com/context-maximiser/code-graph/libs/neo4j-go"
 	"github.com/context-maximiser/code-graph/libs/search-go"
@@ -308,11 +309,17 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	// For other languages: fall back to SCIP graph traversal (needs Reference nodes).
 	if !si.skipRPCDetection {
 		si.report.begin("Detectors")
+		// Capture the run watermark BEFORE the detectors write: every node they
+		// (re-)emit gets updatedAt >= detectStart, so anything older afterwards is
+		// a leftover from a previous run's (possibly wrong) detector output.
+		detectStart := time.Now().UTC().Unix()
+		detectOK := true
 		if si.language == LanguageGo {
 			vprintln("Detecting cross-service RPC call sites via Go AST...")
 			stats, err := si.runASTRPCDetection(ctx, projectPath)
 			if err != nil {
 				si.report.warn("AST RPC detection failed: %v", err)
+				detectOK = false
 			}
 			si.report.end(detectorDetail(stats))
 			si.reportCoverageWarnings(stats)
@@ -326,9 +333,35 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			}
 			if err := rpcDetector.DetectRPCCalls(ctx); err != nil {
 				si.report.warn("SCIP RPC detection failed: %v", err)
+				detectOK = false
 			}
 			si.report.end("SCIP symbol traversal")
 		}
+		// Only sweep after a SUCCESSFUL detection pass — sweeping after a failed
+		// one would delete the service's entire semantic layer.
+		if detectOK {
+			si.report.begin("Sweep")
+			if n, err := SweepStaleCallNodes(ctx, si.client, si.serviceName, si.scopeCtx.ScopeID, detectStart); err != nil {
+				si.report.warn("stale call-node sweep failed: %v", err)
+				si.report.end("failed")
+			} else {
+				si.report.end(fmt.Sprintf("%d stale call nodes removed", n))
+			}
+		}
+	}
+
+	// Step 9c: Proto contract nodes (.proto → ProtoContract/ProtoMethod). Runs only
+	// when the project ships proto sources (the shared contract repo). ProtoMethod
+	// nodes are the cross-service rendezvous that activates IMPLEMENTED_BY linking
+	// (API-surface Strategy 3b) on every subsequent service index — without this
+	// step the ProtoIndexer was never invoked anywhere and 3b was permanently dead.
+	if hasProtoSources(projectPath) {
+		si.report.begin("Contracts")
+		protoIdx := contracts.NewProtoIndexer(si.client, si.serviceName, si.scopeCtx)
+		if err := protoIdx.IndexProtoFiles(ctx, projectPath); err != nil {
+			si.report.warn("proto contract indexing failed: %v", err)
+		}
+		si.report.end("proto contracts")
 	}
 
 	// Step 10b: API analysis (depends on body ranges from call graph step above)

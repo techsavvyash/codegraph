@@ -70,7 +70,10 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 				Kind:          convertSymbolKind(symbolInfo.Kind),
 				DisplayName:   extractDisplayName(symbolInfo.Symbol),
 				Documentation: strings.Join(symbolInfo.Documentation, " "),
-				Signature:     extractSignature(symbolInfo),
+				// Normalized (version-agnostic) form, NOT the raw symbol string:
+				// Signature feeds nodeKey derivation, which must be stable across
+				// index runs (see ParseSCIPSymbol).
+				Signature: scipSymbol.String(),
 			},
 			Refs: []*models.SymbolReference{},
 		}
@@ -120,7 +123,7 @@ func (sp *SCIPParser) ExtractSymbols() ([]*models.SymbolDefinition, error) {
 						Symbol:      scipSymbol,
 						Kind:        inferSymbolKind(occurrence.Symbol),
 						DisplayName: extractDisplayName(occurrence.Symbol),
-						Signature:   occurrence.Symbol, // Use SCIP symbol string as signature for unique nodeKey derivation
+						Signature:   scipSymbol.String(), // normalized symbol string — version-agnostic nodeKey derivation
 						FilePath:    filePath,
 						StartLine:   startLine,
 						EndLine:     endLine,
@@ -339,12 +342,6 @@ func extractDisplayName(symbol string) string {
 	}
 	
 	return descriptor
-}
-
-func extractSignature(symbolInfo *scip.SymbolInformation) string {
-	// For now, use the display name as signature
-	// In a full implementation, we might extract more detailed signature info
-	return symbolInfo.Symbol
 }
 
 // extractSigAndDoc pulls the rendered Go signature and the human doc comment out

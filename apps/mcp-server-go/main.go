@@ -3404,10 +3404,10 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		RETURN
 		  handler.name AS handlerName,
 		  handler.filePath AS handlerFile,
-		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, line: db.line} ELSE null END) AS dbCalls,
-		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {service: grpc.targetService, method: grpc.targetMethod, hops: rg.hops, via: rg.viaFunction} ELSE null END) AS grpcCalls,
-		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {service: http.targetService, url: http.url, hops: rh.hops, via: rh.viaFunction} ELSE null END) AS httpCalls,
-		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {event: event.eventType, transport: event.transport} ELSE null END) AS events
+		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, file: db.filePath, line: db.line} ELSE null END) AS dbCalls,
+		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {service: grpc.targetService, method: grpc.targetMethod, file: grpc.filePath, line: grpc.line, hops: rg.hops, via: rg.viaFunction} ELSE null END) AS grpcCalls,
+		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {service: http.targetService, url: http.url, file: http.filePath, line: http.line, hops: rh.hops, via: rh.viaFunction} ELSE null END) AS httpCalls,
+		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {event: event.eventType, transport: event.transport, queue: event.destQueue, destSvc: event.destService, file: event.filePath, line: event.line} ELSE null END) AS events
 		LIMIT 1
 	`
 
@@ -3464,6 +3464,23 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		out.WriteString("\n")
 	}
 
+	// siteRef renders the call site's own file:line. The site frequently lives in a
+	// DIFFERENT file than the handler (util wrappers like utils/fx.go), so the file
+	// must always accompany the line — a bare line number gets misattributed to the
+	// handler's file by the reader.
+	siteRef := func(r map[string]interface{}) string {
+		file := getStringFromRecord(r, "file")
+		line := getIntFromRecord(r, "line")
+		switch {
+		case file != "" && line > 0:
+			return fmt.Sprintf(" at `%s:%d`", file, line)
+		case file != "":
+			return fmt.Sprintf(" at `%s`", file)
+		default:
+			return ""
+		}
+	}
+
 	dbCalls, _ := m["dbCalls"].([]interface{})
 	writeListSection("DB Tables", dbCalls, func(r map[string]interface{}) string {
 		table := getStringFromRecord(r, "table")
@@ -3471,13 +3488,10 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 			return ""
 		}
 		op := getStringFromRecord(r, "op")
-		line := getIntFromRecord(r, "line")
-		if op != "" && line > 0 {
-			return fmt.Sprintf("`%s` — %s (line %d)", table, op, line)
-		} else if op != "" {
-			return fmt.Sprintf("`%s` — %s", table, op)
+		if op != "" {
+			return fmt.Sprintf("`%s` — %s%s", table, op, siteRef(r))
 		}
-		return fmt.Sprintf("`%s`", table)
+		return fmt.Sprintf("`%s`%s", table, siteRef(r))
 	})
 
 	// reachSuffix annotates a cross-service call with how deep in the call chain
@@ -3503,9 +3517,9 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		}
 		method := getStringFromRecord(r, "method")
 		if method != "" {
-			return fmt.Sprintf("**%s** — `%s`%s", svcName, method, reachSuffix(r))
+			return fmt.Sprintf("**%s** — `%s`%s%s", svcName, method, siteRef(r), reachSuffix(r))
 		}
-		return fmt.Sprintf("**%s**%s", svcName, reachSuffix(r))
+		return fmt.Sprintf("**%s**%s%s", svcName, siteRef(r), reachSuffix(r))
 	})
 
 	httpCalls, _ := m["httpCalls"].([]interface{})
@@ -3516,9 +3530,9 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		}
 		url := getStringFromRecord(r, "url")
 		if url != "" {
-			return fmt.Sprintf("**%s** — `%s`%s", svcName, url, reachSuffix(r))
+			return fmt.Sprintf("**%s** — `%s`%s%s", svcName, url, siteRef(r), reachSuffix(r))
 		}
-		return fmt.Sprintf("**%s**%s", svcName, reachSuffix(r))
+		return fmt.Sprintf("**%s**%s%s", svcName, siteRef(r), reachSuffix(r))
 	})
 
 	events, _ := m["events"].([]interface{})
@@ -3527,11 +3541,19 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		if eventType == "" {
 			return ""
 		}
-		transport := getStringFromRecord(r, "transport")
-		if transport != "" {
-			return fmt.Sprintf("`%s` via %s", eventType, transport)
+		text := fmt.Sprintf("`%s`", eventType)
+		// Destination queue determines the consumer: distinct events from one handler
+		// routinely fan out to DIFFERENT queues (queue.event.event vs
+		// queue.settlement.payout vs queue.fx.fx), so never summarize by transport alone.
+		if queue := getStringFromRecord(r, "queue"); queue != "" {
+			text += fmt.Sprintf(" → `%s`", queue)
+			if destSvc := getStringFromRecord(r, "destSvc"); destSvc != "" {
+				text += fmt.Sprintf(" (consumed by **%s**)", destSvc)
+			}
+		} else if transport := getStringFromRecord(r, "transport"); transport != "" {
+			text += fmt.Sprintf(" via %s", transport)
 		}
-		return fmt.Sprintf("`%s`", eventType)
+		return text + siteRef(r)
 	})
 
 	return ToolCallResponse{
@@ -3982,6 +4004,7 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		  } END) AS httpSteps,
 		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {
 		    kind: 'outbox', event: event.eventType, transport: event.transport,
+		    queue: coalesce(event.destQueue,''), destSvc: coalesce(event.destService,''),
 		    line: event.line, file: event.filePath, viaFn: fn4.name
 		  } END) AS eventSteps
 		LIMIT 1
@@ -4005,6 +4028,7 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		m := result[0].AsMap()
 
 		type step struct {
+			File string
 			Line int
 			Text string
 		}
@@ -4019,7 +4043,8 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 					if itemMap, ok := item.(map[string]any); ok {
 						line, text := formatter(itemMap)
 						if text != "" {
-							steps = append(steps, step{Line: line, Text: text})
+							file, _ := itemMap["file"].(string)
+							steps = append(steps, step{File: file, Line: line, Text: text})
 						}
 					}
 				}
@@ -4085,34 +4110,60 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		collectSteps("eventSteps", func(m map[string]any) (int, string) {
 			event, _ := m["event"].(string)
 			transport, _ := m["transport"].(string)
+			queue, _ := m["queue"].(string)
+			destSvc, _ := m["destSvc"].(string)
 			line, _ := m["line"].(int64)
 			viaFn, _ := m["viaFn"].(string)
 			if event == "" {
 				return 0, ""
 			}
-			text := fmt.Sprintf("**Event** `%s` via %s", event, transport)
+			text := fmt.Sprintf("**Event** `%s`", event)
+			// The destination queue identifies the consumer — events from one handler fan
+			// out to different queues, so a bare transport label misleads.
+			if queue != "" {
+				text += fmt.Sprintf(" → `%s`", queue)
+				if destSvc != "" {
+					text += fmt.Sprintf(" (consumed by **%s**)", destSvc)
+				}
+			} else if transport != "" {
+				text += fmt.Sprintf(" via %s", transport)
+			}
 			if viaFn != "" {
 				text += fmt.Sprintf(" (via `%s`)", viaFn)
 			}
 			return int(line), text
 		})
 
-		// Sort by line number (insertion sort).
-		for i := 1; i < len(steps); i++ {
-			for j := i; j > 0 && steps[j].Line < steps[j-1].Line; j-- {
-				steps[j], steps[j-1] = steps[j-1], steps[j]
+		// Sort by file, then line. Call sites span MANY files (handler file plus util
+		// wrappers); a single cross-file line ordering invites misreading every line
+		// number against the handler's file.
+		sort.Slice(steps, func(i, j int) bool {
+			if steps[i].File != steps[j].File {
+				return steps[i].File < steps[j].File
 			}
-		}
+			return steps[i].Line < steps[j].Line
+		})
 
 		if len(steps) == 0 {
-			output.WriteString("_No DB/RPC/event call sites found within 3 hops. Ensure the service is indexed with SCIP._\n")
+			output.WriteString("_No DB/RPC/event call sites found. Ensure the service is indexed with SCIP._\n")
 		} else {
-			output.WriteString("### Call Sites (source order)\n\n")
-			for i, st := range steps {
+			output.WriteString("### Call Sites (grouped by file)\n\n")
+			currentFile := "\x00"
+			n := 0
+			for _, st := range steps {
+				if st.File != currentFile {
+					currentFile = st.File
+					if currentFile == "" {
+						output.WriteString("\n**(file unknown)**\n")
+					} else {
+						output.WriteString(fmt.Sprintf("\n**`%s`**\n", currentFile))
+					}
+				}
+				n++
 				if st.Line > 0 {
-					output.WriteString(fmt.Sprintf("%d. (line %d) %s\n", i+1, st.Line, st.Text))
+					output.WriteString(fmt.Sprintf("%d. (line %d) %s\n", n, st.Line, st.Text))
 				} else {
-					output.WriteString(fmt.Sprintf("%d. %s\n", i+1, st.Text))
+					output.WriteString(fmt.Sprintf("%d. %s\n", n, st.Text))
 				}
 			}
 		}

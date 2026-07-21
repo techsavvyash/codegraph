@@ -194,7 +194,7 @@ func (d *EventCallDetector) writeEmissions(funcDecl *ast.FuncDecl, callerFuncID,
 		// anchor the relay helper to its destination service via the OutboxCall node.
 		// Skip EventType node creation and the EMITS_EVENT edge for these.
 		if em.group != "" {
-			etKey := models.EventTypeNodeKey(em.group, em.action)
+			etKey := models.EventTypeNodeKeyFromName(em.event)
 			etProps := map[string]any{
 				"nodeKey": etKey,
 				// name is the Neo4j Browser caption: the full event name "<group>.<action>"

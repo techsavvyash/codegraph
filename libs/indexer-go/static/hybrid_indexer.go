@@ -3,6 +3,7 @@ package static
 import (
 	"context"
 	"fmt"
+	"time"
 
 	models "github.com/context-maximiser/code-graph/libs/core-models-go"
 	neo4j "github.com/context-maximiser/code-graph/libs/neo4j-go"
@@ -88,10 +89,15 @@ func runASTPass(ctx context.Context, cfg IndexConfig) error {
 
 	// RPC / event / DB call-site detection via Go AST.
 	// Use the full constructor so langConfig and all derived fields are initialised.
+	// detectStart is the stale-sweep watermark: nodes the detectors below re-emit
+	// get a fresh updatedAt; older ones were not re-detected and are swept.
+	detectStart := time.Now().UTC().Unix()
+	detectOK := true
 	astHost := NewSCIPIndexerWithLanguage(cfg.Client, cfg.ServiceName, cfg.Version, cfg.RepoURL, LanguageGo)
 	astHost.SetScope(cfg.ScopeCtx)
 	if _, err := astHost.runASTRPCDetection(ctx, cfg.ProjectPath); err != nil {
 		fmt.Printf("Warning: AST RPC/DB/event detection failed: %v\n", err)
+		detectOK = false
 	}
 
 	// SCIP-based RPC detection for Go — catches cross-service calls made through
@@ -108,6 +114,18 @@ func runASTPass(ctx context.Context, cfg IndexConfig) error {
 	}
 	if err := scipRPCDet.DetectRPCCalls(ctx); err != nil {
 		fmt.Printf("Warning: SCIP RPC detection failed: %v\n", err)
+		detectOK = false
+	}
+
+	// Sweep semantic call nodes the run above did not re-emit (stale detector
+	// output from previous runs). Only after a fully successful detection pass —
+	// sweeping after a failure would delete the service's semantic layer.
+	if detectOK {
+		if n, err := SweepStaleCallNodes(ctx, cfg.Client, cfg.ServiceName, cfg.ScopeCtx.ScopeID, detectStart); err != nil {
+			fmt.Printf("Warning: stale call-node sweep failed: %v\n", err)
+		} else if n > 0 {
+			fmt.Printf("[hybrid] Swept %d stale call nodes\n", n)
+		}
 	}
 
 	// API surface detection.

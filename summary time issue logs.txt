@@ -1,0 +1,565 @@
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../settlement --service="settlement"                                                                                      
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../settlement
+Detected 1 language root(s):
+  Go           .
+
+━━ settlement ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       495 docs → 309 files                                   17.5s
+Indexing 9328 symbols...
+Merged 9328 Symbol nodes
+Merged 3887 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 16427 reference items from 9328 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 16427 items not written)
+Completed indexing symbols (created 16427 reference relationships)
+ Symbols    9328 syms · 3887 defs · 806 impl                        3.2s
+ Deps       0 internal · 129 ext/stdlib                            330ms
+Building call graph from SCIP references...
+ Calls      2489 CALLS · 3069 precise/2 bare                        4.9s
+Warning: const "csvFilePath" resolves to divergent values across the repo ("migration/1_scripts/historical_adjustment_changes.csv" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement/migration/1_scripts/down/main.go vs "migration/2_scripts/historical_beneficiary_changes.csv" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement/migration/2_scripts/up/main.go) — marking ambiguous (resolve → not static)
+  DBCall→Method resolution: 357 RESOLVES_TO edges created
+ Detectors  DB=583 Cache=32 Evt=59 Ext=19 GRPC=106 HTTP=3 Outbo…    8.1s
+Running structural API surface detection...
+  Strategy 1: marked 1648 functions with external parameter types
+  Strategy 2: marked 331 functions as cross-package call targets
+  Strategy 3a: stamped 71 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 155 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 1648 external-param, 331 cross-pkg, 71 rpc-handlers, 0 proto-links, 155 reaches-call
+ API        structural surface                                     391ms
+ Semantic   consumers + cron                                       146ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ settlement indexed in 34.6s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   1797 nodes  9.1s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../mp-dashboard --service="mp-dashboard" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../mp-dashboard
+Detected 1 language root(s):
+  Go           .
+
+━━ mp-dashboard ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       112 docs → 59 files                                    10.6s
+Indexing 3417 symbols...
+Merged 3417 Symbol nodes
+Merged 505 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 2743 reference items from 3417 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 2743 items not written)
+Completed indexing symbols (created 2743 reference relationships)
+ Symbols    3417 syms · 505 defs · 236 impl                        656ms
+ Deps       4 internal · 93 ext/stdlib                             154ms
+Building call graph from SCIP references...
+ Calls      247 CALLS · 283 precise/0 bare                         964ms
+  DBCall→Method resolution: 360 RESOLVES_TO edges created
+ Detectors  DB=7 Cache=7 Evt=0 Ext=2 GRPC=64 HTTP=2 Outbox=0        1.9s
+Running structural API surface detection...
+  Strategy 1: marked 1859 functions with external parameter types
+  Strategy 2: marked 386 functions as cross-package call targets
+  Strategy 3a: stamped 121 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 214 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 1859 external-param, 386 cross-pkg, 121 rpc-handlers, 0 proto-links, 214 reaches-call
+ API        structural surface                                      93ms
+ Semantic   consumers + cron                                         9ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ mp-dashboard indexed in 14.4s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   2047 nodes  13.6s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../bfi --service="bfi"     
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../bfi
+Detected 1 language root(s):
+  Go           .
+
+━━ bfi ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       135 docs → 92 files                                    16.6s
+Indexing 2567 symbols...
+Merged 2567 Symbol nodes
+Merged 1081 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 2794 reference items from 2567 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 2794 items not written)
+Completed indexing symbols (created 2794 reference relationships)
+ Symbols    2567 syms · 1081 defs · 155 impl                        1.4s
+ Deps       4 internal · 93 ext/stdlib                              98ms
+Building call graph from SCIP references...
+ Calls      349 CALLS · 423 precise/0 bare                          1.1s
+  DBCall→Method resolution: 402 RESOLVES_TO edges created
+ Detectors  DB=71 Cache=4 Evt=1 Ext=2 GRPC=19 HTTP=1 Outbox=2       1.5s
+Running structural API surface detection...
+  Strategy 1: marked 2104 functions with external parameter types
+  Strategy 2: marked 468 functions as cross-package call targets
+  Strategy 3a: stamped 136 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 233 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 2104 external-param, 468 cross-pkg, 136 rpc-handlers, 0 proto-links, 233 reaches-call
+ API        structural surface                                      55ms
+ Semantic   consumers + cron                                         2ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ bfi indexed in 20.9s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   2367 nodes  18.6s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../account --service="account"
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../account
+Detected 1 language root(s):
+  Go           .
+
+━━ account ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       546 docs → 351 files                                   11.3s
+Indexing 6809 symbols...
+Merged 6809 Symbol nodes
+Merged 2423 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 10404 reference items from 6809 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 10404 items not written)
+Completed indexing symbols (created 10404 reference relationships)
+ Symbols    6809 syms · 2423 defs · 1269 impl                       1.6s
+ Deps       0 internal · 126 ext/stdlib                            131ms
+Building call graph from SCIP references...
+ Calls      1422 CALLS · 1951 precise/38 bare                       2.7s
+  DBCall→Method resolution: 747 RESOLVES_TO edges created
+ Detectors  DB=583 Cache=43 Evt=13 Ext=31 GRPC=1 HTTP=3 Outbox=…    9.6s
+Running structural API surface detection...
+  Strategy 1: marked 3234 functions with external parameter types
+  Strategy 2: marked 805 functions as cross-package call targets
+  Strategy 3a: stamped 218 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 234 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 3234 external-param, 805 cross-pkg, 218 rpc-handlers, 0 proto-links, 234 reaches-call
+ API        structural surface                                      74ms
+ Semantic   consumers + cron                                         1ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ account indexed in 25.5s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   3604 nodes  39.3s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../fx --service="fx"    
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../fx
+Detected 1 language root(s):
+  Go           .
+
+━━ fx ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       161 docs → 104 files                                    9.9s
+Indexing 1628 symbols...
+Merged 1628 Symbol nodes
+Merged 599 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 2508 reference items from 1628 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 2508 items not written)
+Completed indexing symbols (created 2508 reference relationships)
+ Symbols    1628 syms · 599 defs · 250 impl                        452ms
+ Deps       2 internal · 63 ext/stdlib                             165ms
+Building call graph from SCIP references...
+ Calls      318 CALLS · 404 precise/5 bare                          2.2s
+Warning: const "CellulantServiceCode" resolves to divergent values across the repo ("TAZDEV0178" in /Users/tazapay-mbp-001/Workspace/Tazapay/fx/constants/constant.go vs "cellulant.service_code" in /Users/tazapay-mbp-001/Workspace/Tazapay/fx/env/service.go) — marking ambiguous (resolve → not static)
+  DBCall→Method resolution: 785 RESOLVES_TO edges created
+ Detectors  DB=103 Cache=4 Evt=0 Ext=0 GRPC=2 HTTP=9 Outbox=0       3.7s
+   ⚠ 2 file(s) import queue (SQS/outbox) but 0 OutboxCall nodes were written — a whole wrapper class may be invisible
+Running structural API surface detection...
+  Strategy 1: marked 3483 functions with external parameter types
+  Strategy 2: marked 885 functions as cross-package call targets
+  Strategy 3a: stamped 237 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 236 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 3483 external-param, 885 cross-pkg, 237 rpc-handlers, 0 proto-links, 236 reaches-call
+ API        structural surface                                     269ms
+ Semantic   consumers + cron                                         4ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ fx indexed in 16.7s   ⚠ 1 warning(s)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   3902 nodes  48.2s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../pricing --service="pricing"
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../pricing
+Detected 1 language root(s):
+  Go           .
+
+━━ pricing ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       171 docs → 110 files                                    9.1s
+Indexing 2234 symbols...
+Merged 2234 Symbol nodes
+Merged 838 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 2525 reference items from 2234 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 2525 items not written)
+Completed indexing symbols (created 2525 reference relationships)
+ Symbols    2234 syms · 838 defs · 364 impl                        602ms
+ Deps       4 internal · 56 ext/stdlib                              59ms
+Building call graph from SCIP references...
+ Calls      344 CALLS · 505 precise/8 bare                          1.0s
+  DBCall→Method resolution: 809 RESOLVES_TO edges created
+ Detectors  DB=142 Cache=0 Evt=0 Ext=0 GRPC=5 HTTP=1 Outbox=0       2.4s
+Running structural API surface detection...
+  Strategy 1: marked 3769 functions with external parameter types
+  Strategy 2: marked 959 functions as cross-package call targets
+  Strategy 3a: stamped 270 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 245 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 3769 external-param, 959 cross-pkg, 270 rpc-handlers, 0 proto-links, 245 reaches-call
+ API        structural surface                                      68ms
+ Semantic   consumers + cron                                        97ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ pricing indexed in 13.4s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   4292 nodes  55.2s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../onboarding --service="onboarding" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../onboarding
+Detected 1 language root(s):
+  Go           .
+
+━━ onboarding ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       455 docs → 296 files                                   12.3s
+Indexing 5856 symbols...
+Merged 5856 Symbol nodes
+Merged 2054 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 9234 reference items from 5856 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 9234 items not written)
+Completed indexing symbols (created 9234 reference relationships)
+ Symbols    5856 syms · 2054 defs · 1019 impl                       1.7s
+ Deps       6 internal · 89 ext/stdlib                             127ms
+Building call graph from SCIP references...
+ Calls      1245 CALLS · 1729 precise/3 bare                        3.4s
+  DBCall→Method resolution: 1132 RESOLVES_TO edges created
+ Detectors  DB=586 Cache=2 Evt=19 Ext=9 GRPC=32 HTTP=10 Outbox=…   14.9s
+Running structural API surface detection...
+  Strategy 1: marked 4733 functions with external parameter types
+  Strategy 2: marked 1242 functions as cross-package call targets
+  Strategy 3a: stamped 344 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 310 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 4733 external-param, 1242 cross-pkg, 344 rpc-handlers, 0 proto-links, 310 reaches-call
+ API        structural surface                                     201ms
+ Semantic   consumers + cron                                         3ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ onboarding indexed in 32.6s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  78.9s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../payout-router --service="payout-router" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../payout-router
+Detected 1 language root(s):
+  Go           .
+
+━━ payout-router ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       172 docs → 111 files                                   13.4s
+Indexing 1700 symbols...
+Merged 1700 Symbol nodes
+Merged 638 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 1607 reference items from 1700 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 1607 items not written)
+Completed indexing symbols (created 1607 reference relationships)
+ Symbols    1700 syms · 638 defs · 336 impl                         1.3s
+ Deps       6 internal · 63 ext/stdlib                             140ms
+Building call graph from SCIP references...
+ Calls      197 CALLS · 316 precise/1 bare                          3.7s
+  DBCall→Method resolution: 1187 RESOLVES_TO edges created
+ Detectors  DB=124 Cache=0 Evt=1 Ext=3 GRPC=3 HTTP=0 Outbox=1       3.5s
+Running structural API surface detection...
+  Strategy 1: marked 4964 functions with external parameter types
+  Strategy 2: marked 1287 functions as cross-package call targets
+  Strategy 3a: stamped 371 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 316 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 4964 external-param, 1287 cross-pkg, 371 rpc-handlers, 0 proto-links, 316 reaches-call
+ API        structural surface                                      83ms
+ Semantic   consumers + cron                                         1ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ payout-router indexed in 22.2s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  85.8s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../proto --service="proto" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../proto
+Detected 1 language root(s):
+  Go           .
+
+━━ proto ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+
+ SCIP       1149 docs → 0 files                                     5.9s
+Indexing 0 symbols...
+Merged 0 Symbol nodes
+Merged 0 definition nodes across 0 labels
+
+Creating reference relationships...
+  Built 0 reference items from 0 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 0 items not written)
+Completed indexing symbols (created 0 reference relationships)
+ Symbols    0 syms · 0 defs · 42995 impl                            1.0s
+ Deps       13 internal · 9 ext/stdlib                             258ms
+Building call graph from SCIP references...
+ Calls      0 CALLS · 0 precise/0 bare                              96ms
+  DBCall→Method resolution: 1187 RESOLVES_TO edges created
+ Detectors  DB=0 Cache=0 Evt=0 Ext=0 GRPC=0 HTTP=0 Outbox=0        669ms
+Running structural API surface detection...
+  Strategy 1: marked 4961 functions with external parameter types
+  Strategy 2: marked 1287 functions as cross-package call targets
+  Strategy 3a: stamped 371 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 316 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 4961 external-param, 1287 cross-pkg, 371 rpc-handlers, 0 proto-links, 316 reaches-call
+ API        structural surface                                      94ms
+ Semantic   consumers + cron                                         1ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ proto indexed in 8.1s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  83.3s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ 
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ 
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ 
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ 
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../settlement-orchestration --service="settlement-orchestration" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../settlement-orchestration
+Detected 1 language root(s):
+  Go           .
+
+━━ settlement-orchestration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       448 docs → 300 files                                   10.4s
+Indexing 7835 symbols...
+Merged 7835 Symbol nodes
+Merged 3141 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 8812 reference items from 7835 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 8812 items not written)
+Completed indexing symbols (created 8812 reference relationships)
+ Symbols    7835 syms · 3141 defs · 178 impl                        1.8s
+ Deps       89 internal · 106 ext/stdlib                           218ms
+Building call graph from SCIP references...
+ Calls      1395 CALLS · 1736 precise/2 bare                        3.0s
+Warning: const "CustomerTypeCorporate" resolves to divergent values across the repo ("C" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/bankingcircle/constant.go vs "Corporate" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/dbs/constant.go) — marking ambiguous (resolve → not static)
+Warning: const "RemitterTypeIndividual" resolves to divergent values across the repo ("individual" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/constant.go vs "Individual" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/dbs/constant.go) — marking ambiguous (resolve → not static)
+Warning: const "StatusCompleted" resolves to divergent values across the repo ("COMPLETED" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/cpnofi/constant.go vs "Completed" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/jpmorgan/constant.go) — marking ambiguous (resolve → not static)
+Warning: const "ChargeTypeOurs" resolves to divergent values across the repo ("OUR" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/bankingcircle/constant.go vs "ours" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/payout.go) — marking ambiguous (resolve → not static)
+Warning: const "ChargeTypeShared" resolves to divergent values across the repo ("SHA" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/bankingcircle/constant.go vs "shared" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/payout.go) — marking ambiguous (resolve → not static)
+Warning: const "PayoutStatusCompleted" resolves to divergent values across the repo ("Completed" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/scb/constant.go vs "COMPLETED" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/unlimit/status.go) — marking ambiguous (resolve → not static)
+Warning: const "EntityTypeCompany" resolves to divergent values across the repo ("COMPANY" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/bvnk/bvnk.go vs "company" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/xendit/constant.go) — marking ambiguous (resolve → not static)
+Warning: const "PayoutStatusFailed" resolves to divergent values across the repo ("Failed" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/bankingcircle/constant.go vs "FAILED" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/xendit/status.go) — marking ambiguous (resolve → not static)
+Warning: const "StatusAccepted" resolves to divergent values across the repo ("ACCEPTED" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/jpmorgan/constant.go vs "AS" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/yesbank/status.go) — marking ambiguous (resolve → not static)
+Warning: const "TransferType" resolves to divergent values across the repo ("transfer_type" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/payout.go vs "ANY" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/yesbank/yesbank.go) — marking ambiguous (resolve → not static)
+Warning: const "Response" resolves to divergent values across the repo ("unlimit_response" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/unlimit/constant.go vs "response" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/yesbank/yesbank.go) — marking ambiguous (resolve → not static)
+Warning: const "SCBSingleBalancePath" resolves to divergent values across the repo ("/openapi/accounts/v3/" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/scb/constant.go vs "scb.single_balance_path" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/env/service.go) — marking ambiguous (resolve → not static)
+Warning: const "SCBBulkBalancePath" resolves to divergent values across the repo ("/openapi/accounts/v3/balances" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/constants/scb/constant.go vs "scb.bulk_balance_path" in /Users/tazapay-mbp-001/Workspace/Tazapay/settlement-orchestration/env/service.go) — marking ambiguous (resolve → not static)
+  DBCall→Method resolution: 1221 RESOLVES_TO edges created
+ Detectors  DB=41 Cache=15 Evt=15 Ext=3 GRPC=11 HTTP=62 Outbox=…    8.0s
+Running structural API surface detection...
+  Strategy 1: marked 5783 functions with external parameter types
+  Strategy 2: marked 1402 functions as cross-package call targets
+  Strategy 3a: stamped 399 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 322 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 5783 external-param, 1402 cross-pkg, 399 rpc-handlers, 0 proto-links, 322 reaches-call
+ API        structural surface                                     153ms
+ Semantic   consumers + cron                                         2ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ settlement-orchestration indexed in 23.6s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  95.8s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../event --service="event"             
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../event
+Detected 1 language root(s):
+  Go           .
+
+━━ event ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       175 docs → 102 files                                   14.4s
+Indexing 2919 symbols...
+Merged 2919 Symbol nodes
+Merged 1099 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 6922 reference items from 2919 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 6922 items not written)
+Completed indexing symbols (created 6922 reference relationships)
+ Symbols    2919 syms · 1099 defs · 98 impl                        972ms
+ Deps       47 internal · 60 ext/stdlib                            196ms
+Building call graph from SCIP references...
+ Calls      941 CALLS · 975 precise/0 bare                          2.2s
+  DBCall→Method resolution: 1226 RESOLVES_TO edges created
+ Detectors  DB=10 Cache=2 Evt=104 Ext=1 GRPC=67 HTTP=1 Outbox=2…   34.3s
+Running structural API surface detection...
+  Strategy 1: marked 6264 functions with external parameter types
+  Strategy 2: marked 1471 functions as cross-package call targets
+  Strategy 3a: stamped 400 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 322 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 6264 external-param, 1471 cross-pkg, 400 rpc-handlers, 0 proto-links, 322 reaches-call
+ API        structural surface                                     123ms
+ Semantic   consumers + cron                                         2ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ event indexed in 52.2s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  115.0s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../notification --service="notification" 
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../notification
+Detected 1 language root(s):
+  Go           .
+
+━━ notification ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       206 docs → 123 files                                   12.0s
+Indexing 2905 symbols...
+Merged 2905 Symbol nodes
+Merged 928 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 2625 reference items from 2905 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 2625 items not written)
+Completed indexing symbols (created 2625 reference relationships)
+ Symbols    2905 syms · 928 defs · 246 impl                        649ms
+ Deps       19 internal · 64 ext/stdlib                            100ms
+Building call graph from SCIP references...
+ Calls      585 CALLS · 715 precise/1 bare                          1.7s
+  DBCall→Method resolution: 1298 RESOLVES_TO edges created
+ Detectors  DB=104 Cache=4 Evt=0 Ext=2 GRPC=11 HTTP=2 Outbox=0      4.0s
+   ⚠ 40 file(s) import queue (SQS/outbox) but 0 OutboxCall nodes were written — a whole wrapper class may be invisible
+Running structural API surface detection...
+  Strategy 1: marked 6589 functions with external parameter types
+  Strategy 2: marked 1615 functions as cross-package call targets
+  Strategy 3a: stamped 410 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 330 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 6589 external-param, 1615 cross-pkg, 410 rpc-handlers, 0 proto-links, 330 reaches-call
+ API        structural surface                                     102ms
+ Semantic   consumers + cron                                         1ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ notification indexed in 18.6s   ⚠ 1 warning(s)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  121.4s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../balance --service="balance"    
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../balance
+Detected 1 language root(s):
+  Go           .
+
+━━ balance ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       150 docs → 94 files                                     9.9s
+Indexing 1584 symbols...
+Merged 1584 Symbol nodes
+Merged 602 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 1825 reference items from 1584 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 1825 items not written)
+Completed indexing symbols (created 1825 reference relationships)
+ Symbols    1584 syms · 602 defs · 192 impl                        515ms
+ Deps       12 internal · 67 ext/stdlib                             69ms
+Building call graph from SCIP references...
+ Calls      344 CALLS · 403 precise/12 bare                         1.1s
+  DBCall→Method resolution: 1358 RESOLVES_TO edges created
+ Detectors  DB=100 Cache=12 Evt=5 Ext=0 GRPC=10 HTTP=0 Outbox=12    4.8s
+Running structural API surface detection...
+  Strategy 1: marked 6807 functions with external parameter types
+  Strategy 2: marked 1672 functions as cross-package call targets
+  Strategy 3a: stamped 420 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 332 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 6807 external-param, 1672 cross-pkg, 420 rpc-handlers, 0 proto-links, 332 reaches-call
+ API        structural surface                                     105ms
+ Semantic   consumers + cron                                         2ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ balance indexed in 16.4s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  120.9s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../metadata --service="metadata"
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../metadata
+Detected 1 language root(s):
+  Go           .
+
+━━ metadata ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       121 docs → 78 files                                    12.3s
+Indexing 1407 symbols...
+Merged 1407 Symbol nodes
+Merged 472 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 1748 reference items from 1407 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 1748 items not written)
+Completed indexing symbols (created 1748 reference relationships)
+ Symbols    1407 syms · 472 defs · 194 impl                        652ms
+ Deps       23 internal · 49 ext/stdlib                            203ms
+Building call graph from SCIP references...
+ Calls      162 CALLS · 234 precise/5 bare                          1.6s
+  DBCall→Method resolution: 1369 RESOLVES_TO edges created
+ Detectors  DB=60 Cache=0 Evt=0 Ext=2 GRPC=30 HTTP=0 Outbox=0       3.4s
+Running structural API surface detection...
+  Strategy 1: marked 6990 functions with external parameter types
+  Strategy 2: marked 1700 functions as cross-package call targets
+  Strategy 3a: stamped 449 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 359 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 6990 external-param, 1700 cross-pkg, 449 rpc-handlers, 0 proto-links, 359 reaches-call
+ API        structural surface                                     103ms
+ Semantic   consumers + cron                                         1ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ metadata indexed in 18.3s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  124.9s
+✓ Polyglot indexing completed successfully
+➜  codegraph git:(FEAT/cross-service-rpc) ✗ ./bin/codegraph index scip ../payin --service="payin"  
+📤 OpenSearch enabled for BM25 text indexing
+No --language specified — running polyglot indexing at ../payin
+Detected 1 language root(s):
+  Go           .
+
+━━ payin ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SCIP       357 docs → 211 files                                   10.7s
+Indexing 7577 symbols...
+Merged 7577 Symbol nodes
+Merged 2568 definition nodes across 4 labels
+
+Creating reference relationships...
+  Built 13480 reference items from 7577 symbols
+  Skipping Reference node creation (suppressed via noiseNodeLabels — 13480 items not written)
+Completed indexing symbols (created 13480 reference relationships)
+ Symbols    7577 syms · 2568 defs · 577 impl                        1.8s
+ Deps       40 internal · 99 ext/stdlib                            160ms
+Building call graph from SCIP references...
+ Calls      1682 CALLS · 2086 precise/2 bare                        3.2s
+  DBCall→Method resolution: 1580 RESOLVES_TO edges created
+ Detectors  DB=284 Cache=13 Evt=5 Ext=8 GRPC=105 HTTP=6 Outbox=…   16.3s
+Running structural API surface detection...
+  Strategy 1: marked 8024 functions with external parameter types
+  Strategy 2: marked 1871 functions as cross-package call targets
+  Strategy 3a: stamped 521 functions as RPC handlers
+  Strategy 3b: linked 0 handlers to proto methods (IMPLEMENTED_BY)
+  Strategy 4: materialized 650 REACHES_CALL edges (handler → cross-service call)
+Structural API surface detection complete: 8024 external-param, 1871 cross-pkg, 521 rpc-handlers, 0 proto-links, 650 reaches-call
+ API        structural surface                                     193ms
+ Semantic   consumers + cron                                        79ms
+──────────────────────────────────────────────────────────────────────────
+ ✓ payin indexed in 32.6s
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▸ Node summaries   5000 nodes  144.0s
+✓ Polyglot indexing completed successfully
