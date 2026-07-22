@@ -3397,8 +3397,13 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		WITH handler ORDER BY coalesce(handler.isRPCHandler,false) DESC LIMIT 1
 
 		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c1)-[:CALLS_DB]->(db:DBCall)
-		OPTIONAL MATCH (handler)-[rg:REACHES_CALL]->(grpc:GRPCCall)
-		OPTIONAL MATCH (handler)-[rh:REACHES_CALL]->(http:HTTPCall)
+		// Cross-service calls split by reachability mode: async=false is reached
+		// synchronously within the handler; async=true is reached AFTER a
+		// self-consumed event (viaEvent) through its consumer (viaConsumer).
+		OPTIONAL MATCH (handler)-[rg:REACHES_CALL {async:false}]->(grpc:GRPCCall)
+		OPTIONAL MATCH (handler)-[rh:REACHES_CALL {async:false}]->(http:HTTPCall)
+		OPTIONAL MATCH (handler)-[ag:REACHES_CALL {async:true}]->(agrpc:GRPCCall)
+		OPTIONAL MATCH (handler)-[ah:REACHES_CALL {async:true}]->(ahttp:HTTPCall)
 		OPTIONAL MATCH (handler)-[:CALLS*0..6]->(c4)-[:CALLS_API]->(event:OutboxCall)
 
 		RETURN
@@ -3407,6 +3412,8 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, file: db.filePath, line: db.line} ELSE null END) AS dbCalls,
 		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {service: grpc.targetService, method: grpc.targetMethod, file: grpc.filePath, line: grpc.line, hops: rg.hops, via: rg.viaFunction} ELSE null END) AS grpcCalls,
 		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {service: http.targetService, url: http.url, file: http.filePath, line: http.line, hops: rh.hops, via: rh.viaFunction} ELSE null END) AS httpCalls,
+		  COLLECT(DISTINCT CASE WHEN agrpc IS NOT NULL THEN {service: agrpc.targetService, method: agrpc.targetMethod, file: agrpc.filePath, line: agrpc.line, viaEvent: ag.viaEvent, viaConsumer: ag.viaConsumer} ELSE null END) AS asyncGrpcCalls,
+		  COLLECT(DISTINCT CASE WHEN ahttp IS NOT NULL THEN {service: ahttp.targetService, url: ahttp.url, file: ahttp.filePath, line: ahttp.line, viaEvent: ah.viaEvent, viaConsumer: ah.viaConsumer} ELSE null END) AS asyncHttpCalls,
 		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {event: event.eventType, transport: event.transport, queue: event.destQueue, destSvc: event.destService, file: event.filePath, line: event.line} ELSE null END) AS events
 		LIMIT 1
 	`
@@ -3494,6 +3501,17 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		return fmt.Sprintf("`%s`%s", table, siteRef(r))
 	})
 
+	// hasNonNilRow reports whether a COLLECT result holds at least one real row
+	// (Cypher COLLECT of a CASE returns [null] when nothing matched).
+	hasNonNilRow := func(rows []interface{}) bool {
+		for _, r := range rows {
+			if r != nil {
+				return true
+			}
+		}
+		return false
+	}
+
 	// reachSuffix annotates a cross-service call with how deep in the call chain
 	// it sits, so a dependency reached 8 hops down through business logic is
 	// distinguishable from one the handler calls directly.
@@ -3534,6 +3552,52 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		}
 		return fmt.Sprintf("**%s**%s%s", svcName, siteRef(r), reachSuffix(r))
 	})
+
+	// asyncSuffix annotates a call reached only after a self-consumed event fires —
+	// the sync→async→downstream continuation (e.g. after `payout.approved`, the
+	// consumer contacts payout-router). Kept in its OWN section so it is never read
+	// as a synchronous call the handler makes directly.
+	asyncSuffix := func(r map[string]interface{}) string {
+		ev := getStringFromRecord(r, "viaEvent")
+		via := getStringFromRecord(r, "viaConsumer")
+		switch {
+		case ev != "" && via != "":
+			return fmt.Sprintf(" _(async: after `%s` → `%s`)_", ev, via)
+		case ev != "":
+			return fmt.Sprintf(" _(async: after `%s`)_", ev)
+		default:
+			return " _(async)_"
+		}
+	}
+
+	asyncGrpc, _ := m["asyncGrpcCalls"].([]interface{})
+	asyncHTTP, _ := m["asyncHttpCalls"].([]interface{})
+	if hasNonNilRow(asyncGrpc) || hasNonNilRow(asyncHTTP) {
+		writeListSection("Async Downstream (after self-consumed events)", asyncGrpc, func(r map[string]interface{}) string {
+			svcName := getStringFromRecord(r, "service")
+			if svcName == "" {
+				return ""
+			}
+			method := getStringFromRecord(r, "method")
+			if method != "" {
+				return fmt.Sprintf("**%s** — `%s`%s%s", svcName, method, siteRef(r), asyncSuffix(r))
+			}
+			return fmt.Sprintf("**%s**%s%s", svcName, siteRef(r), asyncSuffix(r))
+		})
+		// Fold async HTTP into the same section by appending after the gRPC rows.
+		for _, raw := range asyncHTTP {
+			row, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			svcName := getStringFromRecord(row, "service")
+			if svcName == "" {
+				continue
+			}
+			url := getStringFromRecord(row, "url")
+			out.WriteString(fmt.Sprintf("- **%s** — `%s`%s%s\n", svcName, url, siteRef(row), asyncSuffix(row)))
+		}
+	}
 
 	events, _ := m["events"].([]interface{})
 	writeListSection("Events Published", events, func(r map[string]interface{}) string {
@@ -3976,13 +4040,16 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 
 		// DB calls
 		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn)-[:CALLS_DB]->(db:DBCall)
-		// gRPC calls — cross-service, any depth, via precomputed reachability closure.
+		// gRPC calls — synchronous, any depth, via precomputed reachability closure.
 		// Target read from the resolved targetService property (not a CALLS_SERVICE
 		// edge) so calls to un-indexed downstream services still surface.
-		OPTIONAL MATCH (root)-[rg:REACHES_CALL]->(grpc:GRPCCall)
+		OPTIONAL MATCH (root)-[rg:REACHES_CALL {async:false}]->(grpc:GRPCCall)
 		OPTIONAL MATCH (grpc)-[:RESOLVES_TO]->(handler)
-		// HTTP calls — cross-service, any depth
-		OPTIONAL MATCH (root)-[rh:REACHES_CALL]->(http:HTTPCall)
+		// HTTP calls — synchronous, any depth
+		OPTIONAL MATCH (root)-[rh:REACHES_CALL {async:false}]->(http:HTTPCall)
+		// Async continuation — calls reached only after a self-consumed event fires.
+		OPTIONAL MATCH (root)-[ag:REACHES_CALL {async:true}]->(agrpc:GRPCCall)
+		OPTIONAL MATCH (root)-[ah:REACHES_CALL {async:true}]->(ahttp:HTTPCall)
 		// Events
 		OPTIONAL MATCH (root)-[:CALLS*0..6]->(fn4)-[:CALLS_API]->(event:OutboxCall)
 
@@ -4002,6 +4069,14 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 		    targetSvc: coalesce(http.targetService,''), line: http.line,
 		    file: http.filePath, viaFn: rh.viaFunction, hops: rh.hops
 		  } END) AS httpSteps,
+		  COLLECT(DISTINCT CASE WHEN agrpc IS NOT NULL THEN {
+		    kind: 'async-grpc', target: agrpc.targetMethod, targetSvc: coalesce(agrpc.targetService,''),
+		    line: agrpc.line, file: agrpc.filePath, viaEvent: ag.viaEvent, viaConsumer: ag.viaConsumer
+		  } END) AS asyncGrpcSteps,
+		  COLLECT(DISTINCT CASE WHEN ahttp IS NOT NULL THEN {
+		    kind: 'async-http', url: ahttp.url, targetSvc: coalesce(ahttp.targetService,''),
+		    line: ahttp.line, file: ahttp.filePath, viaEvent: ah.viaEvent, viaConsumer: ah.viaConsumer
+		  } END) AS asyncHttpSteps,
 		  COLLECT(DISTINCT CASE WHEN event IS NOT NULL THEN {
 		    kind: 'outbox', event: event.eventType, transport: event.transport,
 		    queue: coalesce(event.destQueue,''), destSvc: coalesce(event.destService,''),
@@ -4106,6 +4181,41 @@ func (s *CodeGraphMCPServer) handleRPCAnatomyTool(ctx context.Context, args map[
 			}
 			return int(line), text
 		})
+
+		// Async continuation steps — reached only after a self-consumed event. Marked
+		// distinctly so they are never read as synchronous calls of the handler.
+		asyncStep := func(m map[string]any, kind string) (int, string) {
+			targetSvc, _ := m["targetSvc"].(string)
+			line, _ := m["line"].(int64)
+			ev, _ := m["viaEvent"].(string)
+			via, _ := m["viaConsumer"].(string)
+			var label string
+			if kind == "grpc" {
+				target, _ := m["target"].(string)
+				if target == "" {
+					return 0, ""
+				}
+				label = fmt.Sprintf("**async gRPC** → `%s`", target)
+			} else {
+				url, _ := m["url"].(string)
+				if url == "" {
+					return 0, ""
+				}
+				label = fmt.Sprintf("**async HTTP** `%s`", url)
+			}
+			if targetSvc != "" {
+				label += fmt.Sprintf(" @ **%s**", targetSvc)
+			}
+			switch {
+			case ev != "" && via != "":
+				label += fmt.Sprintf(" _(after `%s` → `%s`)_", ev, via)
+			case ev != "":
+				label += fmt.Sprintf(" _(after `%s`)_", ev)
+			}
+			return int(line), label
+		}
+		collectSteps("asyncGrpcSteps", func(m map[string]any) (int, string) { return asyncStep(m, "grpc") })
+		collectSteps("asyncHttpSteps", func(m map[string]any) (int, string) { return asyncStep(m, "http") })
 
 		collectSteps("eventSteps", func(m map[string]any) (int, string) {
 			event, _ := m["event"].(string)

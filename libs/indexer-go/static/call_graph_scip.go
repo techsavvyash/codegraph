@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -1108,6 +1109,89 @@ func parseASTCallsPerFunc(filePath string) (map[int][]astCallSite, error) {
 			})
 			return true
 		})
+
+		// Higher-order dispatch: a function that RETURNS a package-level function
+		// value (e.g. `func GetOrchestrationRoutes() func()error { return orchestrationRoutes }`)
+		// hands that function to its caller to invoke. SCIP records no CallExpr at the
+		// return, so without this the dispatcher is severed from its queue-listener
+		// entry and everything it dispatches to is unreachable from the async closure.
+		// We treat the returned function identifier as a call target so it flows
+		// through the same precise/fallback resolution as an ordinary call. The
+		// capture is gated on the DECLARED result type being a function type, which
+		// precisely isolates the dispatcher pattern from ordinary value returns
+		// (`return err`, `return &Thing{}`, `return nil`) without needing type
+		// inference. Nested func literals are not descended into — their returns
+		// belong to the closure, not this function.
+		for _, rv := range returnedFuncValues(fn, fset) {
+			out[declLine] = append(out[declLine], astCallSite{
+				Line:       rv.line,
+				TargetName: rv.name,
+			})
+		}
 	}
 	return out, nil
 }
+
+// retFuncVal is a function-value identifier returned by a function body.
+type retFuncVal struct {
+	name string
+	line int
+}
+
+// returnedFuncValues collects identifiers returned as function values by fn,
+// gated on the DECLARED result type at each position being a function type — the
+// signal that a returned identifier is a dispatcher function value rather than an
+// ordinary value (`return err`, `return &Thing{}`). It does not descend into
+// nested function literals (their returns belong to the closure). Both a bare
+// identifier (`return handler`) and a package-qualified selector (`return
+// pkg.Handler`) are captured by their final name segment; caller-side name
+// resolution keeps only those that correspond to an indexed Function/Method.
+func returnedFuncValues(fn *ast.FuncDecl, fset *token.FileSet) []retFuncVal {
+	if fn.Body == nil || fn.Type == nil || fn.Type.Results == nil {
+		return nil
+	}
+	// funcResultPos[i] = true when the i-th declared result is a function type.
+	// A single result field can declare multiple names, so expand by field width.
+	var funcResultPos []bool
+	for _, field := range fn.Type.Results.List {
+		width := len(field.Names)
+		if width == 0 {
+			width = 1
+		}
+		_, isFunc := field.Type.(*ast.FuncType)
+		for range width {
+			funcResultPos = append(funcResultPos, isFunc)
+		}
+	}
+	if !slices.Contains(funcResultPos, true) {
+		return nil // no function-typed result — nothing to capture
+	}
+
+	var out []retFuncVal
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.FuncLit:
+			return false // returns inside a closure belong to the closure
+		case *ast.ReturnStmt:
+			for i, res := range node.Results {
+				if i >= len(funcResultPos) || !funcResultPos[i] {
+					continue // this result position is not a function type
+				}
+				switch e := res.(type) {
+				case *ast.Ident:
+					if e.Name == "" || e.Name == "nil" {
+						continue
+					}
+					out = append(out, retFuncVal{name: e.Name, line: fset.Position(e.Pos()).Line})
+				case *ast.SelectorExpr:
+					if e.Sel != nil && e.Sel.Name != "" {
+						out = append(out, retFuncVal{name: e.Sel.Name, line: fset.Position(e.Sel.Pos()).Line})
+					}
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+

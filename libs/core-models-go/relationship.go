@@ -71,15 +71,26 @@ const (
 	// Written by HelperCollapseStage. Carries viaShim property naming the intermediate function.
 	TransitiveCallsAPIRel RelationshipType = "TRANSITIVE_CALLS_API"
 
-	// ReachesCallRel connects an RPC handler to a resolved cross-service call
-	// (GRPCCall/HTTPCall) reachable ANYWHERE in its downstream CALLS chain,
+	// ReachesCallRel connects an ENTRY POINT (sync RPC handler OR async event
+	// consumer) to a resolved cross-service call (GRPCCall/HTTPCall) it reaches,
 	// regardless of depth. This is the transitive reachability closure — distinct
 	// from TransitiveCallsAPIRel, which only collapses thin single-RPC shims one
 	// hop. Written at index time by the API-surface enrichment pass so that
 	// handler-scoped tools enumerate deep cross-service dependencies (e.g. a call
 	// 8 hops deep through ordinary business functions) via one hop instead of a
-	// deep, noisy CALLS* walk. Carries hops + viaFunction (the containing fn).
-	ReachesCallRel RelationshipType = "REACHES_CALL" // Function/Method (handler) → GRPCCall/HTTPCall
+	// deep, noisy CALLS* walk.
+	//
+	// Properties distinguish two reachability modes so tools never conflate them:
+	//   - async=false: reached SYNCHRONOUSLY within the entry point's own CALLS
+	//     chain. Carries hops + viaFunction (the containing fn).
+	//   - async=true: reached ASYNCHRONOUSLY — the entry point emits a self-consumed
+	//     event whose consumer reaches the call. Carries viaEvent (the event name)
+	//     + viaConsumer (the consuming handler). This is the analog, for sync RPC
+	//     flows, of following an SQS boundary: it lets a tool show "after event X,
+	//     consumer Y calls Z" without walking the event graph at query time.
+	// async is part of the edge identity, so a call reachable both ways yields two
+	// edges — one per mode.
+	ReachesCallRel RelationshipType = "REACHES_CALL" // entry point → GRPCCall/HTTPCall (async flag distinguishes sync vs event-boundary reach)
 
 	// Proto contract relationships (Phase 1.4)
 	DefinesMethodRel RelationshipType = "DEFINES_METHOD"  // ProtoContract → ProtoMethod

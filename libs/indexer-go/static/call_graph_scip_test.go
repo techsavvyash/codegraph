@@ -286,6 +286,75 @@ func f(ctx context.Context) {}
 	}
 }
 
+// TestParseASTCallsHigherOrderDispatch pins the higher-order-dispatch capture: a
+// function that RETURNS a package-level function value must yield a call site to
+// that function (so the returns-a-dispatcher indirection — GetXRoutes →
+// xRoutes — is not severed), while ordinary non-function returns (nil, err, a
+// struct literal) must NOT produce phantom call sites.
+func TestParseASTCallsHigherOrderDispatch(t *testing.T) {
+	dir := t.TempDir()
+	src := `package example
+
+func GetOrchestrationRoutes() func() error {
+	return orchestrationRoutes
+}
+
+func orchestrationRoutes() error {
+	return InitiatePayoutOrchestration()
+}
+
+func makeThing() *Thing {
+	return &Thing{}
+}
+
+func passthrough(err error) error {
+	return err
+}
+
+func returnsPkgFunc() func() error {
+	return pkg.Handler
+}
+`
+	tmpFile := filepath.Join(dir, "routes.go")
+	if err := os.WriteFile(tmpFile, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, err := parseASTCallsPerFunc(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Flatten every captured target name for easy assertions.
+	names := map[string]bool{}
+	for _, sites := range calls {
+		for _, s := range sites {
+			names[s.TargetName] = true
+		}
+	}
+
+	// The returned dispatcher function value must be captured as a call target.
+	if !names["orchestrationRoutes"] {
+		t.Errorf("expected `return orchestrationRoutes` to be captured as a call site; got %v", names)
+	}
+	// The package-qualified returned function value is captured by its final segment.
+	if !names["Handler"] {
+		t.Errorf("expected `return pkg.Handler` to be captured as `Handler`; got %v", names)
+	}
+	// The ordinary CallExpr inside the dispatcher is still captured.
+	if !names["InitiatePayoutOrchestration"] {
+		t.Errorf("expected the direct call InitiatePayoutOrchestration to be captured; got %v", names)
+	}
+	// A plain error passthrough must NOT be captured as a call (would be a phantom edge).
+	if names["err"] {
+		t.Errorf("`return err` must not be captured as a call site")
+	}
+	// A composite-literal return is not an identifier and must not be captured.
+	if names["Thing"] {
+		t.Errorf("`return &Thing{}` must not be captured as a call site")
+	}
+}
+
 func TestParseFuncRangesInvalidFile(t *testing.T) {
 	_, err := parseFuncRanges("/nonexistent/path.go")
 	if err == nil {

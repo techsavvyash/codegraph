@@ -83,51 +83,174 @@ func (d *APISurfaceDetector) Detect(ctx context.Context) error {
 // comfortably above the observed ceiling while keeping the closure bounded.
 const maxReachDepth = 16
 
-// resolveCrossServiceReachability precomputes, for every RPC handler, a
-// first-class REACHES_CALL edge to each resolved cross-service call
-// (GRPCCall/HTTPCall) reachable ANYWHERE in its downstream CALLS chain. This is
-// the synchronous-RPC analog of the async ROUTED_TO/CALLS_SERVICE edges: without
-// it, a cross-service call buried deep behind ordinary business functions is
+// maxAsyncEventHops bounds the fixpoint that propagates async-continuation edges
+// across chained self-consumed events (producer → event → consumer → event →
+// consumer → …). Observed real chains are 2 hops (create_payout: payout.approved
+// → handlePayoutApproved → payout.auto_initiate → orchestration → PSP), so 5 is
+// comfortable headroom; the loop also breaks early once an iteration adds nothing.
+const maxAsyncEventHops = 5
+
+// resolveCrossServiceReachability precomputes REACHES_CALL edges from every ENTRY
+// POINT — synchronous RPC handlers AND asynchronous event consumers — to each
+// resolved cross-service call it reaches. Without it, a cross-service call buried
+// deep behind ordinary business functions (or behind a self-consumed event) is
 // invisible to handler-scoped tools unless they run an unbounded, noisy CALLS*
-// walk (raising the depth cap pulls in shared-utility noise). Precomputing the
-// closure once at index time keeps those tools thin — a single REACHES_CALL hop —
-// and removes the depth-cap/noise tradeoff.
+// walk that still cannot cross an event boundary. Precomputing the closure at
+// index time keeps those tools thin (a single hop) and — crucially — lets them
+// follow the sync→async→PSP style continuation that a pure CALLS walk cannot.
 //
-// Scope guards keep the closure bounded and on-point: it originates only from
-// isRPCHandler nodes, targets only calls whose targetService resolved and differs
-// from the caller's own service (genuine cross-service edges), and records the
-// minimum hop distance plus the containing function for provenance.
+// Two passes, both scoped and provenance-tagged:
+//
+//   Pass A (synchronous closure). For every entry point — isRPCHandler OR an async
+//   consumer (a function that listens on a queue or handles specific events) —
+//   MERGE (entry)-[:REACHES_CALL {async:false}]->(call) for every cross-service
+//   call reachable via CALLS within maxReachDepth. Seeding async consumers here is
+//   what gives the async downstream (e.g. InitiatePayoutOrchestration → payout-
+//   router / SOL) a closure of its own; previously only isRPCHandler seeded, so
+//   anything behind an event was unreachable.
+//
+//   Pass B (asynchronous continuation, iterated to a fixpoint). For every entry
+//   point H that emits a SELF-consumed event E (destService == callerService), find
+//   the event's consumer C and copy C's reachability onto H as
+//   (H)-[:REACHES_CALL {async:true, viaEvent:E, viaConsumer:C}]->(call). Because C's
+//   set already includes async edges from earlier iterations, chained event hops
+//   propagate (payout.approved → handlePayoutApproved → payout.auto_initiate → …).
+//   Only self-consumed events are followed, which bounds the closure to the flow's
+//   own service and never bleeds into unrelated consumers of a shared bus.
+//
+// Guards throughout: targets must have a resolved targetService differing from the
+// caller's own; async is part of the edge identity so sync and async edges to the
+// same call coexist without clobbering each other.
 func (d *APISurfaceDetector) resolveCrossServiceReachability(ctx context.Context) (int, error) {
-	cypher := fmt.Sprintf(`
+	// entryPredicate matches both sync handlers and async consumers, bound to the
+	// entry variable `h` used by both passes. Async-role properties (listensOnQueue,
+	// handlesEvents*, all set by the event detector during this same index run,
+	// before this pass) identify event consumers without depending on the
+	// cross-service ROUTED_TO edges, which are written later by a global resolver.
+	const entryPredicate = `(
+		coalesce(h.isRPCHandler, false) = true
+		OR h.listensOnQueue IS NOT NULL
+		OR h.handlesEventsDirectly IS NOT NULL
+		OR h.handlesEvents IS NOT NULL
+	)`
+
+	// --- Pass A: synchronous closures for every entry point. ---
+	syncCypher := fmt.Sprintf(`
 		MATCH (call)
 		WHERE (call:GRPCCall OR call:HTTPCall)
 		  AND coalesce(call.targetService, '') <> ''
 		  AND toLower(call.targetService) <> toLower(coalesce(call.callerService, ''))
 		MATCH (f)-[:CALLS_API]->(call)
 		MATCH p = (h)-[:CALLS*0..%d]->(f)
-		WHERE coalesce(h.isRPCHandler, false) = true
-		  AND (h.scopeId = $scopeId OR h.scopeId = 'main')
+		WHERE (h.scopeId = $scopeId OR h.scopeId = 'main')
+		  AND %s
 		WITH h, call, f, min(length(p)) AS hops
-		MERGE (h)-[r:REACHES_CALL]->(call)
+		MERGE (h)-[r:REACHES_CALL {async: false}]->(call)
 		SET r.hops = hops, r.viaFunction = f.name
 		RETURN count(r) AS cnt
-	`, maxReachDepth)
+	`, maxReachDepth, entryPredicate)
 
+	total, err := d.runReachQuery(ctx, syncCypher)
+	if err != nil {
+		return 0, fmt.Errorf("cross-service reachability (sync): %w", err)
+	}
+	syncCount := total
+
+	// --- Pass B: asynchronous continuation across self-consumed events. ---
+	// Consumer selection prefers the precise per-event handler; when none resolved
+	// (e.g. a dispatcher whose switch the event resolver could not enumerate), it
+	// falls back to the queue's listener entry, which Pass A has given a closure via
+	// the higher-order-dispatch CALLS edge (return <dispatcher>). Both are bounded
+	// to self-consumed events.
+	asyncCypher := fmt.Sprintf(`
+		MATCH (h)-[:CALLS*0..%d]->()-[:CALLS_API]->(oc:OutboxCall)-[:EMITS_EVENT]->(et:EventType)
+		WHERE (h.scopeId = $scopeId OR h.scopeId = 'main')
+		  AND %s
+		  AND coalesce(oc.destService, '') <> ''
+		  AND toLower(oc.destService) = toLower(coalesce(oc.callerService, ''))
+		// Consumer: precise per-event handler if any exists, else the queue entry.
+		CALL {
+			WITH oc, et
+			OPTIONAL MATCH (ph)
+			WHERE (ph.handlesEventsDirectly IS NOT NULL AND et.eventType IN ph.handlesEventsDirectly)
+			   OR (ph.handlesEvents IS NOT NULL AND et.eventType IN ph.handlesEvents)
+			WITH oc, collect(DISTINCT ph) AS precise
+			OPTIONAL MATCH (qe) WHERE size(precise) = 0 AND qe.listensOnQueue = oc.destQueue
+			// Aggregate qe first, THEN concatenate — combining a grouping key (precise)
+			// with an aggregation (collect(qe)) in one expression is an illegal
+			// implicit-grouping mix in Cypher.
+			WITH precise, collect(DISTINCT qe) AS entries
+			WITH precise + entries AS consumers
+			RETURN consumers
+		}
+		UNWIND consumers AS c
+		WITH h, et, c WHERE c IS NOT NULL AND c <> h
+		MATCH (c)-[:REACHES_CALL]->(call)
+		WHERE coalesce(call.targetService, '') <> ''
+		  AND toLower(call.targetService) <> toLower(coalesce(call.callerService, ''))
+		MERGE (h)-[ar:REACHES_CALL {async: true}]->(call)
+		SET ar.viaEvent = et.eventType, ar.viaConsumer = c.name
+		RETURN count(ar) AS cnt
+	`, maxReachDepth, entryPredicate)
+
+	// Iterate to a fixpoint: each round lets producers inherit the async edges that
+	// the previous round added to intermediate consumers, so multi-hop event chains
+	// resolve. Stop as soon as a round changes nothing.
+	prevAsync := -1
+	for i := range maxAsyncEventHops {
+		if _, aerr := d.runReachQuery(ctx, asyncCypher); aerr != nil {
+			return total, fmt.Errorf("cross-service reachability (async, iter %d): %w", i+1, aerr)
+		}
+		// Converge when the total distinct async-edge count stops growing (each round
+		// lets producers inherit async edges the previous round added to consumers).
+		distinct, derr := d.countAsyncReachEdges(ctx)
+		if derr == nil {
+			if distinct == prevAsync {
+				break
+			}
+			prevAsync = distinct
+		}
+	}
+	asyncTotal := max(prevAsync, 0)
+
+	fmt.Printf("  Strategy 4: materialized %d REACHES_CALL edges (%d sync entry-point→call, %d async via self-consumed events)\n",
+		syncCount+asyncTotal, syncCount, asyncTotal)
+	return syncCount + asyncTotal, nil
+}
+
+// runReachQuery executes a REACHES_CALL MERGE query and returns the reported count.
+func (d *APISurfaceDetector) runReachQuery(ctx context.Context, cypher string) (int, error) {
 	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
 		"scopeId": d.scopeCtx.ScopeID,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("cross-service reachability: %w", err)
+		return 0, err
 	}
-
-	cnt := 0
 	if len(records) > 0 {
 		if v, ok := records[0].AsMap()["cnt"].(int64); ok {
-			cnt = int(v)
+			return int(v), nil
 		}
 	}
-	fmt.Printf("  Strategy 4: materialized %d REACHES_CALL edges (handler → cross-service call)\n", cnt)
-	return cnt, nil
+	return 0, nil
+}
+
+// countAsyncReachEdges returns the number of distinct async REACHES_CALL edges in
+// scope, used to detect fixpoint convergence.
+func (d *APISurfaceDetector) countAsyncReachEdges(ctx context.Context) (int, error) {
+	records, err := d.client.ExecuteQuery(ctx, `
+		MATCH (h)-[r:REACHES_CALL {async: true}]->()
+		WHERE h.scopeId = $scopeId OR h.scopeId = 'main'
+		RETURN count(r) AS cnt
+	`, map[string]any{"scopeId": d.scopeCtx.ScopeID})
+	if err != nil {
+		return 0, err
+	}
+	if len(records) > 0 {
+		if v, ok := records[0].AsMap()["cnt"].(int64); ok {
+			return int(v), nil
+		}
+	}
+	return 0, nil
 }
 
 // detectExternalParamFunctions marks exported functions whose paramTypes
