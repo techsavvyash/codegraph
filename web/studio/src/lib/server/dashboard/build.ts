@@ -1,0 +1,241 @@
+import type {
+  CallHub,
+  DashboardData,
+  DocLinkCounts,
+  HealthFlag,
+  RecentDocLink,
+  SemanticState,
+  ServiceCard
+} from '$lib/types/dashboard'
+import type {
+  ApiRoutesPerServiceRow,
+  CallHubRow,
+  CallsPerServiceRow,
+  EdgesByTypeRow,
+  FlowsPerServiceRow,
+  MentionsPerServiceFamilyRow,
+  NodesByLabelRow,
+  RecentDocLinkRow,
+  SemanticStateRow,
+  ServiceRow
+} from './queries'
+
+/** Raw row sets collected from the graph, ready for pure aggregation. */
+export interface RawDashboardRows {
+  services: ServiceRow[]
+  nodesByLabel: NodesByLabelRow[]
+  edgesByType: EdgesByTypeRow[]
+  callsPerService: CallsPerServiceRow[]
+  mentionsPerServiceFamily: MentionsPerServiceFamilyRow[]
+  semanticState: SemanticStateRow[]
+  flowsPerService: FlowsPerServiceRow[]
+  apiRoutesPerService: ApiRoutesPerServiceRow[]
+  callHubs: CallHubRow[]
+  recentDocLinks: RecentDocLinkRow[]
+}
+
+/** Fields collect.ts knows and build.ts doesn't derive from rows. */
+export interface DashboardMeta {
+  generatedAt: string
+  neo4jTarget: string
+  warnings: string[]
+}
+
+function emptyDocLinks(): DocLinkCounts {
+  return { docmine: 0, semlink: 0 }
+}
+
+function addDocLink(counts: DocLinkCounts, family: string | null, c: number): void {
+  if (family === 'docmine') counts.docmine += c
+  else if (family === 'semlink') counts.semlink += c
+}
+
+/**
+ * Pure aggregation: raw graph rows -> DashboardData (including health
+ * flags). No I/O, no Date.now() — `meta` supplies anything time- or
+ * environment-dependent so this function is fully deterministic and
+ * unit-testable.
+ */
+export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): DashboardData {
+  const serviceOrder = [...raw.services].sort((a, b) => a.name.localeCompare(b.name))
+  const serviceNames = new Set(serviceOrder.map((s) => s.name))
+
+  // ---- per-service accumulators, keyed by service name ----
+  const nodesByLabelPerService = new Map<string, Record<string, number>>()
+  const totalNodesByLabel: Record<string, number> = {}
+  for (const row of raw.nodesByLabel) {
+    if (row.c === 0) continue
+    totalNodesByLabel[row.label] = (totalNodesByLabel[row.label] ?? 0) + row.c
+    if (row.svc === null || !serviceNames.has(row.svc)) continue
+    const bucket = nodesByLabelPerService.get(row.svc) ?? {}
+    bucket[row.label] = (bucket[row.label] ?? 0) + row.c
+    nodesByLabelPerService.set(row.svc, bucket)
+  }
+
+  const totalEdgesByType: Record<string, number> = {}
+  for (const row of raw.edgesByType) {
+    if (row.c === 0) continue
+    totalEdgesByType[row.t] = row.c
+  }
+
+  const callsPerService = new Map<string, number>()
+  for (const row of raw.callsPerService) {
+    if (row.svc === null) continue
+    callsPerService.set(row.svc, (callsPerService.get(row.svc) ?? 0) + row.c)
+  }
+
+  const docLinksPerService = new Map<string, DocLinkCounts>()
+  const totalDocLinks = emptyDocLinks()
+  for (const row of raw.mentionsPerServiceFamily) {
+    addDocLink(totalDocLinks, row.family, row.c)
+    if (row.svc === null) continue
+    const counts = docLinksPerService.get(row.svc) ?? emptyDocLinks()
+    addDocLink(counts, row.family, row.c)
+    docLinksPerService.set(row.svc, counts)
+  }
+
+  const semanticPerService = new Map<string, SemanticState>()
+  let totalEmbeddedChunks = 0
+  let anyEmbeddingModel: string | null = null
+  let anyDims: number | null = null
+  for (const row of raw.semanticState) {
+    totalEmbeddedChunks += row.embedded
+    if (row.embedded > 0 && anyEmbeddingModel === null) {
+      anyEmbeddingModel = row.embeddingModel
+      anyDims = row.dims
+    }
+    if (row.svc === null) continue
+    if (row.embedded > 0) {
+      semanticPerService.set(row.svc, {
+        embeddingModel: row.embeddingModel,
+        dims: row.dims,
+        semlinkModel: row.semlinkModel,
+        semlinkThreshold: row.threshold,
+        embeddedChunks: row.embedded
+      })
+    }
+  }
+
+  const flowsPerService = new Map<string, number>()
+  for (const row of raw.flowsPerService) {
+    if (row.svc === null) continue
+    flowsPerService.set(row.svc, (flowsPerService.get(row.svc) ?? 0) + row.flows)
+  }
+
+  const apiRoutesPerService = new Map<string, number>()
+  for (const row of raw.apiRoutesPerService) {
+    if (row.svc === null) continue
+    apiRoutesPerService.set(row.svc, (apiRoutesPerService.get(row.svc) ?? 0) + row.c)
+  }
+
+  // ---- service cards ----
+  const services: ServiceCard[] = serviceOrder.map((s) => {
+    const nodesByLabel = nodesByLabelPerService.get(s.name) ?? {}
+    const docs = nodesByLabel['Document'] ?? 0
+    const chunks = nodesByLabel['DocumentChunk'] ?? 0
+    return {
+      name: s.name,
+      scopeId: s.scopeId ?? 'main',
+      language: s.language,
+      version: s.version,
+      repositoryUrl: s.repositoryUrl,
+      nodesByLabel,
+      calls: callsPerService.get(s.name) ?? 0,
+      apiRoutes: apiRoutesPerService.get(s.name) ?? 0,
+      flows: flowsPerService.get(s.name) ?? 0,
+      docs,
+      chunks,
+      docLinks: docLinksPerService.get(s.name) ?? emptyDocLinks(),
+      semantic: semanticPerService.get(s.name) ?? null
+    }
+  })
+
+  // ---- call hubs ----
+  const callHubs: CallHub[] = raw.callHubs.map((row) => ({
+    name: row.name,
+    service: row.serviceName,
+    label: row.label,
+    inDegree: row.inDegree
+  }))
+
+  // ---- recent doc links ----
+  const recentDocLinks: RecentDocLink[] = raw.recentDocLinks.map((row) => {
+    const strategy = row.strategy ?? ''
+    const family = strategy.split('/')[0] === 'semlink' ? 'semlink' : 'docmine'
+    return {
+      docPath: row.docPath ?? '(unknown path)',
+      headingPath: row.headingPath ?? '',
+      family,
+      strategy,
+      confidence: row.confidence ?? 0,
+      createdAt: row.createdAt,
+      targetName: row.targetName
+    }
+  })
+
+  // ---- health flags ----
+  const health: HealthFlag[] = []
+
+  // err: zero-flows — services with code (Function/Method) but no flows
+  for (const s of services) {
+    const codeCount = (s.nodesByLabel['Function'] ?? 0) + (s.nodesByLabel['Method'] ?? 0)
+    if (codeCount > 0 && s.flows === 0) {
+      health.push({
+        severity: 'err',
+        code: 'zero-flows',
+        text: `${s.name}: 0 flows generated — no entry points detected`
+      })
+    }
+  }
+
+  // warn: duplicate-repo — services sharing the same non-null repositoryUrl
+  const byRepo = new Map<string, string[]>()
+  for (const s of services) {
+    if (!s.repositoryUrl) continue
+    const names = byRepo.get(s.repositoryUrl) ?? []
+    names.push(s.name)
+    byRepo.set(s.repositoryUrl, names)
+  }
+  for (const [repositoryUrl, names] of byRepo) {
+    if (names.length > 1) {
+      health.push({
+        severity: 'warn',
+        code: 'duplicate-repo',
+        text: `${names.join(', ')} share the same repository URL (${repositoryUrl})`
+      })
+    }
+  }
+
+  // ok/warn: embeddings
+  if (totalEmbeddedChunks > 0) {
+    const dimsPart = anyDims !== null ? ` (dims ${anyDims})` : ''
+    const modelPart = anyEmbeddingModel ? ` · ${anyEmbeddingModel}${dimsPart}` : ''
+    health.push({
+      severity: 'ok',
+      code: 'embeddings-online',
+      text: `embeddings online · ${totalEmbeddedChunks} chunks${modelPart}`
+    })
+  } else {
+    health.push({
+      severity: 'warn',
+      code: 'embeddings-missing',
+      text: 'no embedded chunks — semantic search unavailable'
+    })
+  }
+
+  return {
+    generatedAt: meta.generatedAt,
+    neo4jTarget: meta.neo4jTarget,
+    warnings: meta.warnings,
+    totals: {
+      services: services.length,
+      nodesByLabel: totalNodesByLabel,
+      edgesByType: totalEdgesByType,
+      docLinks: totalDocLinks
+    },
+    services,
+    health,
+    callHubs,
+    recentDocLinks
+  }
+}

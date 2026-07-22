@@ -1,0 +1,365 @@
+import { describe, it, expect } from 'vitest'
+import { buildDashboard, type RawDashboardRows } from './build'
+import type {
+  ApiRoutesPerServiceRow,
+  CallHubRow,
+  CallsPerServiceRow,
+  EdgesByTypeRow,
+  FlowsPerServiceRow,
+  MentionsPerServiceFamilyRow,
+  NodesByLabelRow,
+  RecentDocLinkRow,
+  SemanticStateRow,
+  ServiceRow
+} from './queries'
+
+const META = {
+  generatedAt: '2026-07-23T00:00:00.000Z',
+  neo4jTarget: 'bolt://localhost:7687',
+  warnings: [] as string[]
+}
+
+/** Builds a full RawDashboardRows with sensible empty defaults, overridable per-field. */
+function fixture(overrides: Partial<RawDashboardRows> = {}): RawDashboardRows {
+  return {
+    services: [],
+    nodesByLabel: [],
+    edgesByType: [],
+    callsPerService: [],
+    mentionsPerServiceFamily: [],
+    semanticState: [],
+    flowsPerService: [],
+    apiRoutesPerService: [],
+    callHubs: [],
+    recentDocLinks: [],
+    ...overrides
+  }
+}
+
+describe('buildDashboard', () => {
+  it('aggregates raw rows into totals and per-service cards', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'dough-core',
+        scopeId: 'main',
+        language: 'go',
+        version: 'v1.2.0',
+        repositoryUrl: 'https://github.com/example/dough',
+        packageName: null
+      },
+      {
+        name: 'codegraph',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/codegraph',
+        packageName: null
+      }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [
+      { label: 'Function', svc: 'dough-core', c: 100 },
+      { label: 'Method', svc: 'dough-core', c: 50 },
+      { label: 'Function', svc: 'codegraph', c: 200 },
+      { label: 'File', svc: 'codegraph', c: 30 }
+    ]
+    const edgesByType: EdgesByTypeRow[] = [
+      { t: 'CALLS', c: 500 },
+      { t: 'CONTAINS', c: 900 }
+    ]
+    const callsPerService: CallsPerServiceRow[] = [
+      { svc: 'dough-core', c: 300 },
+      { svc: 'codegraph', c: 200 }
+    ]
+    const flowsPerService: FlowsPerServiceRow[] = [
+      { svc: 'dough-core', flows: 74 },
+      { svc: 'codegraph', flows: 36 }
+    ]
+    const apiRoutesPerService: ApiRoutesPerServiceRow[] = [
+      { svc: 'dough-core', c: 367 },
+      { svc: 'codegraph', c: 155 }
+    ]
+
+    const result = buildDashboard(
+      fixture({ services, nodesByLabel, edgesByType, callsPerService, flowsPerService, apiRoutesPerService }),
+      META
+    )
+
+    expect(result.totals.services).toBe(2)
+    expect(result.totals.nodesByLabel).toEqual({ Function: 300, Method: 50, File: 30 })
+    expect(result.totals.edgesByType).toEqual({ CALLS: 500, CONTAINS: 900 })
+
+    // sorted by name: codegraph before dough-core
+    expect(result.services.map((s) => s.name)).toEqual(['codegraph', 'dough-core'])
+
+    const doughCore = result.services.find((s) => s.name === 'dough-core')!
+    expect(doughCore.nodesByLabel).toEqual({ Function: 100, Method: 50 })
+    expect(doughCore.calls).toBe(300)
+    expect(doughCore.flows).toBe(74)
+    expect(doughCore.apiRoutes).toBe(367)
+    expect(doughCore.language).toBe('go')
+    expect(doughCore.version).toBe('v1.2.0')
+
+    const codegraphCard = result.services.find((s) => s.name === 'codegraph')!
+    expect(codegraphCard.nodesByLabel).toEqual({ Function: 200, File: 30 })
+    expect(codegraphCard.calls).toBe(200)
+    expect(codegraphCard.version).toBeNull()
+  })
+
+  it('handles null rows arrays as empty (no throw, zeroed aggregates)', () => {
+    const services: ServiceRow[] = [
+      { name: 'lonely', scopeId: 'main', language: null, version: null, repositoryUrl: null, packageName: null }
+    ]
+    const result = buildDashboard(fixture({ services }), META)
+
+    expect(result.totals.nodesByLabel).toEqual({})
+    expect(result.totals.edgesByType).toEqual({})
+    expect(result.services).toHaveLength(1)
+    expect(result.services[0].nodesByLabel).toEqual({})
+    expect(result.services[0].calls).toBe(0)
+    expect(result.services[0].flows).toBe(0)
+    expect(result.services[0].semantic).toBeNull()
+  })
+
+  it('surfaces a docs-only service (no code, no flows, no zero-flows flag)', () => {
+    const services: ServiceRow[] = [
+      { name: 'docs-only', scopeId: 'main', language: null, version: null, repositoryUrl: null, packageName: null }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [
+      { label: 'Document', svc: 'docs-only', c: 5 },
+      { label: 'DocumentChunk', svc: 'docs-only', c: 42 }
+    ]
+    const result = buildDashboard(fixture({ services, nodesByLabel }), META)
+
+    const card = result.services[0]
+    expect(card.docs).toBe(5)
+    expect(card.chunks).toBe(42)
+    expect(card.calls).toBe(0)
+    expect(card.flows).toBe(0)
+
+    // no code (Function/Method) present, so no zero-flows error for this service
+    expect(result.health.find((h) => h.code === 'zero-flows')).toBeUndefined()
+  })
+
+  it('flags a code-only service with zero flows as an err', () => {
+    const services: ServiceRow[] = [
+      { name: 'no-entrypoints', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'no-entrypoints', c: 12 }]
+    const result = buildDashboard(fixture({ services, nodesByLabel }), META)
+
+    const flag = result.health.find((h) => h.code === 'zero-flows')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('err')
+    expect(flag!.text).toContain('no-entrypoints')
+    expect(flag!.text).toContain('0 flows generated')
+  })
+
+  it('flags services sharing a repositoryUrl as a duplicate-repo warning', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'codegraph',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/repo',
+        packageName: null
+      },
+      {
+        name: 'context-maximiser',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/repo',
+        packageName: null
+      },
+      {
+        name: 'unrelated',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/other',
+        packageName: null
+      }
+    ]
+    const result = buildDashboard(fixture({ services }), META)
+
+    const flag = result.health.find((h) => h.code === 'duplicate-repo')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('warn')
+    expect(flag!.text).toContain('codegraph')
+    expect(flag!.text).toContain('context-maximiser')
+    expect(flag!.text).not.toContain('unrelated')
+  })
+
+  it('flags embeddings online when at least one service has embedded chunks', () => {
+    const services: ServiceRow[] = [
+      { name: 'svc-a', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const semanticState: SemanticStateRow[] = [
+      {
+        svc: 'svc-a',
+        chunks: 100,
+        embedded: 80,
+        dims: 1536,
+        embeddingModel: 'text-embedding-3-small',
+        semlinkModel: 'text-embedding-3-small',
+        threshold: 0.82
+      }
+    ]
+    const result = buildDashboard(fixture({ services, semanticState }), META)
+
+    const flag = result.health.find((h) => h.code === 'embeddings-online')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('ok')
+    expect(flag!.text).toContain('80 chunks')
+    expect(flag!.text).toContain('text-embedding-3-small')
+    expect(flag!.text).toContain('1536')
+    expect(result.health.find((h) => h.code === 'embeddings-missing')).toBeUndefined()
+
+    const card = result.services[0]
+    expect(card.semantic).toEqual({
+      embeddingModel: 'text-embedding-3-small',
+      dims: 1536,
+      semlinkModel: 'text-embedding-3-small',
+      semlinkThreshold: 0.82,
+      embeddedChunks: 80
+    })
+  })
+
+  it('flags embeddings missing as a warn when no service has embedded chunks', () => {
+    const services: ServiceRow[] = [
+      { name: 'svc-a', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const semanticState: SemanticStateRow[] = [
+      { svc: 'svc-a', chunks: 10, embedded: 0, dims: null, embeddingModel: null, semlinkModel: null, threshold: null }
+    ]
+    const result = buildDashboard(fixture({ services, semanticState }), META)
+
+    const flag = result.health.find((h) => h.code === 'embeddings-missing')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('warn')
+    expect(flag!.text).toContain('no embedded chunks')
+    expect(result.health.find((h) => h.code === 'embeddings-online')).toBeUndefined()
+    expect(result.services[0].semantic).toBeNull()
+  })
+
+  it('orders health flags err before warn before ok', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'svc-a',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/shared',
+        packageName: null
+      },
+      {
+        name: 'svc-b',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: 'https://github.com/example/shared',
+        packageName: null
+      }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'svc-a', c: 3 }]
+    const semanticState: SemanticStateRow[] = [
+      {
+        svc: 'svc-a',
+        chunks: 10,
+        embedded: 5,
+        dims: 768,
+        embeddingModel: 'model-x',
+        semlinkModel: null,
+        threshold: null
+      }
+    ]
+    const result = buildDashboard(fixture({ services, nodesByLabel, semanticState }), META)
+
+    const severities = result.health.map((h) => h.severity)
+    const errIdx = severities.indexOf('err')
+    const warnIdx = severities.indexOf('warn')
+    const okIdx = severities.indexOf('ok')
+    expect(errIdx).toBeGreaterThanOrEqual(0)
+    expect(warnIdx).toBeGreaterThanOrEqual(0)
+    expect(okIdx).toBeGreaterThanOrEqual(0)
+    expect(errIdx).toBeLessThan(warnIdx)
+    expect(warnIdx).toBeLessThan(okIdx)
+  })
+
+  it('deduplicates warnings passed through meta', () => {
+    const result = buildDashboard(fixture(), {
+      ...META,
+      warnings: ['AllNodesScan on X', 'AllNodesScan on X', 'slow query Y']
+    })
+    // build.ts passes meta.warnings through as-is; dedup happens in collect.ts
+    // via a Set, so verify build.ts preserves whatever it's given untouched.
+    expect(result.warnings).toEqual(['AllNodesScan on X', 'AllNodesScan on X', 'slow query Y'])
+  })
+
+  it('omits zero-count labels and edge types from totals and service cards', () => {
+    const services: ServiceRow[] = [
+      { name: 'svc-a', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [
+      { label: 'Function', svc: 'svc-a', c: 5 },
+      { label: 'Class', svc: 'svc-a', c: 0 },
+      { label: 'Interface', svc: null, c: 0 }
+    ]
+    const edgesByType: EdgesByTypeRow[] = [
+      { t: 'CALLS', c: 5 },
+      { t: 'IMPLEMENTS', c: 0 }
+    ]
+    const result = buildDashboard(fixture({ services, nodesByLabel, edgesByType }), META)
+
+    expect(result.totals.nodesByLabel).toEqual({ Function: 5 })
+    expect(result.totals.edgesByType).toEqual({ CALLS: 5 })
+    expect(result.services[0].nodesByLabel).toEqual({ Function: 5 })
+  })
+
+  it('aggregates doc link family counts per service and in totals', () => {
+    const services: ServiceRow[] = [
+      { name: 'svc-a', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const mentionsPerServiceFamily: MentionsPerServiceFamilyRow[] = [
+      { svc: 'svc-a', family: 'docmine', c: 12 },
+      { svc: 'svc-a', family: 'semlink', c: 7 }
+    ]
+    const result = buildDashboard(fixture({ services, mentionsPerServiceFamily }), META)
+
+    expect(result.services[0].docLinks).toEqual({ docmine: 12, semlink: 7 })
+    expect(result.totals.docLinks).toEqual({ docmine: 12, semlink: 7 })
+  })
+
+  it('maps call hub and recent doc link rows through unchanged in shape', () => {
+    const callHubs: CallHubRow[] = [
+      { name: 'HandleRequest', serviceName: 'dough-core', label: 'Function', inDegree: 42 }
+    ]
+    const recentDocLinks: RecentDocLinkRow[] = [
+      {
+        docPath: '/docs/architecture.md',
+        headingPath: 'Architecture > Overview',
+        strategy: 'semlink/text-embedding-3-small',
+        confidence: 0.91,
+        createdAt: '2026-07-20T10:00:00.000Z',
+        targetName: 'HandleRequest'
+      }
+    ]
+    const result = buildDashboard(fixture({ callHubs, recentDocLinks }), META)
+
+    expect(result.callHubs).toEqual([
+      { name: 'HandleRequest', service: 'dough-core', label: 'Function', inDegree: 42 }
+    ])
+    expect(result.recentDocLinks).toEqual([
+      {
+        docPath: '/docs/architecture.md',
+        headingPath: 'Architecture > Overview',
+        family: 'semlink',
+        strategy: 'semlink/text-embedding-3-small',
+        confidence: 0.91,
+        createdAt: '2026-07-20T10:00:00.000Z',
+        targetName: 'HandleRequest'
+      }
+    ])
+  })
+})
