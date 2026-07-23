@@ -305,6 +305,13 @@ func (c *Client) MergeNodesBatch(ctx context.Context, label string, items []map[
 // CreateRelsBatch creates relationships in UNWIND batches of batchSize, using pure Cypher (no APOC).
 // relType is the single relationship type for all items.
 // Each item must have "fromId" and "toId" (elementId strings) and "props" (map).
+//
+// Idempotent: uses MERGE, not CREATE. Nodes are MERGEd by nodeKey (stable identity
+// across reindex), so re-running the indexer without wiping the DB would otherwise
+// stack a fresh duplicate edge between the same two nodes on every run. MERGE reuses
+// the existing edge for a given (from, relType, to) pair; SET refreshes its props.
+// All callers write one-per-pair structural edges (CONTAINS/DEFINES/REFERENCES/
+// IMPLEMENTS), for which collapsing to a single edge is the correct semantics.
 func (c *Client) CreateRelsBatch(ctx context.Context, relType string, items []map[string]any, batchSize int) error {
 	if len(items) == 0 {
 		return nil
@@ -317,7 +324,7 @@ func (c *Client) CreateRelsBatch(ctx context.Context, relType string, items []ma
 		UNWIND $batch AS item
 		MATCH (a), (b)
 		WHERE elementId(a) = item.fromId AND elementId(b) = item.toId
-		CREATE (a)-[r:%s]->(b)
+		MERGE (a)-[r:%s]->(b)
 		SET r = item.props
 	`, relType)
 

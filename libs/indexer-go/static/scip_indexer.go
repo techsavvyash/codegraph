@@ -840,9 +840,10 @@ func (si *SCIPIndexer) createFileNode(ctx context.Context, file *models.File, se
 		return "", err
 	}
 
-	// Link file to service
-	_, err = si.client.CreateRelationship(ctx, serviceID, fileID, "CONTAINS",
-		map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID})
+	// Link file to service. MergeRelationship (not CreateRelationship) so a reindex
+	// over a live DB reuses the existing CONTAINS edge instead of stacking a duplicate.
+	_, err = si.client.MergeRelationship(ctx, serviceID, fileID, "CONTAINS",
+		nil, map[string]any{"scope": si.scopeCtx.Scope, "scopeId": si.scopeCtx.ScopeID})
 	return fileID, err
 }
 
@@ -1418,8 +1419,10 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 			"scopeId":      si.scopeCtx.ScopeID,
 		}
 
-		_, err = si.client.CreateRelationship(ctx, serviceID, targetServiceID,
-			string(models.DependsOnRel), relProps)
+		// MergeRelationship (not CreateRelationship): a reindex over a live DB must
+		// reuse the existing DEPENDS_ON edge, not stack a duplicate per run.
+		_, err = si.client.MergeRelationship(ctx, serviceID, targetServiceID,
+			string(models.DependsOnRel), nil, relProps)
 
 		if err != nil {
 			si.report.warn("failed to create DEPENDS_ON relationship to %s: %v", targetServiceName, err)
