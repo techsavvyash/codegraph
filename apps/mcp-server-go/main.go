@@ -271,7 +271,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_get_source",
-			Description: "Retrieve the exact source code for a specific function or method. If the name exists in multiple services/files, candidates are listed — re-call with the service parameter.",
+			Description: "Retrieve the exact source code for a specific function or method. If the name exists in multiple services/files, candidates are listed — re-call with the service parameter. WORKFLOW (Orient→Map→Drill→Verify): this is the DRILL step — use it AFTER mapping structure (codegraph_rpc_dependencies / codegraph_rpc_anatomy), and only for the 1-3 bodies where a condition/business rule decides the outcome. Don't read source the map didn't point you to. See docs/codegraph-analysis-playbook.md.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -667,7 +667,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_rpc_dependencies",
-			Description: "Get all dependencies for a single RPC handler: DB tables touched, downstream gRPC/HTTP services called, and async events published. Requires DBCall nodes (indexed via SCIP pipeline).",
+			Description: "Get all dependencies for a single RPC handler: DB tables touched, downstream gRPC/HTTP services called, and async events published. Requires DBCall nodes (indexed via SCIP pipeline). WORKFLOW (Orient→Map→Drill→Verify): this is your MAP call — start here for 'what does this RPC touch'. Read the 'Does:' line first; treat sync fan-out and Async Downstream separately. Then use codegraph_get_source ONLY on the 1-3 call sites where a condition/business rule decides the outcome. See docs/codegraph-analysis-playbook.md.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -709,7 +709,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_rpc_anatomy",
-			Description: "Return the structured anatomy of an RPC handler: all steps in source order with kind (validation/rpc/db/outbox), control-flow context, transaction membership, and parallel group. Requires enriched indexing with call metadata.",
+			Description: "Return the structured anatomy of an RPC handler: all steps in source order with kind (validation/rpc/db/outbox), control-flow context, transaction membership, and parallel group. Requires enriched indexing with call metadata. WORKFLOW (Orient→Map→Drill→Verify): use this in the MAP step when you need ordering, conditions, or transaction/parallel context WITHIN a handler (rpc_dependencies gives cross-service breadth; this gives in-handler depth). See docs/codegraph-analysis-playbook.md.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -751,7 +751,7 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 		},
 		{
 			Name:        "codegraph_api_callers",
-			Description: "Answer 'who calls this API?' across service boundaries in one call. Given an RPC handler (name, proto method, or HTTP route), returns every inbound call site in other services (gRPC/HTTP, with file:line and resolution confidence), folds each caller back to the calling service's own API endpoint, and lists async triggers (events routed to this handler plus their producers). Use this instead of codegraph_trace_call_graph upstream when the question crosses services.",
+			Description: "Answer 'who calls this API?' across service boundaries in one call. Given an RPC handler (name, proto method, or HTTP route), returns every inbound call site in other services (gRPC/HTTP, with file:line and resolution confidence), folds each caller back to the calling service's own API endpoint, and lists async triggers (events routed to this handler plus their producers). Use this instead of codegraph_trace_call_graph upstream when the question crosses services. WORKFLOW (Orient→Map→Drill→Verify): this is the MAP call for 'who calls this'; pair with codegraph_rpc_dependencies (what it calls). See docs/codegraph-analysis-playbook.md.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -3409,6 +3409,7 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 		RETURN
 		  handler.name AS handlerName,
 		  handler.filePath AS handlerFile,
+		  coalesce(handler.summary, '') AS handlerSummary,
 		  COLLECT(DISTINCT CASE WHEN db IS NOT NULL THEN {table: db.table, op: db.operation, file: db.filePath, line: db.line} ELSE null END) AS dbCalls,
 		  COLLECT(DISTINCT CASE WHEN grpc IS NOT NULL THEN {service: grpc.targetService, method: grpc.targetMethod, file: grpc.filePath, line: grpc.line, hops: rg.hops, via: rg.viaFunction} ELSE null END) AS grpcCalls,
 		  COLLECT(DISTINCT CASE WHEN http IS NOT NULL THEN {service: http.targetService, url: http.url, file: http.filePath, line: http.line, hops: rh.hops, via: rh.viaFunction} ELSE null END) AS httpCalls,
@@ -3438,6 +3439,7 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 	m := result[0].AsMap()
 	handlerName := getStringFromRecord(m, "handlerName")
 	handlerFile := getStringFromRecord(m, "handlerFile")
+	handlerSummary := getStringFromRecord(m, "handlerSummary")
 
 	var out strings.Builder
 	out.WriteString(fmt.Sprintf("# RPC Dependencies: `%s` in **%s**\n\n", rpc, service))
@@ -3445,7 +3447,15 @@ func (s *CodeGraphMCPServer) handleRPCDependenciesTool(ctx context.Context, args
 	if handlerFile != "" {
 		out.WriteString(fmt.Sprintf(" — `%s`", handlerFile))
 	}
-	out.WriteString("\n\n")
+	out.WriteString("\n")
+	// The deterministic "Does:" line carries the handler's one-hop effects
+	// (DB tables written/read, services called, events emitted) — the same
+	// affects-tags six other tools surface. Cheap orientation before the
+	// per-call breakdown below.
+	if handlerSummary != "" {
+		out.WriteString(fmt.Sprintf("**Does**: %s\n", handlerSummary))
+	}
+	out.WriteString("\n")
 
 	writeListSection := func(title string, items []interface{}, render func(map[string]interface{}) string) {
 		out.WriteString(fmt.Sprintf("## %s\n\n", title))

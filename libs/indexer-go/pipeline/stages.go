@@ -365,7 +365,7 @@ func (s *GenerateNodeSummariesStage) Optional() bool  { return true }
 // Delegates to static.GenerateAndStoreNodeSummaries so the same logic also runs
 // inside IndexProjectPolyglot (the direct `index scip` path).
 func (s *GenerateNodeSummariesStage) Run(ctx context.Context, cfg *PipelineConfig) (int, error) {
-	n, err := static.GenerateAndStoreNodeSummaries(ctx, cfg.Client, cfg.ScopeCtx)
+	n, err := static.GenerateAndStoreNodeSummaries(ctx, cfg.Client, cfg.ScopeCtx, cfg.ServiceName)
 	if err != nil {
 		return 0, fmt.Errorf("GenerateNodeSummaries: %w", err)
 	}

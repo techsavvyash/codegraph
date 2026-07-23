@@ -25,43 +25,43 @@ import (
 //  2. a *lead* phrase from the docstring (preferred) or the name. This frames the
 //     intent; on its own it mostly restates the name, so it is only the scaffold
 //     the effects hang off.
-func GenerateAndStoreNodeSummaries(ctx context.Context, client *neo4j.Client, scopeCtx models.ScopeContext) (int, error) {
-	const fetchLimit = 5000
-
+func GenerateAndStoreNodeSummaries(ctx context.Context, client *neo4j.Client, scopeCtx models.ScopeContext, service string) (int, error) {
 	// Each summary describes the node ONE HOP out: its own direct effects (the DB
 	// tables it queries, the services it calls, the events it emits) plus the names
 	// of the functions it directly calls. We deliberately do NOT roll effects up the
 	// whole subtree — the card is a local navigation map, and an LLM walks the graph
 	// hop by hop using the listed callees. One-hop also keeps cards small (the point
 	// is to save tokens) and sidesteps the order/cycle hazards of transitive roll-up.
-	directEffects, err := fetchDirectEffects(ctx, client, scopeCtx.ScopeID)
+	directEffects, err := fetchDirectEffects(ctx, client, scopeCtx.ScopeID, service)
 	if err != nil {
 		return 0, fmt.Errorf("GenerateAndStoreNodeSummaries: %w", err)
 	}
-	directCallees, err := fetchDirectCallees(ctx, client, scopeCtx.ScopeID)
+	directCallees, err := fetchDirectCallees(ctx, client, scopeCtx.ScopeID, service)
 	if err != nil {
 		return 0, fmt.Errorf("GenerateAndStoreNodeSummaries: %w", err)
 	}
 
-	// Regenerate for ALL Function/Method nodes in scope on every run — NOT only
-	// those lacking a summary. Summaries are derived from the call graph, which is
-	// rebuilt each index; a "skip if already set" guard leaves stale summaries from a
-	// previous (possibly buggy) run in place, requiring a manual clear before every
-	// re-index. Recomputing all (a few thousand) nodes is cheap and keeps summaries
-	// consistent with the current graph by construction.
+	// Regenerate for ALL Function/Method nodes of the JUST-INDEXED SERVICE on every
+	// run — NOT only those lacking a summary, and NOT the whole graph. Summaries are
+	// derived from the call graph, which is rebuilt each index; a "skip if already
+	// set" guard would leave stale summaries from a previous (possibly buggy) run in
+	// place. Scoping to the service is essential: every service shares scopeId
+	// "main", so a scopeId-only filter re-summarized the entire accumulated graph on
+	// each service index — O(services × graph) time growth, and a former LIMIT 5000
+	// silently dropped coverage once the graph passed 5000 nodes. Anchoring on the
+	// Service subtree makes each run touch only its own (bounded) node set.
 	metaCypher := `
-MATCH (n) WHERE (n:Function OR n:Method)
-  AND n.scopeId = $scopeId
-RETURN n.nodeKey AS nodeKey,
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)
+WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
+RETURN DISTINCT n.nodeKey AS nodeKey,
        n.name AS name,
        n.goSignature AS goSignature,
        n.docstring AS docstring,
-       coalesce(n.isRPCHandler, false) AS isRPCHandler
-LIMIT $limit`
+       coalesce(n.isRPCHandler, false) AS isRPCHandler`
 
 	rows, err := client.ExecuteQuery(ctx, metaCypher, map[string]any{
 		"scopeId": scopeCtx.ScopeID,
-		"limit":   fetchLimit,
+		"service": service,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("GenerateAndStoreNodeSummaries: fetch failed: %w", err)
@@ -167,7 +167,7 @@ func (r *rawEffects) resolve() NodeEffects {
 // fetchDirectEffects loads every Function/Method's 1-hop effects, keyed by nodeKey.
 // Each edge type is queried separately to avoid a cartesian product between the
 // DB / RPC / event matches on hot nodes.
-func fetchDirectEffects(ctx context.Context, client *neo4j.Client, scopeID string) (map[string]*rawEffects, error) {
+func fetchDirectEffects(ctx context.Context, client *neo4j.Client, scopeID, service string) (map[string]*rawEffects, error) {
 	out := map[string]*rawEffects{}
 	get := func(key string) *rawEffects {
 		if e, ok := out[key]; ok {
@@ -177,10 +177,13 @@ func fetchDirectEffects(ctx context.Context, client *neo4j.Client, scopeID strin
 		out[key] = e
 		return e
 	}
-	params := map[string]any{"scopeId": scopeID}
+	// Scope every effect query to the just-indexed service's own subtree. All
+	// services share scopeId "main", so a scopeId-only filter would scan the whole
+	// accumulated graph on each service index (see GenerateAndStoreNodeSummaries).
+	params := map[string]any{"scopeId": scopeID, "service": service}
 
 	dbRows, err := client.ExecuteQuery(ctx, `
-MATCH (n)-[:CALLS_DB]->(db:DBCall)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)-[:CALLS_DB]->(db:DBCall)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
 RETURN n.nodeKey AS nodeKey, db.table AS tbl, db.operation AS op`, params)
 	if err != nil {
@@ -201,7 +204,7 @@ RETURN n.nodeKey AS nodeKey, db.table AS tbl, db.operation AS op`, params)
 	}
 
 	grpcRows, err := client.ExecuteQuery(ctx, `
-MATCH (n)-[:CALLS_API]->(g:GRPCCall)-[:CALLS_SERVICE]->(s:Service)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)-[:CALLS_API]->(g:GRPCCall)-[:CALLS_SERVICE]->(s:Service)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
 RETURN n.nodeKey AS nodeKey, s.name AS svc, g.targetMethod AS method`, params)
 	if err != nil {
@@ -226,7 +229,7 @@ RETURN n.nodeKey AS nodeKey, s.name AS svc, g.targetMethod AS method`, params)
 	}
 
 	httpRows, err := client.ExecuteQuery(ctx, `
-MATCH (n)-[:CALLS_API]->(h:HTTPCall)-[:CALLS_SERVICE]->(s:Service)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)-[:CALLS_API]->(h:HTTPCall)-[:CALLS_SERVICE]->(s:Service)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
 RETURN n.nodeKey AS nodeKey, s.name AS svc`, params)
 	if err != nil {
@@ -241,7 +244,7 @@ RETURN n.nodeKey AS nodeKey, s.name AS svc`, params)
 	}
 
 	evRows, err := client.ExecuteQuery(ctx, `
-MATCH (n)-[:CALLS_API]->(ev:OutboxCall)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)-[:CALLS_API]->(ev:OutboxCall)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
 OPTIONAL MATCH (ev)-[:EMITS_EVENT]->(et:EventType)
 RETURN n.nodeKey AS nodeKey, coalesce(et.eventType, ev.eventType) AS event, ev.queueOrTopic AS topic`, params)
@@ -264,7 +267,7 @@ RETURN n.nodeKey AS nodeKey, coalesce(et.eventType, ev.eventType) AS event, ev.q
 	}
 
 	extRows, err := client.ExecuteQuery(ctx, `
-MATCH (n)-[:CALLS_API]->(ec:ExternalCall)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(n)-[:CALLS_API]->(ec:ExternalCall)
 WHERE (n:Function OR n:Method) AND n.scopeId = $scopeId
 RETURN n.nodeKey AS nodeKey, ec.provider AS provider, ec.externalService AS service, ec.operation AS operation`, params)
 	if err != nil {
@@ -303,13 +306,13 @@ RETURN n.nodeKey AS nodeKey, ec.provider AS provider, ec.externalService AS serv
 // rather than an unordered set. The ORDER BY drives the row order that the
 // orderedSet below preserves; edges without a line (e.g. from the legacy AST
 // builder) sort last via coalesce.
-func fetchDirectCallees(ctx context.Context, client *neo4j.Client, scopeID string) (map[string][]string, error) {
+func fetchDirectCallees(ctx context.Context, client *neo4j.Client, scopeID, service string) (map[string][]string, error) {
 	rows, err := client.ExecuteQuery(ctx, `
-MATCH (a)-[r:CALLS]->(b)
+MATCH (svc:Service {name: $service})-[:CONTAINS*1..8]->(a)-[r:CALLS]->(b)
 WHERE (a:Function OR a:Method) AND (b:Function OR b:Method)
   AND a.scopeId = $scopeId AND b.scopeId = $scopeId
 RETURN a.nodeKey AS src, b.name AS name
-ORDER BY a.nodeKey, coalesce(r.line, 2147483647)`, map[string]any{"scopeId": scopeID})
+ORDER BY a.nodeKey, coalesce(r.line, 2147483647)`, map[string]any{"scopeId": scopeID, "service": service})
 	if err != nil {
 		return nil, fmt.Errorf("fetch CALLS edges: %w", err)
 	}

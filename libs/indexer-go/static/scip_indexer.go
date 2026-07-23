@@ -591,7 +591,7 @@ func (si *SCIPIndexer) IndexProjectPolyglot(ctx context.Context, projectPath str
 	// Generate and store one-line summaries for all Function/Method nodes that
 	// don't have one yet.  Two round-trips regardless of service size.
 	t := time.Now()
-	if n, err := GenerateAndStoreNodeSummaries(ctx, si.client, si.scopeCtx); err != nil {
+	if n, err := GenerateAndStoreNodeSummaries(ctx, si.client, si.scopeCtx, si.serviceName); err != nil {
 		fmt.Printf(" ▸ %-16s failed: %v\n", "Node summaries", err)
 	} else {
 		fmt.Printf(" ▸ %-16s %d nodes  %s\n", "Node summaries", n, fmtDur(time.Since(t)))
