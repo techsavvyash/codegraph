@@ -245,42 +245,98 @@ MATCH (h:HTTPCall) RETURN count(h),
 
 ---
 
-## Action items (prioritized)
+## 4. AST/SCIP yield analysis (2026-07-24, 3rd pass) — "are we extracting the maximum from SCIP and AST?"
 
-Two tracks. **Track A** raises the quality of what the MCP/graph returns *today*. **Track B** raises architecture resilience/maintainability *without changing current output* — these are decay insurance and hygiene, valuable precisely because they don't move the numbers now. Within each track, ordered by (impact ÷ effort): do the top of each first. Effort scale: **XS** = <1h/one-line · **S** = <½ day · **M** = 1–3 days · **L** = week+.
+**Question:** are AST and SCIP used to their fullest, or can we retire the brittle name-heuristics by consuming facts the toolchain already computes? **Answer: not at max yield — but the gap is narrower and more specific than "use SCIP more," and one dropped fact is the highest-leverage fix in the whole review.**
 
-### Track A — increases output quality now
+### Method (reproducible)
 
-| # | Action | Source | Effort | Output impact | Notes |
+Generated a **real** SCIP index from the live `fx` service with the fleet's own toolchain (`scip-go 0.1.26`) and counted, by protobuf field, exactly what scip-go emits vs. what reaches the graph. This replaces speculation about SCIP's capability with measured fact for *this* toolchain version.
+
+```
+$ scip-go --output /tmp/fx.scip          # in ~/Workspace/Tazapay/fx
+# inspect fx.scip via the scip Go bindings:
+docs=168  occurrences=53,589  definitions=7,816  docSymbols=7,818
+relationships: impl=250  ref=0  typedef=0
+symInfo: withKind=0  withSignature=5,908
+occurrence roles: {Definition:7,816, ReadAccess:45,773}   # no WriteAccess, no Import
+```
+
+### What scip-go emits vs. what the graph keeps
+
+| SCIP fact | scip-go emits (real fx) | In graph | Verdict |
+|---|---|---|---|
+| Occurrences / definitions | 53,589 / 7,816 | → CALLS (16,422), DEFINES (26,485) | ✅ consumed |
+| Signatures | 5,908 | → summary `(Req→Resp)` clause | ✅ consumed |
+| Docstrings | (per-symbol) | → summary leads | ✅ consumed |
+| **Implementation relationships** | **250** | **0 `IMPLEMENTS` edges fleet-wide** | ❌ **extracted then dropped** |
+| Type-definition relationships | **0** | — | ⚠️ toolchain emits none |
+| Reference relationships | **0** | — | ⚠️ toolchain emits none |
+| `SymbolInformation.Kind` | **0 of 7,818** | `Symbol.kind` ∈ {Type, Package, Method, Function} | ⚠️ toolchain emits none → string heuristic forced |
+| Occurrence roles | `Definition` + `ReadAccess` only | only `Definition` bit read | ⚠️ no WriteAccess/Import emitted |
+
+Live-graph cross-checks: `IMPLEMENTS = 0`, `Reference` nodes = 0, `Symbol.kind` distribution = only the four values `inferSymbolKind` can produce (confirming it is the string heuristic, `scip_parser.go:307`, not SCIP's `Kind`).
+
+### F9 — the 250-strong implementation relationship set is extracted, then dropped (high; this is the durable F6 fix and the interface-dispatch fix at once)
+
+scip-go emits 250 `is_implementation` relationships for fx; `ExtractRelationships` (`scip_relationships.go:27`) reads them; **0 reach the graph.** `buildImplementsBatch → resolveNodeID` (`scip_relationships.go:103`) resolves both endpoints only against the *current service's* in-module symbol index, so any relationship whose interface side lives in another module is silently dropped. The most valuable ones do exactly that — they cross into `github.com/tazapay/proto`:
+
+```
+IMPL from  fx/service/grpc/v1 . FxServiceServiceServer#GetBaseFx()
+     to    proto/gen/go/fx/grpc/v1 . FXServiceServer#GetBaseFx
+```
+
+**This is the exact `Fx`↔`FX` identity that F6 reconstructs by case-insensitive string matching — computed by the Go type checker, method by method, convention-free.** scip-go already knows every handler's proto-interface satisfaction. Consequences of dropping it:
+
+- **F6 and the whole receiverType-string-match class are reconstructable from ground truth.** Resolving these relationships' interface side against the existing `ProtoMethod`/`ProtoContract` nodes (not just in-module symbols) yields `handler —IMPLEMENTS→ ProtoMethod` from the type checker — which is precisely the `IMPLEMENTED_BY` edge `api_surface.go:398` currently *approximates* by name. Identity replaces heuristic; F6 disappears; no matcher is loosened.
+- **Interface dispatch is dark in the call graph.** `loadInterfaceImpls` (`call_graph_scip.go:200`) reads this empty `IMPLEMENTS` set, so every interface-mediated call (repository/service/use-case interfaces — pervasive in the fleet) falls back to bare-name resolution. Fixing the resolution lights up interface hops intra-service, fleet-wide.
+
+**Fix:** in `buildImplementsBatch`, when the interface endpoint is external, resolve it against `Symbol`/`ProtoMethod` nodes across scopes (the proto repo *is* indexed) instead of returning `""`. Verify the `resolveNodeID` key format matches how `symbolIDs` is keyed — a 0-across-17-services outcome also admits a key-format mismatch on the concrete side. This is a **resolution/wiring bugfix on already-extracted data**, not a new feature.
+
+### F10 — SCIP (this toolchain) cannot replace the remaining name-heuristics; only go/types can (medium, strategic)
+
+`typedef=0`, `ref=0`, `withKind=0` are hard ceilings of `scip-go 0.1.26`. So three heuristics are **not** SCIP-replaceable today and any plan to do so is a dead end until the toolchain changes:
+
+- `inferSymbolKind` (Interface vs Struct vs Enum vs Const) — SCIP `Kind` is empty; **go/types is the only source.** Today everything non-func/method collapses to `Type`, so the graph cannot say "X is an interface" or "Y is an enum."
+- `New*Client` client-type derivation and arbitrary variable→type resolution — SCIP `typedef` is empty; go/types (or the existing getter table, which is why this is low-risk today) only.
+- Import graph — SCIP emits no `Import` role, so the regex import extractor (`scip_parser.go:638`) is **justified**, not a defect.
+
+The **AST-fullest-potential lever** is therefore a *type-checked* AST pass (`go/packages` + `go/types`) — the only path to real kinds and precise type resolution. But it is a genuine investment (needs compilable code + full deps, materially slower — the documented reason the current AST pass is mode-0, `scip_indexer.go:1612`). **Do not start it until F9 is banked**; F9 delivers most of the same brittleness reduction (handler↔proto identity) for a fraction of the cost, because the type checker already ran *inside scip-go*.
+
+### Already at maximum yield (leave alone)
+
+Signatures (5,908 consumed), the occurrence→CALLS graph, docstrings, and the getter table (proto-import-path ground truth) extract the best available signal. The yield gap is entirely in **dropped relationships (F9)** and **facts this toolchain doesn't emit (F10)** — not in under-using what is already parsed.
+
+---
+
+## 5. Action items (prioritized)
+
+Single ranked list, re-prioritized after the §4 yield analysis (F9 now leads). Ranked by **impact ÷ effort**. **Type** = does it raise *Quality* (what the graph/MCP returns today), *Architecture* (resilience/maintainability, no change to today's output), or *Both*. **Effort:** XS = <1h/one-line · S = <½ day · M = 1–3 days · L = week+.
+
+| P | Action (source) | Type | Effort | Impact | Notes |
 |---|---|---|---|---|---|
-| **A1** | **Reindex the fleet to flush the 428 `proto.`-polluted summaries** | S2 / F1 | **XS** (run reindex) | **Med–High** | The CALLS_SERVICE edges these summaries read are already correct post-F1; only a per-service reindex regenerates the cards. *Bonus:* this is also the first time `loadContractRepoIDs` runs at **detection** time (F1 was so far only validated on the resolve path) — so it doubles as F1's real-world exercise. **Start here: highest impact-per-effort, zero code.** |
-| **A2** | **Fix F6 — quick path: case-insensitive + normalized receiver match** | F6 opt 1–2 / F8 | **S** | **High** (+6–8pp gRPC resolution; recovers ~51 calls incl. fx 33) | `toLower(receiverType) CONTAINS toLower(protoService)` recovers fx today (verified). Must ship **with B3's mis-bind counter** — it loosens a fail-closed match. Ship as the stopgap before A3. |
-| **A3** | **Fix F6 — durable path: resolve through `IMPLEMENTED_BY` identity** | F8 / F6 opt 3 | **M** | **High** (same recall as A2, then convention-independent forever) | Join `GRPCCall → ProtoContract{protoService} → DEFINES_METHOD → ProtoMethod → IMPLEMENTED_BY → handler`. Structurally 1.0 confidence, immune to the naming class that caused F6. Supersedes A2 (keep A2's counter). This is the single change that converts the load-bearing join from name-shape to identity. |
-| **A4** | **S1 — strip docstring punctuation prefixes in summary leads** | S1 | **XS** (`TrimLeft(":-• ")` + drop leading "func to") | **Low–Med** (cosmetic, but visible in ~every service) | Cheapest quality win in the codebase; raises perceived summary quality fleet-wide. Bundle into the next reindex (A1). |
-| **A5** | **S3 — run a summary-refresh pass after the global resolver** | S3 | **M** | **Med** | Today summaries are generated *before* `CrossServiceHandlerResolver`, so cross-service effects lag one reindex. A post-resolver refresh (or accept+document the lag) makes summaries reflect resolved edges same-run. |
-| **A6** | **Index the ~38-call cohort of unindexed services** (opsdashboard 23, sandbox 5, cpnofi 4, …) | F6 residual | **S–M** (operational, per service) | **Med** (completeness) | Not a code change — these calls can never resolve until the target repos are indexed. Do only for services that matter to blast-radius queries. After A3, an unresolved call means *exactly* "target not indexed," so this list becomes self-maintaining. |
+| **1** | **Fix F9 — land the dropped `IMPLEMENTS` relationships** (`scip_relationships.go:103`, resolve external interface endpoints vs `Symbol`/`ProtoMethod` nodes cross-scope) | **Both** | S–M | **High** | scip-go already emits 250/service; you extract and drop them. Landing them lights up interface dispatch in the call graph **and** gives type-checker handler↔proto identity. **Supersedes old A2/A3** (the F6 string-match fixes). Effect materializes on the P4 reindex. Highest impact-per-effort in the doc. |
+| **2** | **Index-time coverage SLOs** (§3 lever 1): per-stage recall proxy, diffed run-over-run, loud WARN | Architecture | M | **High** (resilience) | Instrument already exists (IndexStats "imported but wrote 0"). Would have caught F1 *and* F6 on day one. Do early so P1/P4 land measured. No change to output. |
+| **3** | **Mis-bind counter for any loosened matcher** (§3 cultural note) | Architecture | XS–S | Med (safety) | Gate for any recall-broadening change. Cheap hygiene; prerequisite if the P-A2 fallback ever ships. |
+| **4** | **Reindex the fleet** (S2 / F1) | Quality | XS | **Med–High** | Realizes P1's IMPLEMENTS edges, flushes the 428 `proto.`-polluted summaries, applies P5, exercises `loadContractRepoIDs` at detection, emits P2's SLOs. Batch all code fixes, then reindex once. |
+| **5** | **S1 — strip docstring punctuation in summary leads** (`TrimLeft(":-• ")` + drop leading "func to") | Quality | XS | Low–Med | Cheapest cosmetic win; visible in ~every service. Fold into P4's reindex. |
+| **6** | **Golden-fixture corpus** (§3 lever 2): freeze each past finding as a test | Architecture | M | High (resilience) | Converts the manual re-audit into CI accretion — new house style → one fixture → guarded forever. Best defense against month-scale decay. |
+| **7** | **F3 — kill the silent `LIMIT 2000` truncation** in the SCIP detector (count + WARN) | Architecture | XS–S | Low–Med | Loudness on a currently-invisible cliff for large services. |
+| **8** | **F5 — assert stage prerequisites** (fail loudly if a stage consumes unstamped properties) | Architecture | S–M | Low–Med | Pipeline order is comment-enforced today; a reorder fails silently with empty closures. |
+| **9** | **F4 — converge the AST/SCIP dual-path `targetService` spelling**; drop the anchorless field-ends-`"client"` arm | Architecture | M | Med | "Two spellings reconciled by a fuzzy index" is the standing invitation for the next F1. |
+| **10** | **F7 — decide the dead-on-Go SCIP RPC detector's fate** (remove/guard, or add a TS/Py fixture) | Architecture | S–M | Low–Med | 19KB parallel detector never runs on the all-Go fleet and silently drifts. Make it live or make its dormancy explicit. |
+| **11** | **Convention manifest** (§3 lever 3): hoist the ~dozen class-(a)/(b) anchors into one inventory | Architecture | S–M | Med | Doesn't decouple; makes coupling *enumerable* — a framework change is a one-file review, not a fleet grep. |
+| **12** | **S3 — post-resolver summary refresh** | Quality | M | Med | Closes the one-reindex staleness lag (summaries generated before the global resolver). Defer unless it bites. |
+| **13** | **Index the ~38-call unindexed-service cohort** (opsdashboard 23, sandbox 5, …) | Quality | S–M (ops) | Med | Not code — index the target repos. Only for services that matter to blast-radius. Self-maintaining after P1 (an unresolved call then means exactly "not indexed"). |
+| **14** | **F10 — type-checked AST pass** (`go/packages`+`go/types`) research spike | Architecture | L | Med (strategic) | The **only** source for real symbol Kinds (Interface/Struct/Enum) + precise types. Defer until after P1, judged against P2's SLOs — likely deferred, since scip-go's type-checker verdict is already captured by P1. |
+| — | **S4 verb table** | — | — | — | Do **not** invest beyond bugfixes (benign pluralizer failure). |
+| — | ~~A2 / A3~~ old F6 string-match fixes | — | — | — | **Superseded by P1.** Keep only *P-A2* (case-insensitive `receiverType` match) as a fallback **if** P1 proves hard — and only paired with P3. |
 
-### Track B — increases architecture quality, no change to current output
+### Suggested sequence
 
-| # | Action | Source | Effort | Why (impact is on resilience, not today's numbers) |
-|---|---|---|---|---|
-| **B1** | **Index-time coverage SLOs** — every resolution stage emits a recall proxy (`% GRPCCall RESOLVES_TO`, `% OutboxCall destService`, `% HTTPCall non-dynamic`), diffed vs. previous run, loud WARN past threshold | §3 lever 1 / F6 opt 4 | **M** | **Highest strategic value.** The instrument already exists (IndexStats "imported but wrote 0"); generalize it. A single printed percentage would have caught F1's 15% collapse *and* F6 on day one. Converts silent recall loss into a loud signal. Doesn't change output — it makes future output regressions visible. **Start Track B here.** |
-| **B2** | **Golden-fixture corpus** — freeze every past audit finding as a test fixture in the 414-test harness | §3 lever 2 | **M** | Turns the quarterly manual re-audit into cheap CI accretion: new house style → one fixture → guarded forever. The highest-leverage defense against month-scale decay. |
-| **B3** | **Mis-bind counter for any loosened matcher** | §3 cultural note / F6 opt 1 | **XS–S** | Prerequisite for A2. Every `continue`-on-miss and every broadened match needs a stat, or a precision *policy* silently becomes recall *loss*. Small, but gates A2 safely. |
-| **B4** | **F3 — kill the silent `LIMIT 2000` truncation in the SCIP detector** (count + WARN when hit) | F3 | **XS–S** | Cheap loudness on a currently-invisible cliff for large services. |
-| **B5** | **F7 — decide the dead-on-Go SCIP RPC detector's fate**: either feature-guard/remove it, or add a TS/Python fixture that actually exercises it | F7 | **S–M** | 19KB of parallel detector never runs on the all-Go fleet and silently drifts. Either make it live (a fixture) or make its dormancy explicit. Hygiene + removes an F1-class latent hazard. |
-| **B6** | **F4 — converge the AST/SCIP dual-path `targetService` spelling** (prefer the SCIP/contract fact; drop the weakest arm) | F4 / §3 lever 4 | **M** | "Two spellings reconciled by a fuzzy index" is the standing invitation for the next F1. Also retires the anchorless `field-ends-with-"client"` AST arm. |
-| **B7** | **F5 — assert stage prerequisites** (fail loudly if a stage consumes properties an earlier stage hasn't stamped) | F5 | **S–M** | Today the pipeline order is comment-enforced; a future reorder fails *silently* with empty closures. Cheap guardrail. |
-| **B8** | **Convention manifest** — hoist the ~dozen class-(a)/(b) anchor constants into one declared inventory | §3 lever 3 | **S–M** | Doesn't decouple anything; makes the coupling *enumerable* so a platform-team framework change is a one-file review instead of a fleet grep. |
-| — | **S4 verb table — explicitly do NOT invest** beyond bugfixes | S4 | — | Benign failure mode (naive pluralizer). Listed to close the loop, not to action. |
+1. **Land as one code batch:** P1 (F9) · P3 (counter) · P5 (S1) · P2 (SLOs).
+2. **P4 — one fleet reindex** → materializes IMPLEMENTS edges (fixes F6 + interface dispatch), flushes the 428 summaries, applies S1, prints the new SLOs. This single reindex realizes P1/P2/P4/P5 together.
+3. **P6** (fixtures), then **P7–P11** as capacity allows.
+4. **P12–P14** when relevant; start **P14** only if the SLOs reveal a Kind/type gap worth the go/types cost.
 
-### Suggested execution order (interleaved)
-
-1. **A1** (reindex — flush summaries, exercise F1 at detection) — free, immediate.
-2. **B3 → A2** (counter, then the case-insensitive stopgap) — recover the ~51 stranded calls this week.
-3. **B1** (coverage SLOs) — so every step after this is measured, and F6-class decay can't hide again.
-4. **A3** (IMPLEMENTED_BY identity resolution) — the durable F6 fix; retire A2's heuristic.
-5. **A4** (S1 punctuation) — fold into the reindex you'll run to realize A3.
-6. **B2** (golden fixtures), then **B4–B8** as capacity allows; **A5/A6** when summary-freshness or those specific services become relevant.
-
-**Guiding rule (from §3):** never ship a Track-A recall win without its Track-B counter (B1/B3). A precision policy without instrumentation becomes invisible recall loss — which is exactly how F1 sat unnoticed at 15% for months.
+**Guiding rule (from §3):** never ship a Quality/recall win (P1, P4, P-A2) without its instrumentation (P2, P3). A precision policy without a counter becomes invisible recall loss — exactly how F1 sat unnoticed at 15% for months.
