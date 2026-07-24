@@ -1375,12 +1375,23 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 		// 1. Exact packageName match
 		// 2. Service name in package (e.g., "@try-veil/veil-gateway" matches "veil-gateway")
 		// 3. Package contains service name
+		// A shared proto-contract repo (owns .proto contracts, implements no handler)
+		// is excluded as a dependency target (F1): importing a service's proto package
+		// is a dependency on that SERVICE, not on the contract repo that declares it.
+		// Without this guard every proto import resolves DEPENDS_ON → "proto".
 		targetServiceQuery := `
 			MATCH (s:Service)
-			WHERE s.packageName = $packageName
+			WHERE (s.packageName = $packageName
 			   OR s.name = $packageName
 			   OR $packageName CONTAINS s.packageName
-			   OR s.packageName CONTAINS $packageName
+			   OR s.packageName CONTAINS $packageName)
+			  AND NOT (
+			    EXISTS { (:ProtoContract)-[:BELONGS_TO]->(s) }
+			    AND NOT EXISTS {
+			      MATCH (s)-[:CONTAINS*1..8]->(h)
+			      WHERE (h:Function OR h:Method) AND h.receiverType ENDS WITH 'Server'
+			    }
+			  )
 			RETURN elementId(s) AS id, s.name AS name, s.packageName AS packageName
 			ORDER BY
 				CASE

@@ -52,14 +52,14 @@ func (r *CrossServiceHandlerResolver) Resolve(ctx context.Context) (int, error) 
 		log.Printf("[CrossServiceResolver] gRPC unlinked resolution error: %v", err)
 	}
 
-	httpCount, err := r.resolveHTTP(ctx)
-	if err != nil {
-		log.Printf("[CrossServiceResolver] HTTP resolution error: %v", err)
-	}
-
-	total := grpcCount + unlinkedCount + httpCount
-	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (%d gRPC-linked, %d gRPC-unlinked, %d HTTP)",
-		total, grpcCount, unlinkedCount, httpCount)
+	// HTTP handler resolution was removed (F2): cross-service HTTP URLs are built from
+	// env/config at runtime, so 99% of HTTPCall nodes carry url="dynamic" and the
+	// route→handler match had nothing to key on (0 edges written fleet-wide). The
+	// former name/URL substring heuristic resolved nothing and is gone; reinstate it
+	// only atop real route-table extraction.
+	total := grpcCount + unlinkedCount
+	log.Printf("[CrossServiceResolver] Wrote %d RESOLVES_TO edges (%d gRPC-linked, %d gRPC-unlinked)",
+		total, grpcCount, unlinkedCount)
 
 	// Async pass: link EventType hubs to their listener/handler functions via ROUTED_TO.
 	asyncCount, err := r.resolveAsyncConsumers(ctx)
@@ -596,80 +596,6 @@ func (r *CrossServiceHandlerResolver) resolveGRPCUnlinked(ctx context.Context) (
 	return written, nil
 }
 
-// resolveHTTP processes HTTPCall → CALLS_SERVICE → Service edges and writes
-// RESOLVES_TO edges to the handler Function that matches the target route path.
-func (r *CrossServiceHandlerResolver) resolveHTTP(ctx context.Context) (int, error) {
-	callsQuery := `
-		MATCH (hc:HTTPCall)-[:CALLS_SERVICE]->(svc:Service)
-		WHERE hc.url IS NOT NULL AND hc.url <> '' AND hc.url <> 'dynamic'
-		RETURN elementId(hc) AS hcId,
-		       hc.url AS url,
-		       hc.method AS httpMethod,
-		       elementId(svc) AS svcId,
-		       svc.name AS svcName
-	`
-	rows, err := r.client.ExecuteQuery(ctx, callsQuery, map[string]any{})
-	if err != nil {
-		return 0, fmt.Errorf("resolveHTTP: query CALLS_SERVICE: %w", err)
-	}
-
-	written := 0
-	for _, row := range rows {
-		rm := row.AsMap()
-		hcId := getString(rm, "hcId")
-		rawURL := getString(rm, "url")
-		httpMethod := strings.ToUpper(getString(rm, "httpMethod"))
-		svcId := getString(rm, "svcId")
-
-		if hcId == "" || svcId == "" || rawURL == "" {
-			continue
-		}
-
-		urlPath := extractURLPath(rawURL)
-		if urlPath == "" {
-			continue
-		}
-		if httpMethod == "" {
-			httpMethod = "ANY"
-		}
-
-		// APIRoute nodes no longer exist — HTTP handler resolution via route path unavailable.
-		handlerQuery := `
-			MATCH (svc)-[:CONTAINS*1..5]->(f)
-			WHERE elementId(svc) = $svcId
-			  AND (f:Function OR f:Method)
-			  AND f.nodeKey IS NOT NULL
-			  AND (toLower(coalesce(f.name,'')) CONTAINS toLower($urlPath)
-			       OR toLower($urlPath) CONTAINS toLower(coalesce(f.name,'')))
-			RETURN elementId(f) AS fId, f.name AS fName, f.name AS routePath
-			ORDER BY size(coalesce(f.name,'')) DESC
-			LIMIT 5
-		`
-		handlers, err := r.client.ExecuteQuery(ctx, handlerQuery, map[string]any{
-			"svcId":      svcId,
-			"urlPath":    urlPath,
-			"httpMethod": httpMethod,
-		})
-		if err != nil || len(handlers) == 0 {
-			continue
-		}
-
-		confidence, resolutionMethod := scoreHTTPMatch(len(handlers))
-		best := handlers[0].AsMap()
-		fId := getString(best, "fId")
-		if fId == "" {
-			continue
-		}
-
-		if err := r.writeResolvesToEdge(ctx, hcId, fId, confidence, resolutionMethod); err != nil {
-			log.Printf("[CrossServiceResolver] RESOLVES_TO write failed (%s → %s): %v", hcId, fId, err)
-			continue
-		}
-		written++
-	}
-	return written, nil
-}
-
 // writeResolvesToEdge merges a RESOLVES_TO edge between callSiteId and handlerFuncId.
 func (r *CrossServiceHandlerResolver) writeResolvesToEdge(
 	ctx context.Context,
@@ -700,31 +626,6 @@ func extractMethodName(targetMethod string) string {
 		return ""
 	}
 	return parts[len(parts)-1]
-}
-
-// extractURLPath strips scheme+host from a URL, returning just the path component.
-// "https://payments.internal/v1/charge" → "/v1/charge"
-func extractURLPath(rawURL string) string {
-	for _, prefix := range []string{"https://", "http://", "grpc://"} {
-		if strings.HasPrefix(rawURL, prefix) {
-			rawURL = rawURL[len(prefix):]
-			break
-		}
-	}
-	// rawURL is now "host/path" or just "path" — skip to the first '/'
-	if idx := strings.Index(rawURL, "/"); idx >= 0 {
-		return rawURL[idx:]
-	}
-	// No slash: treat the whole string as a path segment (e.g. relative URLs)
-	return "/" + rawURL
-}
-
-
-func scoreHTTPMatch(candidates int) (confidence float64, method string) {
-	if candidates == 1 {
-		return 0.85, "http_route_matched"
-	}
-	return 0.6, "heuristic"
 }
 
 func getString(m map[string]any, key string) string {

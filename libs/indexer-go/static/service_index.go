@@ -2,6 +2,7 @@ package static
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"slices"
 	"sort"
@@ -19,6 +20,14 @@ type serviceIndex struct {
 
 // loadServiceIndex loads all services in the scope once and builds lookup maps.
 func loadServiceIndex(ctx context.Context, client *neo4j.Client, scopeID string) (*serviceIndex, error) {
+	// Contract-repo services (own .proto contracts, implement no handler) are never
+	// runtime call targets and must be excluded from resolution (F1). See
+	// loadContractRepoIDs for the rationale.
+	contractRepos, err := loadContractRepoIDs(ctx, client, scopeID)
+	if err != nil {
+		return nil, err
+	}
+
 	query := `
 		MATCH (s:Service {scopeId: $scopeId})
 		RETURN s.name AS name,
@@ -33,14 +42,24 @@ func loadServiceIndex(ctx context.Context, client *neo4j.Client, scopeID string)
 	b := newServiceIndexBuilder()
 	for _, row := range rows {
 		rm := row.AsMap()
+		id := getStringFromMap(rm, "id")
+		if contractRepos[id] {
+			continue // contract repo — not a resolvable runtime service
+		}
 		b.addService(
 			getStringFromMap(rm, "name"),
 			getStringFromMap(rm, "packageName"),
-			getStringFromMap(rm, "id"),
+			id,
 		)
 	}
 
-	// Load proto contract → service mappings for precise resolution.
+	// Load proto contract → service mappings for precise resolution. Claims whose
+	// owning service is a contract repo are skipped: in the shared-proto layout every
+	// contract BELONGS_TO the one contract repo, so registering its proto-service
+	// names (FXService, AccountService, …) here would make them PRIMARY aliases for
+	// the contract repo and shadow the real implementer (F1). In a co-located layout
+	// the owning service is a real service (not in contractRepos) and its precise
+	// proto→service claims are kept.
 	protoQuery := `
 		MATCH (pc:ProtoContract)-[:BELONGS_TO]->(s:Service {scopeId: $scopeId})
 		RETURN pc.protoPackage AS pkg, pc.protoService AS svc, elementId(s) AS id
@@ -48,14 +67,54 @@ func loadServiceIndex(ctx context.Context, client *neo4j.Client, scopeID string)
 	protoRows, _ := client.ExecuteQuery(ctx, protoQuery, map[string]any{"scopeId": scopeID})
 	for _, row := range protoRows {
 		rm := row.AsMap()
+		id := getStringFromMap(rm, "id")
+		if contractRepos[id] {
+			continue
+		}
 		b.addProtoContract(
 			getStringFromMap(rm, "pkg"),
 			getStringFromMap(rm, "svc"),
-			getStringFromMap(rm, "id"),
+			id,
 		)
 	}
 
 	return b.build(), nil
+}
+
+// loadContractRepoIDs returns the element-id set of Service nodes that are shared
+// proto-contract repositories: they own one or more ProtoContract nodes yet
+// implement no gRPC server handler (no "…Server" receiver method). Such a service
+// is a contract rendezvous, never a runtime call target — its proto-service names
+// belong to the services that IMPLEMENT them, not to the repo that DECLARES them —
+// so it is excluded from name/proto resolution entirely (F1). Detection is purely
+// structural (owns contracts + implements none): a co-located layout, where a real
+// service ships both its .proto files and their handlers, has server methods and is
+// therefore NOT excluded, keeping its precise proto→service claims. Returns an
+// empty set (resolution unchanged) when no proto contracts are indexed.
+func loadContractRepoIDs(ctx context.Context, client *neo4j.Client, scopeID string) (map[string]bool, error) {
+	query := `
+		MATCH (s:Service {scopeId: $scopeId})
+		WHERE EXISTS { (:ProtoContract)-[:BELONGS_TO]->(s) }
+		  AND NOT EXISTS {
+		    MATCH (s)-[:CONTAINS*1..8]->(h)
+		    WHERE (h:Function OR h:Method) AND h.receiverType ENDS WITH 'Server'
+		  }
+		RETURN elementId(s) AS id
+	`
+	rows, err := client.ExecuteQuery(ctx, query, map[string]any{"scopeId": scopeID})
+	if err != nil {
+		return nil, fmt.Errorf("loadContractRepoIDs: %w", err)
+	}
+	out := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		if id := getStringFromMap(row.AsMap(), "id"); id != "" {
+			out[id] = true
+		}
+	}
+	if len(out) > 0 {
+		log.Printf("service index: excluding %d contract-repo service(s) from resolution (own proto contracts, implement no handler)", len(out))
+	}
+	return out, nil
 }
 
 // serviceIndexBuilder accumulates alias claims during load and arbitrates them
