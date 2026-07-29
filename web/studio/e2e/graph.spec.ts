@@ -24,9 +24,10 @@ test.describe('graph explorer', () => {
     // source pane loads highlighted code (Go-side format=json + rootPath)
     await expect(inspector.locator('pre, code').first()).toBeVisible({ timeout: 20000 })
 
-    // keyboard expand grows the working set
+    // keyboard expand grows the working set (edge count leaves 0 — the exact
+    // node count is index-dependent, so don't assert a magnitude)
     await page.keyboard.press('e')
-    await expect(page.getByText(/\d{2,} nodes · \d+ edges/)).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText(/\d+ nodes · [1-9]\d* edges/)).toBeVisible({ timeout: 30000 })
 
     // relationship groups appear in the inspector
     await expect(inspector.getByText('CALLS', { exact: true })).toBeVisible()
