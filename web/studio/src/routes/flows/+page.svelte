@@ -64,17 +64,25 @@
     }
   }
 
+  // One request per tier: the server truncates entries[:limit] AFTER running
+  // tiers in order, so a single request lets a large tier 1 starve tiers 2-4
+  // out of the rail entirely. Per-tier requests guarantee representation.
   async function loadEntries(service: string) {
     entriesStatus = 'loading'
     entriesError = ''
     try {
-      const data = await unwrap<EntryPointsResponse>(
-        await fetch(`/api/entrypoints?service=${encodeURIComponent(service)}&limit=100`)
+      const perTier = await Promise.all(
+        [1, 2, 3, 4].map(async (tier) =>
+          unwrap<EntryPointsResponse>(
+            await fetch(`/api/entrypoints?service=${encodeURIComponent(service)}&tier=${tier}&limit=50`)
+          )
+        )
       )
-      entries = data.entries
+      entries = perTier.flatMap((d) => d.entries)
       entriesStatus = 'loaded'
-      if (data.tier_errors?.length) {
-        warnings = [...new Set([...warnings, ...data.tier_errors])].slice(-5)
+      const tierErrors = perTier.flatMap((d) => d.tier_errors ?? [])
+      if (tierErrors.length) {
+        warnings = [...new Set([...warnings, ...tierErrors])].slice(-5)
       }
     } catch (e) {
       entriesStatus = 'error'
