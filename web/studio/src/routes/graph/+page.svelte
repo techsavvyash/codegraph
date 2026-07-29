@@ -24,8 +24,10 @@
     const ids = (p.get('nodes') ?? '').split(',').filter(Boolean)
     const sel = p.get('sel')
     const pins = (p.get('pin') ?? '').split(',').filter(Boolean)
+    // one-shot: consumed on restore, then dropped by the URL-sync effect
+    const stitch = (p.get('stitch') ?? '').split(',').filter(Boolean)
     if (ids.length) {
-      store.hydrate(ids).then(() => {
+      store.hydrate(ids, stitch).then(() => {
         if (sel && store.nodes.has(sel)) store.select(sel)
         for (const pin of pins) if (store.nodes.has(pin)) store.togglePin(pin)
       })

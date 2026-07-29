@@ -104,8 +104,11 @@ export class ExplorerStore {
     }
   }
 
-  mergeExpand(resp: ExpandResponse): void {
-    for (const n of resp.nodes) this.addNode(n)
+  mergeExpand(resp: ExpandResponse, opts: { edgesOnly?: boolean } = {}): void {
+    if (!opts.edgesOnly) for (const n of resp.nodes) this.addNode(n)
+    // addEdge keeps only edges whose endpoints are loaded, so in edgesOnly
+    // mode this stitches relationships among the existing working set without
+    // growing it
     for (const e of resp.edges) this.addEdge(e)
   }
 
@@ -179,7 +182,7 @@ export class ExplorerStore {
     relTypes: string[],
     direction: 'in' | 'out' | 'both' = 'out',
     depth = 1,
-    opts: { maxNodes?: number; quiet?: boolean } = {}
+    opts: { maxNodes?: number; quiet?: boolean; edgesOnly?: boolean } = {}
   ): Promise<boolean> {
     const body: Record<string, unknown> = { node_id: nodeId, rel_types: relTypes, direction, depth }
     if (opts.maxNodes !== undefined) body.max_nodes = opts.maxNodes
@@ -193,7 +196,7 @@ export class ExplorerStore {
       )
     )
     if (!data) return false
-    this.mergeExpand(data)
+    this.mergeExpand(data, { edgesOnly: opts.edgesOnly })
     if (data.truncated && !opts.quiet) {
       this.warnings = [...new Set([...this.warnings, 'expansion truncated — raise limits or narrow rel types'])].slice(-5)
     }
@@ -205,7 +208,7 @@ export class ExplorerStore {
    * (the tool has no fetch-by-id primitive; the start node always comes back
    * first) — quiet so the inevitable truncation flag doesn't spam warnings.
    */
-  async hydrate(ids: string[]): Promise<void> {
+  async hydrate(ids: string[], stitchRels: string[] = []): Promise<void> {
     const results = await Promise.all(
       ids.map((id) => this.expand(id, ['CALLS'], 'out', 1, { maxNodes: 1, quiet: true }))
     )
@@ -216,6 +219,18 @@ export class ExplorerStore {
       this.warnings = [
         ...new Set([...this.warnings, `${failed} node(s) from this link no longer exist in the graph`])
       ].slice(-5)
+    }
+    // Edge stitch (e.g. a flow loaded onto the canvas): draw the given
+    // relationships among the hydrated set without growing it.
+    if (stitchRels.length && this.nodes.size > 1) {
+      await Promise.all(
+        ids
+          .filter((id) => this.nodes.has(id))
+          .map((id) =>
+            this.expand(id, stitchRels, 'out', 1, { maxNodes: 200, quiet: true, edgesOnly: true })
+          )
+      )
+      this.error = null
     }
   }
 

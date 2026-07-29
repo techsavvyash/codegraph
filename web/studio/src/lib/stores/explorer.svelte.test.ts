@@ -176,6 +176,80 @@ describe('ExplorerStore API actions', () => {
     expect(s.edges.size).toBe(1)
   })
 
+  it('edgesOnly expand stitches edges without growing the node set', async () => {
+    const fetchFn = vi.fn<FetchLike>().mockResolvedValue(
+      jsonResponse({
+        warnings: [],
+        data: {
+          start: node('a'),
+          nodes: [node('a'), node('b'), node('stranger')],
+          edges: [
+            { from: 'a', to: 'b', type: 'CALLS' },
+            { from: 'a', to: 'stranger', type: 'CALLS' }
+          ],
+          node_count: 3,
+          edge_count: 2,
+          truncated: true
+        }
+      })
+    )
+    const s = new ExplorerStore(fetchFn)
+    s.addNode(node('a'))
+    s.addNode(node('b'))
+    const ok = await s.expand('a', ['CALLS'], 'out', 1, { edgesOnly: true, quiet: true })
+    expect(ok).toBe(true)
+    expect(s.nodes.size).toBe(2) // 'stranger' was not admitted
+    expect(s.edgeList).toEqual([{ from: 'a', to: 'b', type: 'CALLS' }])
+    expect(s.warnings).toEqual([]) // quiet suppresses the truncation notice
+  })
+
+  it('hydrate with stitch rels loads nodes then draws edges among the set only', async () => {
+    const fetchFn = vi.fn<FetchLike>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { node_id: string; max_nodes?: number }
+      if (body.max_nodes === 1) {
+        // hydration pass: bare node only
+        return jsonResponse({
+          warnings: [],
+          data: {
+            start: node(body.node_id),
+            nodes: [node(body.node_id)],
+            edges: [],
+            node_count: 1,
+            edge_count: 0,
+            truncated: true
+          }
+        })
+      }
+      // stitch pass: each node's callees incl. one outside the working set
+      const callee = body.node_id === 'a' ? 'b' : 'a'
+      return jsonResponse({
+        warnings: [],
+        data: {
+          start: node(body.node_id),
+          nodes: [node(body.node_id), node(callee), node('outsider')],
+          edges: [
+            { from: body.node_id, to: callee, type: 'CALLS' },
+            { from: body.node_id, to: 'outsider', type: 'CALLS' }
+          ],
+          node_count: 3,
+          edge_count: 2,
+          truncated: false
+        }
+      })
+    })
+    const s = new ExplorerStore(fetchFn)
+    await s.hydrate(['a', 'b'], ['CALLS'])
+    expect([...s.nodes.keys()].sort()).toEqual(['a', 'b'])
+    expect(s.edgeList).toEqual(
+      expect.arrayContaining([
+        { from: 'a', to: 'b', type: 'CALLS' },
+        { from: 'b', to: 'a', type: 'CALLS' }
+      ])
+    )
+    expect(s.edges.size).toBe(2)
+    expect(s.pending).toBe(0)
+  })
+
   it('source GET encodes the node id and returns the payload', async () => {
     const fetchFn = vi.fn<FetchLike>().mockResolvedValue(
       jsonResponse({
