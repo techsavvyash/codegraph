@@ -6,7 +6,7 @@
 
   const tabs = [
     { label: 'Graph', href: '/graph', built: true },
-    { label: 'Flows', href: '/flows', built: false },
+    { label: 'Flows', href: '/flows', built: true },
     { label: 'Docs', href: '/docs', built: false },
     { label: 'Console', href: '/console', built: false },
     { label: 'Dashboard', href: '/dashboard', built: true }
