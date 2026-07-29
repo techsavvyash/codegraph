@@ -666,6 +666,20 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 	// so a wrong value here breaks the entire DEPENDS_ON graph.
 	actualPackageName := si.detectPackageName(projectPath)
 
+	// rootPath is the absolute, symlink-cleaned indexed directory. It lets
+	// MCP source-resolution (codegraph_source, query source) find files on
+	// disk regardless of the server process's cwd — see RFC-012 R2.
+	rootPath := si.projectPath
+	if rootPath == "" {
+		rootPath = projectPath
+	}
+	if abs, err := filepath.Abs(rootPath); err == nil {
+		rootPath = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(rootPath); err == nil {
+		rootPath = resolved
+	}
+
 	nodeKey := models.ServiceNodeKey(si.serviceName)
 	serviceProps := map[string]any{
 		"name":          si.serviceName,
@@ -676,6 +690,7 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 		"repositoryUrl": si.repoURL,
 		"scope":         si.scopeCtx.Scope,
 		"scopeId":       si.scopeCtx.ScopeID,
+		"rootPath":      rootPath,
 	}
 
 	return si.client.MergeNode(ctx, []string{"Service"},
