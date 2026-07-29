@@ -217,33 +217,34 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 	tools := []MCPTool{
 		{
 			Name:        "codegraph_entry_points",
-			Description: "List structurally-detected entry points (4-tier classification: API-exposed, interface impls with no callers, exported topological roots, high-centrality functions). Same algorithm as codegraph_get_entry_points but with format=json|text|mermaid.",
+			Description: "List structurally-detected entry points (4-tier classification: API-exposed, interface impls with no callers, exported topological roots, high-centrality functions). Same algorithm as codegraph_get_entry_points but with format=json|text|mermaid. format=json entries also carry node_id (elementId), label, start_line, out_degree, in_degree. Passing service_name bypasses workspace-cwd filtering (explicit scoping replaces it).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"tier":         map[string]interface{}{"type": "number", "description": "Restrict to a single tier (1-4); omit for all"},
 					"limit":        map[string]interface{}{"type": "number", "description": "Max entries (default 50)", "default": 50},
 					"scope_id":     map[string]interface{}{"type": "string", "description": "Scope ID (default: main)", "default": "main"},
-					"service_name": map[string]interface{}{"type": "string", "description": "Optional service filter"},
+					"service_name": map[string]interface{}{"type": "string", "description": "Optional service filter; also bypasses workspace-cwd relevance filtering"},
 					"format":       map[string]interface{}{"type": "string", "enum": []string{"json", "text", "mermaid"}, "default": "json"},
 				},
 			},
 		},
 		{
 			Name:        "codegraph_flows",
-			Description: "Generate flow spines. Default: discover entry points via the multi-strategy seed finder and trace each (workspace-filtered). With from/from_name: generate one flow anchored at that specific node (name-or-id addressing; ambiguous names return a candidates list). format=json|text|mermaid.",
+			Description: "Generate flow spines. Default: discover entry points via the multi-strategy seed finder and trace each (workspace-filtered, unless service_name is given). With from/from_name: generate one flow anchored at that specific node (name-or-id addressing; ambiguous names return a candidates list). format=json|text|mermaid; format=json steps carry depth, parentKey (spanning-tree parent nodeKey, omitted on the entry step), nodeId (elementId), filePath, startLine. format=json with zero flows returns {\"flow_count\":0,\"flows\":[]}.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"max_depth":    map[string]interface{}{"type": "number", "description": "Traversal depth per flow (default 5)", "default": 5},
 					"limit":        map[string]interface{}{"type": "number", "description": "Max flows returned (default 20)", "default": 20},
 					"scope_id":     map[string]interface{}{"type": "string", "default": "main"},
-					"service_name": map[string]interface{}{"type": "string", "description": "Optional service filter"},
+					"service_name": map[string]interface{}{"type": "string", "description": "Optional service filter; also bypasses workspace-cwd relevance filtering in discovery mode"},
 					"format":       map[string]interface{}{"type": "string", "enum": []string{"json", "text", "mermaid"}, "default": "json"},
 					"from":         map[string]interface{}{"type": "string", "description": "Node elementId to anchor a single flow at (from expand/path/find results)"},
 					"from_name":    map[string]interface{}{"type": "string", "description": "Function/Method name (or File path) to anchor a single flow at; ambiguous matches return candidates"},
 					"from_label":   map[string]interface{}{"type": "string", "description": "Optional label to disambiguate from_name (e.g. Function, Method)"},
 					"from_service": map[string]interface{}{"type": "string", "description": "Optional serviceName to disambiguate from_name"},
+					"persist":      map[string]interface{}{"type": "boolean", "description": "Persist the generated flow as a Flow/HAS_STEP graph node (default true). Set false for read-only/interactive tracing to avoid polluting the graph.", "default": true},
 				},
 			},
 		},

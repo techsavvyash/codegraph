@@ -9,6 +9,7 @@ import (
 	graphclient "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query"
+	"github.com/context-maximiser/code-graph/internal/query/inference"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -195,6 +196,138 @@ func TestFlowSpineGenerator_GenerateFromAPIEndpoints_KnownPositive(t *testing.T)
 		if step.Order != i {
 			t.Errorf("step %d: expected Order %d, got %d", i, i, step.Order)
 		}
+	}
+}
+
+// TestFlowSpineGenerator_TraceCallees_TreeConsistency creates a seed with
+// more callees at distance 1 than the fanout budget allows, and callees of
+// callees at distance 2. It verifies traceCallees (invoked via
+// GenerateFlowFromNode) drops distance-2 steps whose ParentKey names a
+// distance-1 node that got capped out by the fanout limit — the "child of a
+// fanout-capped parent" case called out in the RFC-005 brief. It also checks
+// Depth/ParentKey are populated correctly for the surviving steps.
+func TestFlowSpineGenerator_TraceCallees_TreeConsistency(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client := createTestGraphClient(t)
+	scopeID := "itest-flows-tree-consistency"
+	defer cleanupTestData(t, ctx, client, scopeID)
+
+	seedKey := "func:seed.go#Seed"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": seedKey, "scopeId": scopeID},
+		map[string]interface{}{"nodeKey": seedKey, "name": "Seed", "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+	if err != nil {
+		t.Fatalf("failed to create seed: %v", err)
+	}
+
+	// Three distance-1 callees, named so alphabetical ORDER BY (the traceCallees
+	// query's tiebreaker) makes AChild/BChild survive a fanout cap of 2 and
+	// CChild get dropped.
+	distance1 := []string{"AChild", "BChild", "CChild"}
+	for _, name := range distance1 {
+		key := "func:child.go#" + name
+		_, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": key, "scopeId": scopeID},
+			map[string]interface{}{"nodeKey": key, "name": name, "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+		if err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+		if err := client.ExecuteQueryWithoutRecords(ctx, `
+			MATCH (s:Function {nodeKey: $seedKey, scopeId: $scopeId})
+			MATCH (c:Function {nodeKey: $childKey, scopeId: $scopeId})
+			MERGE (s)-[r:CALLS]->(c)
+			SET r.scope = $scope, r.scopeId = $scopeId`, map[string]interface{}{
+			"seedKey": seedKey, "childKey": key, "scopeId": scopeID, "scope": "main",
+		}); err != nil {
+			t.Fatalf("failed to create CALLS seed->%s: %v", name, err)
+		}
+	}
+
+	// A distance-2 grandchild under the callee that WILL be pruned (CChild)
+	// and one under a callee that WILL survive (AChild).
+	orphanKey := "func:grandchild.go#OrphanGrandchild"
+	survivorKey := "func:grandchild.go#SurvivorGrandchild"
+	for parentName, gcKey := range map[string]string{"CChild": orphanKey, "AChild": survivorKey} {
+		parentKey := "func:child.go#" + parentName
+		gcName := "OrphanGrandchild"
+		if gcKey == survivorKey {
+			gcName = "SurvivorGrandchild"
+		}
+		_, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": gcKey, "scopeId": scopeID},
+			map[string]interface{}{"nodeKey": gcKey, "name": gcName, "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+		if err != nil {
+			t.Fatalf("failed to create %s: %v", gcName, err)
+		}
+		if err := client.ExecuteQueryWithoutRecords(ctx, `
+			MATCH (p:Function {nodeKey: $parentKey, scopeId: $scopeId})
+			MATCH (c:Function {nodeKey: $childKey, scopeId: $scopeId})
+			MERGE (p)-[r:CALLS]->(c)
+			SET r.scope = $scope, r.scopeId = $scopeId`, map[string]interface{}{
+			"parentKey": parentKey, "childKey": gcKey, "scopeId": scopeID, "scope": "main",
+		}); err != nil {
+			t.Fatalf("failed to create CALLS %s->%s: %v", parentName, gcName, err)
+		}
+	}
+
+	gen := query.NewFlowSpineGenerator(client)
+	gen.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	gen.SetBudget(inference.TraversalBudget{MaxDepth: 5, MaxFanout: 2, MaxSteps: 50})
+	gen.SetPersist(false)
+
+	flows, err := gen.GenerateFlowFromNode(ctx, seedKey, "Seed", "Function", 3)
+	if err != nil {
+		t.Fatalf("GenerateFlowFromNode failed: %v", err)
+	}
+	if len(flows) != 1 {
+		t.Fatalf("expected 1 flow, got %d", len(flows))
+	}
+
+	byName := make(map[string]query.FlowStep)
+	for _, s := range flows[0].Steps {
+		byName[s.Name] = s
+	}
+
+	if _, ok := byName["CChild"]; ok {
+		t.Errorf("CChild should have been dropped by the fanout cap (budget=2, 3 distance-1 candidates), got steps: %+v", flows[0].Steps)
+	}
+	if _, ok := byName["OrphanGrandchild"]; ok {
+		t.Errorf("OrphanGrandchild's parent (CChild) was fanout-capped; it must be dropped too (tree consistency), got steps: %+v", flows[0].Steps)
+	}
+
+	aChild, ok := byName["AChild"]
+	if !ok {
+		t.Fatalf("AChild should have survived the fanout cap, got steps: %+v", flows[0].Steps)
+	}
+	if aChild.Depth != 1 {
+		t.Errorf("expected AChild Depth 1, got %d", aChild.Depth)
+	}
+	if aChild.ParentKey != seedKey {
+		t.Errorf("expected AChild ParentKey %s, got %s", seedKey, aChild.ParentKey)
+	}
+
+	survivor, ok := byName["SurvivorGrandchild"]
+	if !ok {
+		t.Fatalf("SurvivorGrandchild (child of surviving AChild) should be present, got steps: %+v", flows[0].Steps)
+	}
+	if survivor.Depth != 2 {
+		t.Errorf("expected SurvivorGrandchild Depth 2, got %d", survivor.Depth)
+	}
+	if survivor.ParentKey != "func:child.go#AChild" {
+		t.Errorf("expected SurvivorGrandchild ParentKey func:child.go#AChild, got %s", survivor.ParentKey)
+	}
+
+	seed, ok := byName["Seed"]
+	if !ok {
+		t.Fatalf("Seed entry step missing, got steps: %+v", flows[0].Steps)
+	}
+	if seed.Depth != 0 {
+		t.Errorf("expected Seed (entry) Depth 0, got %d", seed.Depth)
+	}
+	if seed.ParentKey != "" {
+		t.Errorf("expected Seed (entry) ParentKey empty, got %q", seed.ParentKey)
 	}
 }
 

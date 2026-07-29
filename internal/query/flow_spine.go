@@ -27,21 +27,26 @@ CALL apoc.path.spanningTree(seed, {
   limit: $nodeLimit
 })
 YIELD path
-WITH last(nodes(path)) AS n, length(path) AS distance
+WITH last(nodes(path)) AS n, nodes(path)[-2] AS parent, length(path) AS distance
 WHERE distance > 0
   AND (n.filePath IS NULL OR NOT n.filePath ENDS WITH '_test.go')
   AND NOT n.nodeKey CONTAINS 'github.com/golang/go/src'
   AND (n.scopeId = $scopeId OR n.scopeId = 'main')
 RETURN n.nodeKey AS nodeKey, n.name AS name, labels(n) AS labels,
-       n.serviceName AS serviceName, distance
+       n.serviceName AS serviceName, distance, parent.nodeKey AS parentKey
 ORDER BY distance ASC, n.name ASC, n.nodeKey ASC`
 
 // FlowStep represents a single step in a flow spine.
 type FlowStep struct {
-	NodeKey string `json:"nodeKey"`
-	Name    string `json:"name"`
-	Label   string `json:"label"` // Function, Method, Service, APIRoute
-	Order   int    `json:"order"`
+	NodeKey   string `json:"nodeKey"`
+	Name      string `json:"name"`
+	Label     string `json:"label"` // Function, Method, Service, APIRoute
+	Order     int    `json:"order"`
+	Depth     int    `json:"depth"`               // BFS distance from the flow entry (0 = entry).
+	ParentKey string `json:"parentKey,omitempty"` // nodeKey of the spanning-tree parent; empty on the entry step.
+	NodeID    string `json:"nodeId,omitempty"`    // elementId(n), filled by post-generation enrichment.
+	FilePath  string `json:"filePath,omitempty"`  // filled by post-generation enrichment.
+	StartLine int    `json:"startLine,omitempty"` // filled by post-generation enrichment.
 }
 
 // FlowSpineResult holds the generated flow and its steps.
@@ -62,6 +67,7 @@ type FlowSpineGenerator struct {
 	graphSeedFinder *inference.GraphSeedFinder
 	serviceNames    []string
 	servicePrefix   string
+	persist         bool
 }
 
 // NewFlowSpineGenerator creates a new generator with default traversal budget.
@@ -76,7 +82,17 @@ func NewFlowSpineGenerator(client *neo4j.Client) *FlowSpineGenerator {
 		deduplicator:    inference.NewFlowDeduplicator(),
 		seedFinder:      inference.NewStructuralSeedFinder().WithBudget(budget),
 		graphSeedFinder: gsf,
+		persist:         true,
 	}
+}
+
+// SetPersist controls whether generated flows are MERGEd into the graph as
+// Flow/HAS_STEP nodes and edges (default true). The Studio UI traces a flow
+// on every click; persisting each of those would pollute the graph with
+// "manual" Flow nodes and inflate dashboard flow counts, so callers doing
+// interactive/read-only traversal should set this false.
+func (g *FlowSpineGenerator) SetPersist(persist bool) {
+	g.persist = persist
 }
 
 // SetBudget overrides the traversal budget used for flow generation.
@@ -192,9 +208,10 @@ func (g *FlowSpineGenerator) GenerateFlowFromNode(ctx context.Context, nodeKey, 
 		maxDepth = 2
 	}
 
-	// Build flow spine from the resolved node.
+	// Build flow spine from the resolved node. Depth 0, no ParentKey: this is
+	// the flow entry.
 	steps := []FlowStep{
-		{NodeKey: nodeKey, Name: nodeName, Label: nodeLabel, Order: 0},
+		{NodeKey: nodeKey, Name: nodeName, Label: nodeLabel, Order: 0, Depth: 0},
 	}
 
 	// Trace callees from the node. Unlike the seed-discovery paths, a caller
@@ -211,8 +228,10 @@ func (g *FlowSpineGenerator) GenerateFlowFromNode(ctx context.Context, nodeKey, 
 	steps = g.deduplicateSteps(steps, 1)
 
 	flowNodeKey := models.FlowNodeKey("manual", nodeKey)
-	if err := g.persistFlow(ctx, flowNodeKey, nodeName, "manual", nodeKey, maxDepth, steps); err != nil {
-		return nil, fmt.Errorf("failed to persist flow: %w", err)
+	if g.persist {
+		if err := g.persistFlow(ctx, flowNodeKey, nodeName, "manual", nodeKey, maxDepth, steps); err != nil {
+			return nil, fmt.Errorf("failed to persist flow: %w", err)
+		}
 	}
 
 	return []FlowSpineResult{
@@ -275,8 +294,10 @@ func (g *FlowSpineGenerator) GenerateFlows(ctx context.Context, maxDepth int) ([
 			continue
 		}
 
-		if err := g.persistFlow(ctx, flowNodeKey, seed.Name, flowType, seed.NodeKey, maxDepth, steps); err != nil {
-			continue
+		if g.persist {
+			if err := g.persistFlow(ctx, flowNodeKey, seed.Name, flowType, seed.NodeKey, maxDepth, steps); err != nil {
+				continue
+			}
 		}
 
 		results = append(results, FlowSpineResult{
@@ -543,6 +564,14 @@ func (g *FlowSpineGenerator) GenerateFromStructuralEntrypoints(ctx context.Conte
 // Semantic change from prior implementation: MaxFanout now caps nodes PER DISTANCE
 // LEVEL (not per parent node). This distributes the fanout budget across the
 // entire depth frontier, reducing query complexity while maintaining reasonable coverage.
+//
+// Tree consistency: the caller's seed node is the traced root and is implicitly
+// "kept". Levels are processed in ascending distance order; a node whose
+// parentKey isn't in the kept set (because its parent was dropped by the
+// fanout cap or a budget filter at the prior level) is dropped too — otherwise
+// it would render as a step with a ParentKey pointing at a step that doesn't
+// exist in the result. The fanout cap is applied AFTER the parent-kept filter
+// per level.
 func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, remainingDepth, nextOrder int) ([]FlowStep, error) {
 	if remainingDepth <= 0 {
 		return nil, nil
@@ -576,6 +605,7 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 		name        string
 		label       string
 		serviceName string
+		parentKey   string
 		distance    int
 	}
 
@@ -609,6 +639,8 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 			distance = int(d)
 		}
 
+		parentKey := strVal(m, "parentKey")
+
 		// Apply budget filters: skip blocked names and disallowed types.
 		if g.budget.IsNameBlocked(name) {
 			continue
@@ -639,15 +671,20 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 			name:        name,
 			label:       label,
 			serviceName: serviceName,
+			parentKey:   parentKey,
 			distance:    distance,
 		})
 	}
 
 	// Flatten by distance, capping per level to fanout, and assign sequential Order values.
+	// kept seeds with the traced root: at distance 1, every surviving node's
+	// parentKey equals nodeKey (the root), so it must always pass the filter.
 	var steps []FlowStep
 	order := nextOrder
+	kept := map[string]bool{nodeKey: true}
 
-	// Process distances in ascending order for determinism.
+	// Process distances in ascending order for determinism and to guarantee
+	// parents are resolved into `kept` before their children are considered.
 	distances := make([]int, 0, len(nodesByDistance))
 	for d := range nodesByDistance {
 		distances = append(distances, d)
@@ -656,17 +693,31 @@ func (g *FlowSpineGenerator) traceCallees(ctx context.Context, nodeKey string, r
 
 	for _, distance := range distances {
 		nodesAtDist := nodesByDistance[distance]
-		// Apply per-level fanout cap (already sorted by name, nodeKey from query).
-		if len(nodesAtDist) > fanout {
-			nodesAtDist = nodesAtDist[:fanout]
+
+		// Drop nodes whose parent didn't survive filtering/capping at the
+		// previous level — a dangling ParentKey would render as a floating
+		// chip in the UI's tree view.
+		consistent := nodesAtDist[:0:0]
+		for _, n := range nodesAtDist {
+			if kept[n.parentKey] {
+				consistent = append(consistent, n)
+			}
 		}
 
-		for _, n := range nodesAtDist {
+		// Apply per-level fanout cap (already sorted by name, nodeKey from query).
+		if len(consistent) > fanout {
+			consistent = consistent[:fanout]
+		}
+
+		for _, n := range consistent {
+			kept[n.nodeKey] = true
 			steps = append(steps, FlowStep{
-				NodeKey: n.nodeKey,
-				Name:    n.name,
-				Label:   n.label,
-				Order:   order,
+				NodeKey:   n.nodeKey,
+				Name:      n.name,
+				Label:     n.label,
+				Order:     order,
+				Depth:     n.distance,
+				ParentKey: n.parentKey,
 			})
 			order++
 		}
@@ -698,13 +749,18 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 		return nil
 	}
 
-	// Build UNWIND list of step descriptors: {targetKey, order, stepName} maps.
+	// Build UNWIND list of step descriptors: {targetKey, order, stepName,
+	// depth, parentKey} maps. depth/parentKey are additive step provenance —
+	// mirrors what FlowStep carries so a re-read via GetFlow could someday
+	// reconstruct the tree without re-tracing.
 	stepList := make([]map[string]any, 0, len(steps))
 	for _, step := range steps {
 		stepList = append(stepList, map[string]any{
 			"targetKey": step.NodeKey,
 			"order":     step.Order,
 			"stepName":  step.Name,
+			"depth":     step.Depth,
+			"parentKey": step.ParentKey,
 		})
 	}
 
@@ -723,7 +779,8 @@ func (g *FlowSpineGenerator) persistFlow(ctx context.Context, flowNodeKey, name,
 		MATCH (flow:Flow {nodeKey: $flowKey})
 		WHERE (flow.scopeId = $scopeId OR flow.scopeId = 'main')
 		MERGE (flow)-[r:HAS_STEP {order: step.order}]->(target)
-		SET r.stepName = step.stepName, r.scope = $scope, r.scopeId = $scopeId`
+		SET r.stepName = step.stepName, r.scope = $scope, r.scopeId = $scopeId,
+		    r.depth = step.depth, r.parentKey = step.parentKey`
 
 	_, err = g.client.ExecuteQuery(ctx, cypher, map[string]any{
 		"flowKey": flowNodeKey,
@@ -968,6 +1025,15 @@ func extractLabel(m map[string]any, key string) string {
 // deduplicator with the current budget, and converts back. The first `anchors`
 // steps (the route/handler/seed the flow is about) bypass name/type blocking —
 // see inference.DeduplicateAnchored.
+//
+// Tree-consistency note: DeduplicateAnchored's own by-nodeKey dedup is a no-op
+// here because traceCallees' spanningTree already guarantees unique nodeKeys
+// (NODE_GLOBAL uniqueness). But its OTHER two filters — name/type blocking
+// past the anchor prefix, and the MaxSteps cap — can still drop a step whose
+// nodeKey is some later step's ParentKey, same failure mode as the fanout cap
+// in traceCallees. dropOrphanedDescendants below re-applies the same
+// kept-set/ascending-depth cascade after DeduplicateAnchored runs so a pruned
+// step takes its whole subtree with it instead of leaving dangling parents.
 func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep, anchors int) []FlowStep {
 	if g.deduplicator == nil || len(steps) == 0 {
 		return steps
@@ -985,14 +1051,64 @@ func (g *FlowSpineGenerator) deduplicateSteps(steps []FlowStep, anchors int) []F
 
 	deduped := g.deduplicator.DeduplicateAnchored(infos, g.budget, anchors)
 
+	// DeduplicateAnchored only carries NodeKey/Name/NodeType/Order through
+	// FlowStepInfo; re-attach Depth/ParentKey/NodeID/FilePath/StartLine from
+	// the original steps by nodeKey.
+	original := make(map[string]FlowStep, len(steps))
+	for _, s := range steps {
+		original[s.NodeKey] = s
+	}
+
 	out := make([]FlowStep, len(deduped))
 	for i, d := range deduped {
+		orig := original[d.NodeKey]
 		out[i] = FlowStep{
-			NodeKey: d.NodeKey,
-			Name:    d.Name,
-			Label:   d.NodeType,
-			Order:   d.Order,
+			NodeKey:   d.NodeKey,
+			Name:      d.Name,
+			Label:     d.NodeType,
+			Order:     d.Order,
+			Depth:     orig.Depth,
+			ParentKey: orig.ParentKey,
+			NodeID:    orig.NodeID,
+			FilePath:  orig.FilePath,
+			StartLine: orig.StartLine,
 		}
 	}
+
+	return dropOrphanedDescendants(out)
+}
+
+// dropOrphanedDescendants removes any step whose ParentKey does not resolve
+// to a surviving step, cascading transitively (a dropped step's own children
+// are dropped too). Steps are processed in ascending Depth order — same
+// invariant traceCallees relies on — so a parent is always resolved into
+// `kept` before its children are considered. Depth-0 steps (ParentKey == "")
+// are always kept; they are flow entries, not spanning-tree children.
+func dropOrphanedDescendants(steps []FlowStep) []FlowStep {
+	byDepth := make(map[int][]FlowStep)
+	maxDepth := 0
+	for _, s := range steps {
+		byDepth[s.Depth] = append(byDepth[s.Depth], s)
+		if s.Depth > maxDepth {
+			maxDepth = s.Depth
+		}
+	}
+
+	kept := make(map[string]bool, len(steps))
+	out := make([]FlowStep, 0, len(steps))
+	for depth := 0; depth <= maxDepth; depth++ {
+		for _, s := range byDepth[depth] {
+			if s.ParentKey != "" && !kept[s.ParentKey] {
+				continue
+			}
+			kept[s.NodeKey] = true
+			out = append(out, s)
+		}
+	}
+
+	// Restore original Order-based sequencing (byDepth grouping does not
+	// preserve the input's relative order across depths reliably enough on
+	// its own; sort.Slice on Order is cheap and keeps output deterministic).
+	sort.Slice(out, func(i, j int) bool { return out[i].Order < out[j].Order })
 	return out
 }
