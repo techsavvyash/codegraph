@@ -5,7 +5,7 @@
   let { children } = $props()
 
   const tabs = [
-    { label: 'Graph', href: '/graph', built: false },
+    { label: 'Graph', href: '/graph', built: true },
     { label: 'Flows', href: '/flows', built: false },
     { label: 'Docs', href: '/docs', built: false },
     { label: 'Console', href: '/console', built: false },
