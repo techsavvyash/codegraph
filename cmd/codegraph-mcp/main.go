@@ -357,6 +357,12 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 						"type":        "string",
 						"description": "Name of a function or method (used when node_id is not available; ambiguous if multiple matches exist)",
 					},
+					"format": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"markdown", "json"},
+						"description": "Response format: markdown code block (default) or structured json (kind/name/lang/source/...) for UI consumption",
+						"default":     "markdown",
+					},
 				},
 			},
 		},

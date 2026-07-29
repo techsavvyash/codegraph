@@ -226,6 +226,10 @@ type pathEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Type string `json:"type"`
+	// Provenance (RFC-011 I4): present on inferred edges (e.g. MENTIONS) so
+	// surfaces can distinguish them from structural facts. Mirrors expandEdge.
+	Strategy   string  `json:"strategy,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 type pathResult struct {

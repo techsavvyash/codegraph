@@ -526,7 +526,7 @@ MATCH (a) WHERE elementId(a) = $fromId
 MATCH (b) WHERE elementId(b) = $toId
 %s
 RETURN [n IN nodes(p) | {node_id: elementId(n), label: labels(n)[0], name: coalesce(n.name, n.path, n.title, n.headingPath, '')}] AS pathNodes,
-       [r IN relationships(p) | {from: elementId(startNode(r)), to: elementId(endNode(r)), type: type(r)}] AS pathEdges,
+       [r IN relationships(p) | {from: elementId(startNode(r)), to: elementId(endNode(r)), type: type(r), strategy: coalesce(r.strategy, ''), confidence: coalesce(r.confidence, -1.0)}] AS pathEdges,
        length(p) AS hops
 ORDER BY hops
 LIMIT 25
@@ -559,13 +559,24 @@ LIMIT 25
 		}
 		pe := make([]pathEdge, 0, len(edgesRaw))
 		for _, x := range edgesRaw {
-			if mm, ok := x.(map[string]interface{}); ok {
-				pe = append(pe, pathEdge{
-					From: getStringFromRecord(mm, "from"),
-					To:   getStringFromRecord(mm, "to"),
-					Type: getStringFromRecord(mm, "type"),
-				})
+			mm, ok := x.(map[string]interface{})
+			if !ok {
+				continue
 			}
+			e := pathEdge{
+				From: getStringFromRecord(mm, "from"),
+				To:   getStringFromRecord(mm, "to"),
+				Type: getStringFromRecord(mm, "type"),
+			}
+			// Only provenanced (inferred) edges carry these; structural
+			// facts stay clean. Mirrors handleExpandTool's edge handling.
+			if strategy := getStringFromRecord(mm, "strategy"); strategy != "" {
+				e.Strategy = strategy
+				if conf, ok := mm["confidence"].(float64); ok && conf >= 0 {
+					e.Confidence = conf
+				}
+			}
+			pe = append(pe, e)
 		}
 		paths = append(paths, pathResult{Hops: hops, Nodes: pn, Edges: pe})
 	}
