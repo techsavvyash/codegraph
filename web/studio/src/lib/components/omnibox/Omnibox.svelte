@@ -8,6 +8,7 @@
   import type { ApiEnvelope, ApiError, FindResponse, FoundNode } from '$lib/types/graph'
   import { nodeColors } from '$lib/components/canvas/elements'
   import { groupResults, parseQuery, semanticDisableReason, type ResultGroup } from './query'
+  import { timedFetch } from '$lib/api/timedFetch'
 
   let {
     open = $bindable(false),
@@ -96,7 +97,7 @@
 
     loading = true
     try {
-      const res = await fetch(`/api/find?${params.toString()}`, { signal: controller.signal })
+      const res = await timedFetch(`/api/find?${params.toString()}`, { signal: controller.signal })
       const body = await res.json()
 
       if (!res.ok) {

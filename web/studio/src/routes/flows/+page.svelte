@@ -15,6 +15,7 @@
   import Inspector from '$lib/components/inspector/Inspector.svelte'
   import type { ApiEnvelope, ApiError, GraphEdge, GraphNode, SourceResponse } from '$lib/types/graph'
   import type { EntryPoint, EntryPointsResponse, Flow, FlowResponse, FlowStep, ServicesResponse } from '$lib/types/flows'
+  import { timedFetch } from '$lib/api/timedFetch'
 
   type Status = 'idle' | 'loading' | 'loaded' | 'error'
 
@@ -55,7 +56,7 @@
   async function loadServices() {
     servicesStatus = 'loading'
     try {
-      const data = await unwrap<ServicesResponse>(await fetch('/api/services'))
+      const data = await unwrap<ServicesResponse>(await timedFetch('/api/services'))
       services = data.services
       servicesStatus = 'loaded'
     } catch (e) {
@@ -74,7 +75,7 @@
       const perTier = await Promise.all(
         [1, 2, 3, 4].map(async (tier) =>
           unwrap<EntryPointsResponse>(
-            await fetch(`/api/entrypoints?service=${encodeURIComponent(service)}&tier=${tier}&limit=50`)
+            await timedFetch(`/api/entrypoints?service=${encodeURIComponent(service)}&tier=${tier}&limit=50`)
           )
         )
       )
@@ -95,7 +96,7 @@
     flowError = ''
     try {
       const data = await unwrap<FlowResponse>(
-        await fetch('/api/flow', {
+        await timedFetch('/api/flow', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ node_id: entry.node_id, max_depth: requestedDepth })
@@ -233,7 +234,7 @@
 
   const loadSource = async (nodeId: string): Promise<SourceResponse | null> => {
     try {
-      return await unwrap<SourceResponse>(await fetch(`/api/source?node_id=${encodeURIComponent(nodeId)}`))
+      return await unwrap<SourceResponse>(await timedFetch(`/api/source?node_id=${encodeURIComponent(nodeId)}`))
     } catch (e) {
       fatalError = e instanceof Error ? e.message : String(e)
       return null

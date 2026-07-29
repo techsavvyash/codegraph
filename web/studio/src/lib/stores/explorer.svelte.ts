@@ -16,6 +16,7 @@ import type {
   SourceResponse
 } from '$lib/types/graph'
 import { edgeKey } from '$lib/types/workingset'
+import { timedFetch } from '$lib/api/timedFetch'
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
@@ -66,7 +67,7 @@ export class ExplorerStore {
 
   private fetchFn: FetchLike
 
-  constructor(fetchFn: FetchLike = (...args) => fetch(...args)) {
+  constructor(fetchFn: FetchLike = (...args) => timedFetch(...args)) {
     this.fetchFn = fetchFn
   }
 
