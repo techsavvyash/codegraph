@@ -195,6 +195,9 @@ func dumpAndCompare(t *testing.T, ctx context.Context, client *neo4j.Client, gol
 			Services: fixtureServices,
 			Markers:  fixtureModuleMarkers,
 		},
+		// rootPath is the absolute path the fixture was indexed from —
+		// machine-specific by definition, so it can never live in a golden.
+		IgnoreNodeProps: []string{"rootPath"},
 	})
 	if err != nil {
 		t.Fatalf("Dump: %v", err)
