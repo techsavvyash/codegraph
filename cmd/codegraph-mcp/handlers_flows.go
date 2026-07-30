@@ -350,9 +350,14 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		ORDER BY fn.name`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") })
 
-	// Tier 2: Interface implementations with no callers.
+	// Tier 2: Interface implementations with no callers. Method-level
+	// IMPLEMENTS edges from SCIP relationship ingestion point at the abstract
+	// *member* (a Method contained by a File), not at an Interface node —
+	// Class→Interface is the only shape that targets :Interface directly. So
+	// the predicate is "fn implements anything", not "fn implements an
+	// :Interface".
 	runTier(2, "Interface impl", fmt.Sprintf(`
-		MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+		MATCH (fn)-[:IMPLEMENTS]->(abstract)
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.isTestFunction, false) = false
@@ -360,12 +365,12 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		  %s
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 		WHERE caller:Function OR caller:Method
-		WITH fn, iface, count(caller) AS callerCount
+		WITH fn, head(collect(abstract.name)) AS abstractName, count(caller) AS callerCount
 		WHERE callerCount = 0
 		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       iface.name AS source,
+		       coalesce(abstractName, '') AS source,
 		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
 		       COUNT { (fn)-[:CALLS]->() } AS outDegree, COUNT { ()-[:CALLS]->(fn) } AS inDegree
 		ORDER BY fn.name`, serviceFilterClause("fn")),

@@ -228,15 +228,17 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 
 // findInterfaceImplSeeds returns functions/methods that implement an interface
 // and have inDegree = 0 (no callers). These are likely dependency-injected
-// entry points.
+// entry points. Method-level IMPLEMENTS edges target the abstract *member*
+// (a Method node), not an :Interface node — only Class→Interface edges do —
+// so the predicate is "implements anything", matching the entry_points tool.
 func (f *GraphSeedFinder) findInterfaceImplSeeds(ctx context.Context) ([]GraphSeed, error) {
 	cypher := `
-		MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+		MATCH (fn)-[:IMPLEMENTS]->()
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.inDegree, 0) = 0
 		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
-		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels
+		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels
 	`
 
 	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))

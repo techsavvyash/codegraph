@@ -615,3 +615,61 @@ func TestGraphSeedFinder_ServiceFilterBeatsGlobalCap(t *testing.T) {
 		t.Fatalf("prefix filter: expected only %s, got %+v", smallRootKey, seeds)
 	}
 }
+
+// TestGraphSeedFinder_InterfaceImplSeeds_MethodLevelEdges reproduces the tier-2
+// dead spot: SCIP relationship ingestion emits method-level IMPLEMENTS edges
+// Method→Method (abstract member), while the old tier-2 query demanded
+// fn-[:IMPLEMENTS]->(:Interface) — a shape only Class→Interface edges have —
+// so tier 2 returned zero for every service.
+func TestGraphSeedFinder_InterfaceImplSeeds_MethodLevelEdges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const scopeID = "itest-iface-impl-seeds"
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, scopeID)
+	}()
+
+	implKey := "method:itest/impl.go#Store#Save"
+	abstractKey := "method:itest/iface.go#Storer#Save"
+	for key, name := range map[string]string{implKey: "Save", abstractKey: "Save"} {
+		if _, err := client.MergeNode(ctx, []string{"Method"},
+			map[string]interface{}{"nodeKey": key, "scopeId": scopeID},
+			map[string]interface{}{
+				"nodeKey": key, "scopeId": scopeID, "scope": "main",
+				"name": name, "serviceName": "itest-iface-svc", "inDegree": 0,
+			}); err != nil {
+			t.Fatalf("failed to merge %s: %v", key, err)
+		}
+	}
+	if err := client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (a:Method {nodeKey: $a, scopeId: $s})
+		MATCH (b:Method {nodeKey: $b, scopeId: $s})
+		MERGE (a)-[r:IMPLEMENTS]->(b)
+		SET r.scope = 'main', r.scopeId = $s`,
+		map[string]interface{}{"a": implKey, "b": abstractKey, "s": scopeID}); err != nil {
+		t.Fatalf("failed to create IMPLEMENTS: %v", err)
+	}
+
+	finder := inference.NewGraphSeedFinder(client)
+	finder.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	finder.SetServiceFilter([]string{"itest-iface-svc"}, "")
+
+	seeds, err := finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("FindSeeds failed: %v", err)
+	}
+	var impl *inference.GraphSeed
+	for i := range seeds {
+		if seeds[i].NodeKey == implKey {
+			impl = &seeds[i]
+		}
+	}
+	if impl == nil {
+		t.Fatalf("expected method-level implementer %s as a seed, got %+v", implKey, seeds)
+	}
+	if impl.Tier != 2 {
+		t.Fatalf("expected tier 2, got %d", impl.Tier)
+	}
+}
