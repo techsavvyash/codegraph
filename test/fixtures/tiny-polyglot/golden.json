@@ -2388,6 +2388,7 @@
       ],
       "endKey": "iface:scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -2403,6 +2404,7 @@
       ],
       "endKey": "method:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/Client#send().",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }

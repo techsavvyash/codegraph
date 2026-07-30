@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/ingest/resolve"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -216,6 +217,60 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		// Skip, not failure: SCIP relationships are optional; index can proceed without them
 		si.report.IncrementSkipped("IMPLEMENTS relationships", 1)
 	} else {
+		// RFC-001 Layer 3: scip-go emits sparse is_implementation
+		// relationships for Go's structural interfaces (see rfc/001).
+		// Supplement whatever SCIP gave us with an authoritative go/types
+		// structural-satisfaction pass. Best-effort by design: any failure
+		// (no go.mod, non-Go project, packages.Load error) is a warning,
+		// never an indexing failure — the SCIP-native relationships above
+		// already indexed fine without this.
+		if si.language == LanguageGo {
+			knownSymbols := make([]string, 0, len(symIdx.symbolIDs))
+			for sym := range symIdx.symbolIDs {
+				knownSymbols = append(knownSymbols, sym)
+			}
+
+			resolverRels, resolveStats, resolveErr := resolve.ResolveImplementations(si.projectPath, knownSymbols)
+			if resolveErr != nil {
+				fmt.Printf("WARNING: Go structural type resolver skipped: %v\n", resolveErr)
+				si.report.AddWarning(fmt.Sprintf("go structural type resolver skipped: %v", resolveErr))
+			} else {
+				// Skip pairs scip-go already emitted: MERGE would dedupe the
+				// edge anyway, but the later SET would overwrite its "scip"
+				// provenance with "go-types-resolver" — the edge should keep
+				// crediting the indexer that found it first.
+				scipPairs := make(map[[2]string]bool, len(scipRels))
+				for _, r := range scipRels {
+					if r.IsImplementation {
+						scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] = true
+					}
+				}
+				added := 0
+				for _, r := range resolverRels {
+					if scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] {
+						continue
+					}
+					scipRels = append(scipRels, SCIPRelationship{
+						FromSymbol:       r.FromSymbol,
+						ToSymbol:         r.ToSymbol,
+						IsImplementation: r.IsImplementation,
+						IsReference:      r.IsReference,
+						IsTypeDefinition: r.IsTypeDefinition,
+						DetectionSource:  "go-types-resolver",
+					})
+					added++
+				}
+				fmt.Printf(
+					"Go structural type resolver: %d structural implementations found (%d type-level, %d method-level), %d dropped (symbol not in index), %d new beyond scip-go\n",
+					resolveStats.TypeLevelEmitted+resolveStats.MethodLevelEmitted,
+					resolveStats.TypeLevelEmitted,
+					resolveStats.MethodLevelEmitted,
+					resolveStats.DroppedMissingSymbol,
+					added,
+				)
+			}
+		}
+
 		implCount := 0
 		for _, r := range scipRels {
 			if r.IsImplementation {

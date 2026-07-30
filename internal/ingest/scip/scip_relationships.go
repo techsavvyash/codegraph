@@ -21,6 +21,25 @@ type SCIPRelationship struct {
 	IsImplementation bool   // true if FromSymbol implements ToSymbol
 	IsReference      bool   // true if FromSymbol references ToSymbol
 	IsTypeDefinition bool   // true if FromSymbol is a type definition of ToSymbol
+
+	// DetectionSource records where this relationship came from: "" (or
+	// "scip") for relationships parsed directly out of SymbolInformation.Relationships
+	// by ExtractRelationships, or "go-types-resolver" for relationships
+	// produced by internal/ingest/resolve's structural type resolver
+	// (RFC-001 Layer 3). Threaded onto the IMPLEMENTS edge's properties by
+	// buildImplementsBatch so resolver-produced edges stay distinguishable
+	// from indexer-native ones for debugging/auditing.
+	DetectionSource string
+}
+
+// detectionSourceOrDefault returns rel.DetectionSource, defaulting to "scip"
+// for relationships that didn't set it (i.e. everything produced by
+// ExtractRelationships, which parses SCIP-native data).
+func detectionSourceOrDefault(rel SCIPRelationship) string {
+	if rel.DetectionSource == "" {
+		return "scip"
+	}
+	return rel.DetectionSource
 }
 
 // ExtractRelationships extracts all SymbolInformation.Relationships from
@@ -98,8 +117,9 @@ func buildImplementsBatch(
 			"fromId": fromID,
 			"toId":   toID,
 			"props": map[string]any{
-				"scope":   scope.Scope,
-				"scopeId": scope.ScopeID,
+				"scope":           scope.Scope,
+				"scopeId":         scope.ScopeID,
+				"detectionSource": detectionSourceOrDefault(rel),
 			},
 		})
 	}

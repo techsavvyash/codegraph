@@ -2564,6 +2564,7 @@
       ],
       "endKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -2579,6 +2580,7 @@
       ],
       "endKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
