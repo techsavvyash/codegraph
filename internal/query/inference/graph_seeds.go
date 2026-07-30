@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
@@ -42,9 +43,11 @@ type GraphSeed struct {
 // signals — zero name heuristics. It queries the graph for API endpoints,
 // interface implementations, topological roots, and high-centrality nodes.
 type GraphSeedFinder struct {
-	client   *neo4j.Client
-	scopeCtx models.ScopeContext
-	budget   TraversalBudget
+	client        *neo4j.Client
+	scopeCtx      models.ScopeContext
+	budget        TraversalBudget
+	serviceNames  []string
+	servicePrefix string
 
 	// CentralityThreshold is the minimum betweennessCentrality to qualify
 	// as a Tier 4 seed. Zero means use automatic threshold (mean + 1 stddev).
@@ -69,6 +72,33 @@ func (f *GraphSeedFinder) SetScope(scope models.ScopeContext) {
 func (f *GraphSeedFinder) SetBudget(budget TraversalBudget) {
 	f.budget = budget
 }
+
+// SetServiceFilter restricts seed detection to functions whose serviceName is
+// in names (exact) or starts with prefix. Filtering must happen inside the
+// tier queries — FindSeeds caps results to budget.MaxSteps, and a global cap
+// applied before service filtering starves small services out of the seed set
+// entirely (their tier-3 seeds lose the priority sort to the big services'
+// tier-1 seeds).
+func (f *GraphSeedFinder) SetServiceFilter(names []string, prefix string) {
+	f.serviceNames = append([]string{}, names...)
+	f.servicePrefix = prefix
+}
+
+// serviceParams returns the base query params including service constraints.
+func (f *GraphSeedFinder) serviceParams(extra map[string]any) map[string]any {
+	params := map[string]any{
+		"scopeId":       f.scopeCtx.ScopeID,
+		"serviceNames":  f.serviceNames,
+		"servicePrefix": f.servicePrefix,
+	}
+	maps.Copy(params, extra)
+	return params
+}
+
+// serviceClause is the WHERE-clause fragment enforcing the service filter on fn.
+const serviceClause = `
+		  AND (size($serviceNames) = 0 OR fn.serviceName IN $serviceNames)
+		  AND ($servicePrefix = '' OR fn.serviceName STARTS WITH $servicePrefix)`
 
 // FindSeeds queries the graph across all four tiers, deduplicates by nodeKey
 // (higher tier wins), and returns seeds sorted by priority descending.
@@ -149,16 +179,14 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND (route.scopeId = $scopeId OR route.scopeId = 'main')
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.hasExternalParams, false) AS hasExternal,
 		       coalesce(fn.isCrossPkgTarget, false) AS isCrossPkg,
 		       coalesce(route.detectionSource, '') AS detectionSource
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -207,13 +235,11 @@ func (f *GraphSeedFinder) findInterfaceImplSeeds(ctx context.Context) ([]GraphSe
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.inDegree, 0) = 0
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -250,14 +276,12 @@ func (f *GraphSeedFinder) findTopologicalRootSeeds(ctx context.Context) ([]Graph
 		  AND coalesce(fn.isExported, false) = true
 		  AND coalesce(fn.inDegree, 0) = 0
 		  AND coalesce(fn.outDegree, 0) > 0
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.outDegree, 0) AS outDegree
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +337,7 @@ func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed,
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND fn.betweennessCentrality > $threshold
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 		WHERE (caller:Function OR caller:Method)
 		  AND caller.betweennessCentrality > fn.betweennessCentrality
@@ -325,10 +349,9 @@ func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed,
 		ORDER BY bc DESC
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId":   f.scopeCtx.ScopeID,
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(map[string]any{
 		"threshold": threshold,
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}

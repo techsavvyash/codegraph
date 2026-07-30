@@ -512,3 +512,106 @@ func cleanupTestData(t *testing.T, ctx context.Context, client *graphclient.Clie
 		t.Logf("cleanup failed for scopeId %s: %v", scopeID, err)
 	}
 }
+
+// TestGraphSeedFinder_ServiceFilterBeatsGlobalCap reproduces the seed-starvation
+// bug: FindSeeds caps results to budget.MaxSteps AFTER the priority sort, so
+// without in-query service filtering a small service's tier-3 seeds lose the
+// cut to other services' tier-1 seeds and the service indexes with zero flows.
+// With SetServiceFilter the cap must apply within the requested service.
+func TestGraphSeedFinder_ServiceFilterBeatsGlobalCap(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const scopeID = "itest-seed-starvation"
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, scopeID)
+	}()
+
+	mergeFn := func(nodeKey string, props map[string]interface{}) {
+		t.Helper()
+		props["nodeKey"] = nodeKey
+		props["scopeId"] = scopeID
+		props["scope"] = "main"
+		if _, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": nodeKey, "scopeId": scopeID}, props); err != nil {
+			t.Fatalf("failed to merge %s: %v", nodeKey, err)
+		}
+	}
+
+	// "Big" service: a tier-1 seed (EXPOSES_API handler, priority >= 85).
+	bigHandlerKey := "func:itest-big/handler.go#Handle"
+	mergeFn(bigHandlerKey, map[string]interface{}{
+		"name": "Handle", "serviceName": "itest-svc-big", "filePath": "itest-big/handler.go",
+	})
+	routeKey := "api:itest:GET:/itest"
+	if _, err := client.MergeNode(ctx, []string{"APIRoute"},
+		map[string]interface{}{"nodeKey": routeKey, "scopeId": scopeID},
+		map[string]interface{}{
+			"nodeKey": routeKey, "scopeId": scopeID, "scope": "main",
+			"name": "GET /itest", "method": "GET", "path": "/itest",
+		}); err != nil {
+		t.Fatalf("failed to merge route: %v", err)
+	}
+	if err := client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (h:Function {nodeKey: $h, scopeId: $s})
+		MATCH (r:APIRoute {nodeKey: $r, scopeId: $s})
+		MERGE (h)-[rel:EXPOSES_API]->(r)
+		SET rel.scope = 'main', rel.scopeId = $s`,
+		map[string]interface{}{"h": bigHandlerKey, "r": routeKey, "s": scopeID}); err != nil {
+		t.Fatalf("failed to create EXPOSES_API: %v", err)
+	}
+
+	// "Small" service: only a tier-3 seed (exported topological root, priority ~70).
+	smallRootKey := "func:itest-small/root.go#Root"
+	mergeFn(smallRootKey, map[string]interface{}{
+		"name": "Root", "serviceName": "itest-svc-small", "filePath": "itest-small/root.go",
+		"isExported": true, "inDegree": 0, "outDegree": 1,
+	})
+
+	finder := inference.NewGraphSeedFinder(client)
+	finder.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	budget := inference.DefaultTraversalBudget
+	budget.MaxSteps = 1 // force the cap so priority sorting decides who survives
+	finder.SetBudget(budget)
+
+	// Unfiltered: the single surviving seed must be a tier-1 seed, i.e. the
+	// small service is starved out of the capped seed set.
+	seeds, err := finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("unfiltered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 {
+		t.Fatalf("expected exactly 1 seed under MaxSteps=1, got %d", len(seeds))
+	}
+	if seeds[0].NodeKey == smallRootKey {
+		t.Fatalf("tier-3 seed unexpectedly beat tier-1 seeds in the priority sort")
+	}
+
+	// Service-filtered: the same cap must now apply within the small service,
+	// so its tier-3 root survives.
+	finder.SetServiceFilter([]string{"itest-svc-small"}, "")
+	seeds, err = finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("filtered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 {
+		t.Fatalf("expected exactly 1 seed for itest-svc-small, got %d", len(seeds))
+	}
+	if seeds[0].NodeKey != smallRootKey {
+		t.Fatalf("expected small-service root %s, got %s", smallRootKey, seeds[0].NodeKey)
+	}
+	if seeds[0].Tier != 3 {
+		t.Fatalf("expected tier 3 seed, got tier %d", seeds[0].Tier)
+	}
+
+	// Prefix filtering must behave the same way.
+	finder.SetServiceFilter(nil, "itest-svc-small")
+	seeds, err = finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("prefix-filtered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 || seeds[0].NodeKey != smallRootKey {
+		t.Fatalf("prefix filter: expected only %s, got %+v", smallRootKey, seeds)
+	}
+}

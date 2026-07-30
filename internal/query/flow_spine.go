@@ -112,12 +112,14 @@ func (g *FlowSpineGenerator) SetScope(scope models.ScopeContext) {
 // Service names. If empty, no service-name filtering is applied.
 func (g *FlowSpineGenerator) SetServiceFilter(serviceNames []string) {
 	g.serviceNames = append([]string{}, serviceNames...)
+	g.graphSeedFinder.SetServiceFilter(g.serviceNames, g.servicePrefix)
 }
 
 // SetServicePrefix restricts flow generation to Service nodes whose name starts
 // with this prefix (useful for polyglot sub-services such as "svc/path").
 func (g *FlowSpineGenerator) SetServicePrefix(prefix string) {
 	g.servicePrefix = prefix
+	g.graphSeedFinder.SetServiceFilter(g.serviceNames, g.servicePrefix)
 }
 
 func (g *FlowSpineGenerator) hasServiceConstraints() bool {

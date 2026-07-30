@@ -187,12 +187,16 @@ var queryDepsCmd = &cobra.Command{
 var queryFlowsCmd = &cobra.Command{
 	Use:   "flows",
 	Short: "List or generate flow spines",
-	Long:  "List existing flow spines or generate new ones from API endpoints",
+	Long: "List existing flow spines or generate new ones from graph-structural entry points " +
+		"(API-exposed handlers, interface impls, topological roots, high-centrality nodes), " +
+		"falling back to API-endpoint heuristics. Use --service to scope generation to one service " +
+		"without re-indexing it.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		generate, _ := cmd.Flags().GetBool("generate")
 		maxDepth, _ := cmd.Flags().GetInt("max-depth")
 		flowType, _ := cmd.Flags().GetString("type")
 		scopeID, _ := cmd.Flags().GetString("scope-id")
+		service, _ := cmd.Flags().GetString("service")
 
 		client, err := createNeo4jClient()
 		if err != nil {
@@ -204,6 +208,11 @@ var queryFlowsCmd = &cobra.Command{
 		if scopeID != "" {
 			gen.SetScope(models.NewPRScope(models.NormalizePRID(scopeID)))
 		}
+		if service != "" {
+			// Prefix matching mirrors the index pipeline (polyglot sub-services
+			// such as "svc/path" index under the parent service's prefix).
+			gen.SetServicePrefix(service)
+		}
 		if maxDepth > 0 {
 			budget := inference.DefaultTraversalBudget
 			budget.MaxDepth = maxDepth
@@ -212,7 +221,7 @@ var queryFlowsCmd = &cobra.Command{
 		ctx := context.Background()
 
 		if generate {
-			results, err := gen.GenerateFromAPIEndpoints(ctx, maxDepth)
+			results, err := gen.GenerateFlows(ctx, maxDepth)
 			if err != nil {
 				return fmt.Errorf("failed to generate flows: %w", err)
 			}
@@ -264,8 +273,9 @@ func init() {
 	queryDepsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware query")
 
 	// Flow flags
-	queryFlowsCmd.Flags().Bool("generate", false, "Generate flow spines from API endpoints")
-	queryFlowsCmd.Flags().Int("max-depth", 2, "Maximum call graph traversal depth")
+	queryFlowsCmd.Flags().Bool("generate", false, "Generate flow spines from graph-structural entry points")
+	queryFlowsCmd.Flags().Int("max-depth", 3, "Maximum call graph traversal depth")
 	queryFlowsCmd.Flags().String("type", "", "Filter by flow type (api, consumer, cron)")
 	queryFlowsCmd.Flags().String("scope-id", "", "Optional scope ID for overlay-aware flows")
+	queryFlowsCmd.Flags().String("service", "", "Scope generation to services with this name prefix")
 }
