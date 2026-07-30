@@ -224,12 +224,12 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		// (no go.mod, non-Go project, packages.Load error) is a warning,
 		// never an indexing failure — the SCIP-native relationships above
 		// already indexed fine without this.
-		if si.language == LanguageGo {
-			knownSymbols := make([]string, 0, len(symIdx.symbolIDs))
-			for sym := range symIdx.symbolIDs {
-				knownSymbols = append(knownSymbols, sym)
-			}
+		knownSymbols := make([]string, 0, len(symIdx.symbolIDs))
+		for sym := range symIdx.symbolIDs {
+			knownSymbols = append(knownSymbols, sym)
+		}
 
+		if si.language == LanguageGo {
 			resolverRels, resolveStats, resolveErr := resolve.ResolveImplementations(si.projectPath, knownSymbols)
 			if resolveErr != nil {
 				fmt.Printf("WARNING: Go structural type resolver skipped: %v\n", resolveErr)
@@ -269,6 +269,18 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 					added,
 				)
 			}
+		} else if si.language == LanguageTypeScript || si.language == LanguageJavaScript {
+			// RFC-001 Layer 3 (TS/JS side): scip-typescript only emits
+			// is_implementation for explicit `implements`/heritage clauses
+			// (FileIndexer.ts's forEachAncestor walk) — a class that
+			// structurally satisfies a local interface WITHOUT an
+			// `implements` clause gets no relationship at all. Supplement
+			// with tools/ts-resolver/resolve.mjs, which uses the TypeScript
+			// compiler's own checker.isTypeAssignableTo. Best-effort by
+			// design, mirroring the Go branch above: a missing/unusable
+			// Node.js or `typescript` environment is a warning, never an
+			// indexing failure.
+			scipRels = si.runTSStructuralResolver(scipRels, knownSymbols)
 		}
 
 		implCount := 0
@@ -424,6 +436,116 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 
 	fmt.Println("SCIP indexing completed successfully")
 	return nil
+}
+
+// tsResolverTimeout bounds how long the external Node.js structural
+// resolver is allowed to run. Best-effort by design: a slow/hung resolver
+// must never hold up the rest of indexing indefinitely.
+const tsResolverTimeout = 120 * time.Second
+
+// locateTSResolverScript finds tools/ts-resolver/resolve.mjs, checked in
+// this order:
+//  1. CODEGRAPH_TS_RESOLVER env var, if set (explicit override).
+//  2. <dir of the running executable>/../tools/ts-resolver/resolve.mjs
+//     (the layout produced when the repo's tools/ directory is shipped
+//     alongside the built binary).
+//
+// Returns "" (never an error) when neither resolves, so callers can treat
+// "resolver not found" as a warn-and-skip condition identical to any other
+// best-effort environment gap.
+func locateTSResolverScript() string {
+	if envPath := os.Getenv("CODEGRAPH_TS_RESOLVER"); envPath != "" {
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+		return ""
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	candidate := filepath.Join(filepath.Dir(exePath), "..", "tools", "ts-resolver", "resolve.mjs")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
+// runTSStructuralResolver runs the TypeScript/JavaScript structural type
+// resolver (tools/ts-resolver/resolve.mjs) against si.projectPath and
+// returns scipRels with any newly-discovered structural implementation
+// relationships appended (DetectionSource: "ts-types-resolver"), deduped
+// against whatever scip-typescript already emitted natively — mirroring the
+// Go branch in IndexProject exactly (see the `si.language == LanguageGo`
+// block above).
+//
+// knownSymbols is every SCIP symbol string scip-typescript emitted for this
+// project (the same set the Go branch builds from symIdx.symbolIDs) — it is
+// what JoinTSRelationships joins the resolver's file/type/method-name
+// output onto.
+//
+// Every failure mode here — no `node` in PATH, script not found, resolver
+// exit codes 2/3, timeout, malformed output — is best-effort: it is
+// recorded as a warning and scipRels is returned unchanged. This function
+// never returns an error and never fails the index run.
+func (si *SCIPIndexer) runTSStructuralResolver(scipRels []SCIPRelationship, knownSymbols []string) []SCIPRelationship {
+	if _, err := exec.LookPath("node"); err != nil {
+		msg := "ts structural type resolver skipped: 'node' not found in PATH"
+		fmt.Printf("WARNING: %s\n", msg)
+		si.report.AddWarning(msg)
+		return scipRels
+	}
+
+	scriptPath := locateTSResolverScript()
+	if scriptPath == "" {
+		msg := "ts structural type resolver skipped: resolve.mjs not found (set CODEGRAPH_TS_RESOLVER or ship tools/ts-resolver alongside the binary)"
+		fmt.Printf("WARNING: %s\n", msg)
+		si.report.AddWarning(msg)
+		return scipRels
+	}
+
+	parsed, err := resolve.RunTSResolver(context.Background(), scriptPath, si.projectPath, tsResolverTimeout)
+	if err != nil {
+		fmt.Printf("WARNING: TS structural type resolver skipped: %v\n", err)
+		si.report.AddWarning(fmt.Sprintf("ts structural type resolver skipped: %v", err))
+		return scipRels
+	}
+
+	resolverRels, joinStats := resolve.JoinTSRelationships(parsed, knownSymbols)
+
+	scipPairs := make(map[[2]string]bool, len(scipRels))
+	for _, r := range scipRels {
+		if r.IsImplementation {
+			scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] = true
+		}
+	}
+	added := 0
+	for _, r := range resolverRels {
+		if scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] {
+			continue
+		}
+		scipRels = append(scipRels, SCIPRelationship{
+			FromSymbol:       r.FromSymbol,
+			ToSymbol:         r.ToSymbol,
+			IsImplementation: r.IsImplementation,
+			IsReference:      r.IsReference,
+			IsTypeDefinition: r.IsTypeDefinition,
+			DetectionSource:  "ts-types-resolver",
+		})
+		added++
+	}
+
+	fmt.Printf(
+		"TS structural type resolver: %d structural implementations found (%d type-level, %d method-level), %d dropped (symbol not in index), %d new beyond scip-typescript\n",
+		joinStats.TypeLevelEmitted+joinStats.MethodLevelEmitted,
+		joinStats.TypeLevelEmitted,
+		joinStats.MethodLevelEmitted,
+		joinStats.DroppedMissingSymbol,
+		added,
+	)
+
+	return scipRels
 }
 
 // IndexProjectPolyglot detects all languages present under projectPath, installs
