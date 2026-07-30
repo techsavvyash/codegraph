@@ -38,11 +38,47 @@ type FunctionNode struct {
 	// bound variable's name for closures assigned via a declarator
 	// (const g = () => …), or "" for anonymous functions.
 	Name string
+	// Decorators are the decorator annotations immediately preceding this
+	// function-like node as a sibling (TypeScript/TSX only, e.g. `@Get()`
+	// preceding a method_definition). Empty/nil when the node carries none
+	// or the grammar has no decorator syntax.
+	Decorators []DecoratorInfo
+}
+
+// DecoratorInfo is one decorator annotation: `@Name(Arg)` or `@Name`.
+type DecoratorInfo struct {
+	// Name is the decorator's identifier: `Controller` for `@Controller(...)`.
+	Name string
+	// Arg is the first call argument's text when it's a string literal
+	// (quotes stripped), else "" — including when the decorator has no
+	// call (`@Injectable`), no arguments (`@Get()`), or a non-literal first
+	// argument (a template string or an identifier/expression).
+	Arg string
+}
+
+// ClassNode is one class-like syntactic construct (TypeScript/TSX only).
+// Lines are 1-based and inclusive; columns are 0-based, matching FunctionNode.
+type ClassNode struct {
+	StartLine, EndLine int
+	StartCol, EndCol   int
+	// Name is the declared class identifier, or "" for anonymous class
+	// expressions.
+	Name string
+	// Decorators are the decorator annotations immediately preceding this
+	// class as a sibling (`@Controller('users')` preceding class_declaration,
+	// possibly through an export_statement wrapper).
+	Decorators []DecoratorInfo
 }
 
 // FileStructure is every function-like node in one file, in source order.
 type FileStructure struct {
 	Functions []FunctionNode
+	// Classes holds every class-like node found (TypeScript/TSX only), in
+	// source order. Populated independently of Functions: classes are not
+	// function-like nodes and do not participate in FunctionNode.ParentIndex
+	// nesting, but ClassDecoratorsAt lets callers attribute a method's
+	// position to its enclosing class's decorators.
+	Classes []ClassNode
 	// HasErrors reports that the parse tree contains ERROR or MISSING
 	// nodes. Extracted spans are still exact — tree-sitter error recovery
 	// localizes damage — but definitions inside error regions may be
@@ -109,12 +145,149 @@ func collect(lang *Language, n *sitter.Node, src []byte, parentIdx int, fs *File
 			}
 		}
 
+		if lang.hasDecorators {
+			fn.Decorators = precedingDecorators(n, src)
+		}
+
 		fs.Functions = append(fs.Functions, fn)
 		nextParent = len(fs.Functions) - 1
 	}
+
+	if lang.hasDecorators && n.Kind() == "class_declaration" && n.IsNamed() {
+		cls := ClassNode{
+			StartLine:  int(n.StartPosition().Row) + 1,
+			StartCol:   int(n.StartPosition().Column),
+			Name:       nodeName(n, src),
+			Decorators: ownDecorators(n, src),
+		}
+		cls.EndLine, cls.EndCol = endOf(n)
+		// A class wrapped in `export`/`export default` widens its span to
+		// the wrapper so position-containment lands the same way
+		// FunctionNode's declarator widening does. Decorators on an exported
+		// class attach to the export_statement as ITS OWN children (the
+		// grammar's "decorator" field lives on export_statement, not on the
+		// class_declaration it wraps), not to the inner class_declaration.
+		if wrapper := exportWrapper(n); wrapper != nil {
+			cls.StartLine = int(wrapper.StartPosition().Row) + 1
+			cls.StartCol = int(wrapper.StartPosition().Column)
+			cls.EndLine, cls.EndCol = endOf(wrapper)
+			cls.Decorators = ownDecorators(wrapper, src)
+		}
+		fs.Classes = append(fs.Classes, cls)
+	}
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		collect(lang, n.Child(i), src, nextParent, fs)
 	}
+}
+
+// exportWrapper returns n's parent when it is an export_statement directly
+// wrapping n (`export class Foo {}` / `export default class Foo {}`), else
+// nil. Decorators on an exported class attach to the export_statement, not
+// the class_declaration itself.
+func exportWrapper(n *sitter.Node) *sitter.Node {
+	p := n.Parent()
+	if p != nil && p.Kind() == "export_statement" {
+		return p
+	}
+	return nil
+}
+
+// ownDecorators collects `decorator` nodes that are DIRECT CHILDREN of n
+// itself, in source order: the grammar gives class_declaration and
+// export_statement a named (multiple) "decorator" field, so a class's own
+// decorators are its children, not its siblings — unlike method_definition,
+// which has no such field and relies on precedingDecorators instead.
+func ownDecorators(n *sitter.Node, src []byte) []DecoratorInfo {
+	var decorators []DecoratorInfo
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() == "decorator" && c.IsNamed() {
+			decorators = append(decorators, parseDecorator(c, src))
+		}
+	}
+	return decorators
+}
+
+// precedingDecorators collects the `decorator` nodes that are n's immediate
+// preceding siblings (there may be several stacked: `@A() @B() method() {}`
+// inside a class_body), in source order. Walks PrevSibling() rather than
+// re-deriving n's index from its parent's children: go-tree-sitter's *Node is
+// a value wrapper allocated fresh per accessor call, so pointer/struct
+// equality against a Child(i) result never matches n itself.
+func precedingDecorators(n *sitter.Node, src []byte) []DecoratorInfo {
+	var reversed []DecoratorInfo
+	for cur := n.PrevSibling(); cur != nil && cur.Kind() == "decorator"; cur = cur.PrevSibling() {
+		if cur.IsNamed() {
+			reversed = append(reversed, parseDecorator(cur, src))
+		}
+	}
+	if reversed == nil {
+		return nil
+	}
+	decorators := make([]DecoratorInfo, len(reversed))
+	for i, d := range reversed {
+		decorators[len(reversed)-1-i] = d
+	}
+	return decorators
+}
+
+// parseDecorator extracts a decorator's name and optional first string-literal
+// argument from its single named child: either a bare `identifier`
+// (`@Injectable`) or a `call_expression` (`@Get('path')`, `@Get()`) whose
+// `function` field names the decorator and whose `arguments` field holds the
+// call arguments.
+func parseDecorator(n *sitter.Node, src []byte) DecoratorInfo {
+	var target *sitter.Node
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); c.IsNamed() {
+			target = c
+			break
+		}
+	}
+	if target == nil {
+		return DecoratorInfo{}
+	}
+	if target.Kind() != "call_expression" {
+		// Bare identifier or member_expression/parenthesized_expression: no
+		// call, so no argument. nodeText handles any of these uniformly.
+		return DecoratorInfo{Name: nodeText(target, src)}
+	}
+	fn := target.ChildByFieldName("function")
+	name := ""
+	if fn != nil {
+		name = nodeText(fn, src)
+	}
+	args := target.ChildByFieldName("arguments")
+	return DecoratorInfo{Name: name, Arg: firstStringArg(args, src)}
+}
+
+// firstStringArg returns the first argument's text when it is a plain string
+// literal (quotes stripped via the string_fragment child), else "" — covers
+// zero arguments, a template string, and any non-literal expression
+// (identifier, member access, etc.) per RFC-005: computed decorator
+// arguments are a documented limitation, not guessed at.
+func firstStringArg(args *sitter.Node, src []byte) string {
+	if args == nil {
+		return ""
+	}
+	for i := uint(0); i < args.ChildCount(); i++ {
+		c := args.Child(i)
+		if !c.IsNamed() {
+			continue
+		}
+		if c.Kind() != "string" {
+			return ""
+		}
+		for j := uint(0); j < c.ChildCount(); j++ {
+			frag := c.Child(j)
+			if frag.Kind() == "string_fragment" {
+				return nodeText(frag, src)
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // endOf converts a node's exclusive end position to an inclusive
@@ -207,7 +380,7 @@ func nodeText(n *sitter.Node, src []byte) string {
 func (fs *FileStructure) InnermostAt(line, col int) (int, bool) {
 	best := -1
 	for i, fn := range fs.Functions {
-		if !contains(fn, line, col) {
+		if !contains(fn.StartLine, fn.EndLine, fn.StartCol, fn.EndCol, line, col) {
 			continue
 		}
 		// Later matches are deeper: collect appends parents before their
@@ -218,17 +391,43 @@ func (fs *FileStructure) InnermostAt(line, col int) (int, bool) {
 	return best, best >= 0
 }
 
-func contains(fn FunctionNode, line, col int) bool {
+// ClassDecoratorsAt returns the decorators of the smallest ClassNode
+// containing the 1-based line and 0-based column, or nil when no class
+// contains the position (no grammar support, position outside any class, or
+// the containing class carries no decorators). Mirrors InnermostAt's
+// containment logic; classes never nest in this extractor (only the
+// outermost class_declaration is recorded per position), so "smallest" in
+// practice means "only".
+func (fs *FileStructure) ClassDecoratorsAt(line, col int) []DecoratorInfo {
+	best := -1
+	bestSpan := -1
+	for i, cls := range fs.Classes {
+		if !contains(cls.StartLine, cls.EndLine, cls.StartCol, cls.EndCol, line, col) {
+			continue
+		}
+		span := cls.EndLine - cls.StartLine
+		if best < 0 || span < bestSpan {
+			best = i
+			bestSpan = span
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return fs.Classes[best].Decorators
+}
+
+func contains(startLine, endLine, startCol, endCol, line, col int) bool {
 	if col < 0 {
-		return fn.StartLine <= line && line <= fn.EndLine
+		return startLine <= line && line <= endLine
 	}
-	if line < fn.StartLine || line > fn.EndLine {
+	if line < startLine || line > endLine {
 		return false
 	}
-	if line == fn.StartLine && col < fn.StartCol {
+	if line == startLine && col < startCol {
 		return false
 	}
-	if line == fn.EndLine && col > fn.EndCol {
+	if line == endLine && col > endCol {
 		return false
 	}
 	return true

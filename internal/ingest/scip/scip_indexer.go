@@ -406,6 +406,20 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			si.report.AddWarning(fmt.Sprintf("symbol-based API analysis failed: %v", err))
 			si.report.IncrementFailed("API analysis", 1)
 		}
+
+		// Decorator-routed handlers (NestJS @Get/@Post/etc.): the tree-sitter
+		// structure pass stamped fn.decorators/classDecorators during call
+		// graph construction, and decorators are the ONLY signal for these —
+		// the framework invokes handlers via reflection, so no CALLS-based
+		// strategy can see them. Only the decorator strategy runs here; the
+		// full structural detector's other strategies are Go-oriented.
+		apiDetector := NewAPISurfaceDetector(si.client, "")
+		apiDetector.SetScope(si.scopeCtx)
+		apiDetector.SetServiceName(si.serviceName)
+		if _, err := apiDetector.detectDecoratorRoutes(ctx); err != nil {
+			si.report.AddWarning(fmt.Sprintf("decorator route detection failed: %v", err))
+			si.report.IncrementFailed("API analysis", 1)
+		}
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")

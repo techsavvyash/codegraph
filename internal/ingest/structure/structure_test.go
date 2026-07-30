@@ -318,6 +318,184 @@ func TestForFile(t *testing.T) {
 	}
 }
 
+// decoSummary is the assertable shape of one DecoratorInfo.
+type decoSummary struct {
+	Name string
+	Arg  string
+}
+
+func summarizeDecorators(ds []DecoratorInfo) []decoSummary {
+	out := make([]decoSummary, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, decoSummary{d.Name, d.Arg})
+	}
+	return out
+}
+
+func assertDecorators(t *testing.T, got []DecoratorInfo, want []decoSummary) {
+	t.Helper()
+	gs := summarizeDecorators(got)
+	if len(gs) != len(want) {
+		t.Fatalf("decorator count = %d, want %d\ngot: %+v want: %+v", len(gs), len(want), gs, want)
+	}
+	for i := range want {
+		if gs[i] != want[i] {
+			t.Errorf("decorators[%d] = %+v, want %+v", i, gs[i], want[i])
+		}
+	}
+}
+
+// funcByName finds the first FunctionNode with the given name, failing the
+// test if absent.
+func funcByName(t *testing.T, fs *FileStructure, name string) FunctionNode {
+	t.Helper()
+	for _, f := range fs.Functions {
+		if f.Name == name {
+			return f
+		}
+	}
+	t.Fatalf("no function named %q in %+v", name, summarize(fs))
+	return FunctionNode{}
+}
+
+// TestDecoratorExtraction_MethodAndClass covers the NestJS shape RFC-005
+// targets: a decorated controller class with decorated and plain methods,
+// asserting exact name/arg extraction for both stacked-string-arg and
+// no-arg decorators, and that a plain method carries none.
+func TestDecoratorExtraction_MethodAndClass(t *testing.T) {
+	src := `@Controller('users')
+class UsersController {
+  @Get() findAll() {}
+  @Get(':id') findOne() {}
+  @Post('create') create() {}
+  plainMethod() {}
+}
+
+@Injectable()
+class UsersService {
+  save() {}
+}
+
+function freeFunction() {}
+
+class Scheduler {
+  @EventPattern('evt') handleEvt() {}
+  @Cron('* * * * *') runJob() {}
+}
+`
+	fs := extract(t, "typescript", src)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+
+	// Method-level decorators, exact name/arg pairs.
+	assertDecorators(t, funcByName(t, fs, "findAll").Decorators, []decoSummary{{"Get", ""}})
+	assertDecorators(t, funcByName(t, fs, "findOne").Decorators, []decoSummary{{"Get", ":id"}})
+	assertDecorators(t, funcByName(t, fs, "create").Decorators, []decoSummary{{"Post", "create"}})
+	assertDecorators(t, funcByName(t, fs, "plainMethod").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "save").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "freeFunction").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "handleEvt").Decorators, []decoSummary{{"EventPattern", "evt"}})
+	assertDecorators(t, funcByName(t, fs, "runJob").Decorators, []decoSummary{{"Cron", "* * * * *"}})
+
+	// Class-level decorators.
+	if len(fs.Classes) != 3 {
+		t.Fatalf("want 3 classes, got %d: %+v", len(fs.Classes), fs.Classes)
+	}
+	classByName := func(name string) ClassNode {
+		t.Helper()
+		for _, c := range fs.Classes {
+			if c.Name == name {
+				return c
+			}
+		}
+		t.Fatalf("no class named %q in %+v", name, fs.Classes)
+		return ClassNode{}
+	}
+	assertDecorators(t, classByName("UsersController").Decorators, []decoSummary{{"Controller", "users"}})
+	assertDecorators(t, classByName("UsersService").Decorators, []decoSummary{{"Injectable", ""}})
+	assertDecorators(t, classByName("Scheduler").Decorators, nil)
+
+	// Method -> enclosing-class attribution: findOne's identifier position
+	// must resolve, via ClassDecoratorsAt, to UsersController's decorators —
+	// not UsersService's or Scheduler's.
+	findOne := funcByName(t, fs, "findOne")
+	classDecos := fs.ClassDecoratorsAt(findOne.StartLine, findOne.StartCol)
+	assertDecorators(t, classDecos, []decoSummary{{"Controller", "users"}})
+
+	// A method with no enclosing class (freeFunction) resolves no class
+	// decorators.
+	free := funcByName(t, fs, "freeFunction")
+	if got := fs.ClassDecoratorsAt(free.StartLine, free.StartCol); got != nil {
+		t.Errorf("freeFunction ClassDecoratorsAt = %+v, want nil", got)
+	}
+
+	// runJob (inside Scheduler, which has no class decorator) resolves to
+	// an empty decorator list, distinguishing "no enclosing class" from
+	// "enclosing class has no decorators".
+	runJob := funcByName(t, fs, "runJob")
+	if got := fs.ClassDecoratorsAt(runJob.StartLine, runJob.StartCol); got != nil {
+		t.Errorf("runJob (Scheduler has no class decorator) ClassDecoratorsAt = %+v, want nil", got)
+	}
+}
+
+// TestDecoratorExtraction_NoGrammarSupport verifies decorator extraction is
+// gated by language: JavaScript and other non-TS grammars never populate
+// Decorators/Classes even when asked (JS has no decorator syntax in the
+// stable grammar; other languages have no decorator concept at all).
+func TestDecoratorExtraction_NoGrammarSupport(t *testing.T) {
+	fs := extract(t, "javascript", `class C {
+  m() { return 1; }
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	if len(fs.Classes) != 0 {
+		t.Errorf("javascript: want 0 classes tracked, got %d: %+v", len(fs.Classes), fs.Classes)
+	}
+	m := funcByName(t, fs, "m")
+	if m.Decorators != nil {
+		t.Errorf("javascript method Decorators = %+v, want nil", m.Decorators)
+	}
+}
+
+// TestDecoratorExtraction_TSX verifies the TSX grammar (used for .tsx files)
+// extracts decorators identically to plain TypeScript.
+func TestDecoratorExtraction_TSX(t *testing.T) {
+	fs := extract(t, "tsx", `@Controller('widgets')
+class WidgetController {
+  @Get(':id') get() {}
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	assertDecorators(t, funcByName(t, fs, "get").Decorators, []decoSummary{{"Get", ":id"}})
+	if len(fs.Classes) != 1 || fs.Classes[0].Name != "WidgetController" {
+		t.Fatalf("want 1 class WidgetController, got %+v", fs.Classes)
+	}
+	assertDecorators(t, fs.Classes[0].Decorators, []decoSummary{{"Controller", "widgets"}})
+}
+
+// TestDecoratorExtraction_StackedAndNonLiteralArgs covers multiple stacked
+// decorators on one target and a non-string-literal first argument (a bare
+// identifier), which must yield an empty Arg rather than a guess.
+func TestDecoratorExtraction_StackedAndNonLiteralArgs(t *testing.T) {
+	fs := extract(t, "typescript", `const ROUTE = 'dynamic';
+class C {
+  @UseGuards() @Get(ROUTE) mixed() {}
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	assertDecorators(t, funcByName(t, fs, "mixed").Decorators, []decoSummary{
+		{"UseGuards", ""},
+		{"Get", ""}, // non-literal arg (identifier) yields "", not a guess
+	})
+}
+
 // TestByteRangesMatchSource: byte offsets must slice the source to exactly
 // the function text — downstream `source` retrieval depends on it.
 func TestByteRangesMatchSource(t *testing.T) {

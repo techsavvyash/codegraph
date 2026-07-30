@@ -75,8 +75,16 @@ func (d *APISurfaceDetector) Detect(ctx context.Context) error {
 		errs = append(errs, fmt.Errorf("API route synthesis: %w", err))
 	}
 
-	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d API routes\n",
-		extCount, crossPkgCount, apiCount)
+	// Strategy 4: Decorator-routed handlers (NestJS and similar frameworks).
+	// Additive — runs regardless of whether strategies 1-3 found anything,
+	// since decorator syntax is a definitive framework signal on its own.
+	decoratorCount, err := d.detectDecoratorRoutes(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("decorator route detection: %w", err))
+	}
+
+	fmt.Printf("Structural API surface detection complete: %d external-param, %d cross-pkg, %d API routes, %d decorator routes\n",
+		extCount, crossPkgCount, apiCount, decoratorCount)
 	return errors.Join(errs...)
 }
 
@@ -263,6 +271,242 @@ func (d *APISurfaceDetector) synthesizeAPIRoutes(ctx context.Context) (int, erro
 
 	fmt.Printf("  Strategy 3: created %d APIRoute nodes with EXPOSES_API edges\n", created)
 	return created, nil
+}
+
+// --- Strategy 4: decorator-routed handlers -------------------------------
+//
+// SCIP indexers don't emit call-reference edges for decorator-invoked
+// handlers (the framework's runtime calls them via reflection, not a code
+// reference), so strategies 1-3 — which all key off CALLS edges or
+// parameter typing — structurally cannot see them. The RFC-010 tree-sitter
+// structure pass now captures decorator annotations at parse time
+// (internal/ingest/structure), and call_graph_generic.go stamps them onto
+// Function/Method nodes as fn.decorators / fn.classDecorators. This
+// strategy reads those properties back and turns them into APIRoute nodes,
+// exactly like synthesizeAPIRoutes but keyed off an explicit decorator
+// name table instead of graph-structural signals.
+//
+// decoratorHTTPMethods maps a NestJS HTTP method decorator to its uppercase
+// HTTP verb; "All" maps to the wildcard method "*". One place, easy to
+// extend for other frameworks (Angular route decorators, etc. are
+// deliberately NOT included — NestJS-only for now, see package docs).
+var decoratorHTTPMethods = map[string]string{
+	"Get":     "GET",
+	"Post":    "POST",
+	"Put":     "PUT",
+	"Patch":   "PATCH",
+	"Delete":  "DELETE",
+	"Options": "OPTIONS",
+	"Head":    "HEAD",
+	"All":     "*",
+}
+
+// decoratorMessagingNames are decorators (NestJS microservices) marking a
+// handler as a message-broker consumer — mapped to fn.consumesBroker, the
+// same property SemanticEdgeDetector.DetectMessageConsumers sets.
+var decoratorMessagingNames = map[string]bool{
+	"EventPattern":   true,
+	"MessagePattern": true,
+}
+
+// decoratorSchedulingNames are decorators marking a handler as a scheduled
+// task — mapped to fn.scheduledTask, the same property
+// SemanticEdgeDetector.DetectScheduledFunctions sets.
+var decoratorSchedulingNames = map[string]bool{
+	"Cron":     true,
+	"Interval": true,
+	"Timeout":  true,
+}
+
+// decoratedName is one decoded decorator: its bare name and optional
+// argument, from the "Name" / "Name:arg" encoding written by
+// call_graph_generic.go's encodeDecorators.
+type decoratedName struct {
+	Name string
+	Arg  string
+}
+
+// parseDecoratorStrings decodes the []any (Neo4j string-list property,
+// surfaced through the driver as []any of strings) written by
+// encodeDecorators back into structured name/arg pairs. Splits on the FIRST
+// ':' only — an arg containing ':' round-trips intact but is indistinguishable
+// from a name/arg split at that character; this is the same documented
+// known limitation as encodeDecorators.
+//
+// Pure function, no I/O — testable without Neo4j.
+func parseDecoratorStrings(raw []any) []decoratedName {
+	out := make([]decoratedName, 0, len(raw))
+	for _, v := range raw {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		if idx := strings.Index(s, ":"); idx >= 0 {
+			out = append(out, decoratedName{Name: s[:idx], Arg: s[idx+1:]})
+		} else {
+			out = append(out, decoratedName{Name: s})
+		}
+	}
+	return out
+}
+
+// joinPaths builds a route path from a controller-level prefix and a
+// method-level route argument, normalizing slashes so segments never
+// produce a doubled or missing '/'. Always returns a path starting with '/'.
+func joinPaths(prefix, methodArg string) string {
+	prefix = strings.Trim(prefix, "/")
+	methodArg = strings.Trim(methodArg, "/")
+	switch {
+	case prefix == "" && methodArg == "":
+		return "/"
+	case prefix == "":
+		return "/" + methodArg
+	case methodArg == "":
+		return "/" + prefix
+	default:
+		return "/" + prefix + "/" + methodArg
+	}
+}
+
+// detectDecoratorRoutes creates APIRoute nodes + EXPOSES_API edges for
+// functions carrying an HTTP-verb decorator (NestJS @Get/@Post/etc.), and
+// sets consumesBroker/scheduledTask booleans for messaging/scheduling
+// decorators. A function can match more than one category at once (e.g. an
+// @Get handler that is ALSO @Cron-scheduled) — categories are independent,
+// not mutually exclusive.
+func (d *APISurfaceDetector) detectDecoratorRoutes(ctx context.Context) (int, error) {
+	cypher := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND fn.serviceName = $serviceName
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND fn.decorators IS NOT NULL
+		  AND size(fn.decorators) > 0
+		RETURN elementId(fn) AS fnId,
+		       fn.name AS name,
+		       fn.decorators AS decorators,
+		       fn.classDecorators AS classDecorators,
+		       fn.nodeKey AS nodeKey
+	`
+	records, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{
+		"scopeId":     d.scopeCtx.ScopeID,
+		"serviceName": d.serviceName,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("decorator route query: %w", err)
+	}
+
+	created := 0
+	for _, rec := range records {
+		rm := rec.AsMap()
+		fnID := getStringFromMap(rm, "fnId")
+		name := getStringFromMap(rm, "name")
+		if fnID == "" || name == "" {
+			continue
+		}
+
+		methodDecorators := parseDecoratorStrings(asAnySlice(rm["decorators"]))
+		classDecorators := parseDecoratorStrings(asAnySlice(rm["classDecorators"]))
+
+		// Messaging and scheduling: independent boolean flags, checked across
+		// this function's own decorators (NestJS applies these directly to
+		// the handler method, not the class).
+		hasMessaging := false
+		hasScheduling := false
+		for _, dec := range methodDecorators {
+			if decoratorMessagingNames[dec.Name] {
+				hasMessaging = true
+			}
+			if decoratorSchedulingNames[dec.Name] {
+				hasScheduling = true
+			}
+		}
+		if hasMessaging {
+			if err := d.setBoolProperty(ctx, fnID, "consumesBroker"); err != nil {
+				fmt.Printf("Warning: failed to set consumesBroker for %s: %v\n", name, err)
+			}
+		}
+		if hasScheduling {
+			if err := d.setBoolProperty(ctx, fnID, "scheduledTask"); err != nil {
+				fmt.Printf("Warning: failed to set scheduledTask for %s: %v\n", name, err)
+			}
+		}
+
+		// HTTP route: only created when an HTTP-verb decorator is present.
+		var httpMethod string
+		var methodArg string
+		for _, dec := range methodDecorators {
+			if verb, ok := decoratorHTTPMethods[dec.Name]; ok {
+				httpMethod = verb
+				methodArg = dec.Arg
+				break
+			}
+		}
+		if httpMethod == "" {
+			continue
+		}
+
+		controllerPrefix := ""
+		for _, dec := range classDecorators {
+			if dec.Name == "Controller" {
+				controllerPrefix = dec.Arg
+				break
+			}
+		}
+
+		routePath := joinPaths(controllerPrefix, methodArg)
+		nodeKey := models.APIRouteNodeKey(httpMethod, routePath)
+		routeProps := map[string]any{
+			"path":            routePath,
+			"method":          httpMethod,
+			"nodeKey":         nodeKey,
+			"protocol":        "HTTP",
+			"framework":       "nestjs",
+			"detectionSource": "decorator",
+			"scope":           d.scopeCtx.Scope,
+			"scopeId":         d.scopeCtx.ScopeID,
+		}
+
+		routeID, err := d.client.MergeNode(ctx, []string{"APIRoute"},
+			map[string]any{"nodeKey": nodeKey, "scopeId": d.scopeCtx.ScopeID}, routeProps)
+		if err != nil {
+			fmt.Printf("Warning: failed to create decorator APIRoute for %s: %v\n", name, err)
+			continue
+		}
+
+		_, err = d.client.MergeRelationship(ctx, fnID, routeID, string(models.ExposesAPIRel), nil, nil)
+		if err != nil {
+			fmt.Printf("Warning: failed to create EXPOSES_API for %s: %v\n", name, err)
+			continue
+		}
+		created++
+	}
+
+	fmt.Printf("  Strategy 4: created %d decorator-detected APIRoute nodes with EXPOSES_API edges\n", created)
+	return created, nil
+}
+
+// setBoolProperty sets a single boolean property on the node identified by
+// elementId, scoped to this detector's service — reusing the exact property
+// names semantic_edges.go already established (consumesBroker,
+// scheduledTask) rather than inventing new ones.
+func (d *APISurfaceDetector) setBoolProperty(ctx context.Context, fnID, prop string) error {
+	cypher := fmt.Sprintf(`
+		MATCH (fn) WHERE elementId(fn) = $fnId
+		SET fn.%s = true
+	`, prop)
+	_, err := d.client.ExecuteQuery(ctx, cypher, map[string]any{"fnId": fnID})
+	return err
+}
+
+// asAnySlice normalizes a Neo4j list-property value (surfaced through the
+// driver as []any, or nil/absent) to a non-nil []any so callers can range
+// over it unconditionally.
+func asAnySlice(v any) []any {
+	if s, ok := v.([]any); ok {
+		return s
+	}
+	return nil
 }
 
 // inferProtocolFromTypes examines external parameter types to infer the

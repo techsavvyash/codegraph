@@ -70,6 +70,12 @@ type genericFuncInfo struct {
 	StartByte int
 	EndByte   int
 	Mapped    bool
+	// Decorators are this function's own decorator annotations (TypeScript/
+	// TSX only), encoded "Name" or "Name:arg" — see encodeDecorators.
+	Decorators []string
+	// ClassDecorators are the enclosing class's decorator annotations, same
+	// encoding, resolved from the same position used for InnermostAt.
+	ClassDecorators []string
 }
 
 // fileStructure parses filePath (resolved against projectPath) and returns
@@ -120,6 +126,51 @@ func applyStructureRanges(funcs []genericFuncInfo, fs *structure.FileStructure) 
 		funcs[i].EndByte = fn.EndByte
 		funcs[i].Mapped = true
 	}
+}
+
+// applyDecorators resolves each function's own decorator annotations and its
+// enclosing class's decorator annotations from the file's tree-sitter
+// structure (TypeScript/TSX only — fs.Functions[i].Decorators and
+// fs.ClassDecoratorsAt are both nil/empty for every other grammar). Position
+// lookups use the SAME SCIP identifier position as applyStructureRanges'
+// InnermostAt call, so this must run against the same fs and after (or
+// alongside) it — order relative to applyStructureRanges does not matter
+// since the two write disjoint fields, but both need a non-nil fs to do
+// anything.
+//
+// Pure function, no I/O — testable without Neo4j.
+func applyDecorators(funcs []genericFuncInfo, fs *structure.FileStructure) {
+	if fs == nil {
+		return
+	}
+	for i := range funcs {
+		idx, ok := fs.InnermostAt(funcs[i].StartLine, funcs[i].StartCol)
+		if ok {
+			funcs[i].Decorators = encodeDecorators(fs.Functions[idx].Decorators)
+		}
+		funcs[i].ClassDecorators = encodeDecorators(fs.ClassDecoratorsAt(funcs[i].StartLine, funcs[i].StartCol))
+	}
+}
+
+// encodeDecorators renders structure.DecoratorInfo values as "Name" (empty
+// arg) or "Name:arg" strings for storage as a Neo4j string-list property:
+// ':' separates name from arg, split on the FIRST ':' only. This means an arg
+// containing ':' is not escaped and round-trips intact (parseDecoratorStrings
+// splits on the first ':' too) — documented known limitation, see
+// parseDecoratorStrings in api_surface.go.
+func encodeDecorators(decorators []structure.DecoratorInfo) []string {
+	if len(decorators) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(decorators))
+	for _, d := range decorators {
+		if d.Arg == "" {
+			out = append(out, d.Name)
+		} else {
+			out = append(out, d.Name+":"+d.Arg)
+		}
+	}
+	return out
 }
 
 // BuildCallGraph infers CALLS relationships for all source files in the service.
@@ -199,6 +250,11 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 	// a stub, never a guessed range.
 	fs := cg.fileStructure(filePath)
 	applyStructureRanges(funcs, fs)
+
+	// Step 2b: Resolve each function's own decorators and its enclosing
+	// class's decorators (TypeScript/TSX only; no-op elsewhere) from the SAME
+	// parsed structure — no second parse of the file.
+	applyDecorators(funcs, fs)
 
 	// Step 3: Write the resolved ranges to Neo4j so downstream tools have
 	// body ranges.
@@ -372,6 +428,11 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 // clobber whatever byte offsets were already stored for the node.
 // rangeSource records provenance per RFC-005 I4: "treesitter" for exact
 // spans from the structure pass, "scip-declaration" for fallback stubs.
+//
+// Also stamps fn.decorators / fn.classDecorators (RFC-005 decorator-route
+// detection) — string-list properties, only SET when non-empty so a
+// function with no decorators never gets an empty-list property written
+// over whatever (nothing) was already there.
 func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs []genericFuncInfo) error {
 	updates := make([]map[string]any, len(funcs))
 	for i, f := range funcs {
@@ -380,12 +441,14 @@ func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs [
 			rangeSource = "treesitter"
 		}
 		updates[i] = map[string]any{
-			"id":          f.ID,
-			"startLine":   f.StartLine,
-			"endLine":     f.EndLine,
-			"startByte":   f.StartByte,
-			"endByte":     f.EndByte,
-			"rangeSource": rangeSource,
+			"id":              f.ID,
+			"startLine":       f.StartLine,
+			"endLine":         f.EndLine,
+			"startByte":       f.StartByte,
+			"endByte":         f.EndByte,
+			"rangeSource":     rangeSource,
+			"decorators":      f.Decorators,
+			"classDecorators": f.ClassDecorators,
 		}
 	}
 	cypher := `
@@ -396,6 +459,12 @@ func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs [
 		    fn.rangeSource = u.rangeSource
 		FOREACH (ignoreMe IN CASE WHEN u.startByte >= 0 THEN [1] ELSE [] END |
 			SET fn.startByte = u.startByte, fn.endByte = u.endByte
+		)
+		FOREACH (ignoreMe IN CASE WHEN size(u.decorators) > 0 THEN [1] ELSE [] END |
+			SET fn.decorators = u.decorators
+		)
+		FOREACH (ignoreMe IN CASE WHEN size(u.classDecorators) > 0 THEN [1] ELSE [] END |
+			SET fn.classDecorators = u.classDecorators
 		)
 	`
 	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})

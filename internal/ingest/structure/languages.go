@@ -27,6 +27,11 @@ type Language struct {
 	// declaratorKinds are the node kinds that bind an anonymous function
 	// to a variable (const g = () => …); see collect's widening step.
 	declaratorKinds map[string]bool
+	// hasDecorators reports whether the grammar has decorator syntax
+	// (`@Foo(...)`) at all. Only TypeScript/TSX set this: plain JavaScript's
+	// stable grammar has no `decorator` node kind, so gating avoids a wasted
+	// walk over every class/method in JS files where it can never match.
+	hasDecorators bool
 }
 
 // Name returns the registry name ("typescript", "python", …).
@@ -39,11 +44,11 @@ var jsDeclarators = map[string]bool{"variable_declarator": true, "assignment_exp
 var registry = map[string]func() *Language{
 	"typescript": func() *Language {
 		return &Language{name: "typescript", ts: sitter.NewLanguage(tsts.LanguageTypescript()),
-			functionKinds: jsFunctionKinds(), declaratorKinds: jsDeclarators}
+			functionKinds: jsFunctionKinds(), declaratorKinds: jsDeclarators, hasDecorators: true}
 	},
 	"tsx": func() *Language {
 		return &Language{name: "tsx", ts: sitter.NewLanguage(tsts.LanguageTSX()),
-			functionKinds: jsFunctionKinds(), declaratorKinds: jsDeclarators}
+			functionKinds: jsFunctionKinds(), declaratorKinds: jsDeclarators, hasDecorators: true}
 	},
 	"javascript": func() *Language {
 		return &Language{name: "javascript", ts: sitter.NewLanguage(tsjs.Language()),

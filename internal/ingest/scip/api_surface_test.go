@@ -107,6 +107,84 @@ func TestBuildStructuralPath(t *testing.T) {
 	}
 }
 
+func TestJoinPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		prefix    string
+		methodArg string
+		want      string
+	}{
+		{"prefix and param", "users", ":id", "/users/:id"},
+		{"empty prefix", "", "path", "/path"},
+		{"both empty", "", "", "/"},
+		{"empty method arg", "users", "", "/users"},
+		{"already-slashed both sides", "/users/", "/:id", "/users/:id"},
+		{"leading slash on prefix only", "/users", "list", "/users/list"},
+		{"trailing slash on method arg only", "users", "list/", "/users/list"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinPaths(tt.prefix, tt.methodArg)
+			if got != tt.want {
+				t.Errorf("joinPaths(%q, %q) = %q, want %q", tt.prefix, tt.methodArg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseDecoratorStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  []any
+		want []decoratedName
+	}{
+		{"empty", nil, []decoratedName{}},
+		{
+			name: "no-arg decorator",
+			raw:  []any{"Injectable"},
+			want: []decoratedName{{Name: "Injectable"}},
+		},
+		{
+			name: "decorator with arg",
+			raw:  []any{"Get:id"},
+			want: []decoratedName{{Name: "Get", Arg: "id"}},
+		},
+		{
+			name: "route param arg (leading colon)",
+			raw:  []any{"Get::id"},
+			want: []decoratedName{{Name: "Get", Arg: ":id"}},
+		},
+		{
+			name: "multiple decorators",
+			raw:  []any{"UseGuards", "Post:create"},
+			want: []decoratedName{{Name: "UseGuards"}, {Name: "Post", Arg: "create"}},
+		},
+		{
+			name: "non-string entries skipped",
+			raw:  []any{"Get:id", 42, nil, ""},
+			want: []decoratedName{{Name: "Get", Arg: "id"}},
+		},
+		{
+			name: "arg containing colon round-trips whole (documented limitation)",
+			raw:  []any{"Cron:0 0 * * *"},
+			want: []decoratedName{{Name: "Cron", Arg: "0 0 * * *"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDecoratorStrings(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseDecoratorStrings(%v) = %+v, want %+v", tt.raw, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("parseDecoratorStrings(%v)[%d] = %+v, want %+v", tt.raw, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestResolveTypeName(t *testing.T) {
 	// Test that resolveTypeName works through parseFuncRanges by parsing
 	// a small Go file with known parameter types.

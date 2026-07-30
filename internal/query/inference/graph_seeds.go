@@ -171,6 +171,9 @@ func (f *GraphSeedFinder) FindSeeds(ctx context.Context) ([]GraphSeed, error) {
 // Sub-priority within Tier 1 is based on detection confidence:
 //   - Both external-params + cross-pkg: priority 100
 //   - External-params only: priority 95
+//   - Decorator-detected (RFC-005: NestJS @Get/@Post/etc. routes SCIP can't
+//     see via CALLS edges): priority 95 — a definitive framework signal,
+//     comparable confidence to explicit external-params typing
 //   - Cross-pkg only: priority 90
 //   - Legacy framework-detected: priority 85
 func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed, error) {
@@ -202,17 +205,8 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 
 		hasExternal, _ := m["hasExternal"].(bool)
 		isCrossPkg, _ := m["isCrossPkg"].(bool)
-
-		// Sub-priority based on detection confidence.
-		priority := 85 // legacy framework-detected fallback
-		switch {
-		case hasExternal && isCrossPkg:
-			priority = 100
-		case hasExternal:
-			priority = 95
-		case isCrossPkg:
-			priority = 90
-		}
+		detectionSource := strValMap(m, "detectionSource")
+		priority := apiExposedPriority(hasExternal, isCrossPkg, detectionSource)
 
 		seeds = append(seeds, GraphSeed{
 			NodeKey:  nodeKey,
@@ -224,6 +218,32 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 		})
 	}
 	return seeds, nil
+}
+
+// apiExposedPriority computes the Tier 1 sub-priority for one EXPOSES_API
+// seed from its detection signals:
+//   - Both external-params + cross-pkg: 100
+//   - External-params only: 95
+//   - Decorator-detected (RFC-005): 95 — a definitive framework signal
+//     (NestJS @Get/@Post/etc.), comparable confidence to explicit
+//     external-params typing, ranked above the bare cross-pkg-target
+//     heuristic
+//   - Cross-pkg only: 90
+//   - None of the above (legacy framework-detected route synthesis): 85
+//
+// Pure function, no I/O — testable without Neo4j.
+func apiExposedPriority(hasExternal, isCrossPkg bool, detectionSource string) int {
+	switch {
+	case hasExternal && isCrossPkg:
+		return 100
+	case hasExternal:
+		return 95
+	case isCrossPkg:
+		return 90
+	case detectionSource == "decorator":
+		return 95
+	}
+	return 85
 }
 
 // findInterfaceImplSeeds returns functions/methods that implement an interface
