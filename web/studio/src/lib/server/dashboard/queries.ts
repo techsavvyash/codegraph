@@ -121,12 +121,34 @@ export interface FlowsPerServiceRow {
   flows: number
 }
 
+// Scoped to 'main': integration-test runs have leaked itest-* scoped Flow
+// nodes into the dev graph before, silently inflating per-service counts.
 export const FLOWS_PER_SERVICE_QUERY = `
 MATCH (f:Flow)
+WHERE f.scopeId = 'main'
 WITH f.entrypointKey AS k
 MATCH (n:Function|Method)
 WHERE n.nodeKey = k
 RETURN n.serviceName AS svc, count(*) AS flows
+`
+
+export interface EntryCandidatesPerServiceRow {
+  svc: string | null
+  c: number
+}
+
+// Detectable flow entry-point candidates per service: the tier-3
+// (exported topological root) shape from GraphSeedFinder. Used to make the
+// zero-flows health flag honest — a service with candidates but no flows is
+// an err (generation failed/starved); a service with none is just untraceable.
+export const ENTRY_CANDIDATES_PER_SERVICE_QUERY = `
+MATCH (fn)
+WHERE (fn:Function OR fn:Method)
+  AND coalesce(fn.isExported, false) = true
+  AND coalesce(fn.inDegree, 0) = 0
+  AND coalesce(fn.outDegree, 0) > 0
+  AND coalesce(fn.isTestFunction, false) = false
+RETURN fn.serviceName AS svc, count(*) AS c
 `
 
 export interface ApiRoutesPerServiceRow {

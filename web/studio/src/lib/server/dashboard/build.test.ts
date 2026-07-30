@@ -29,6 +29,7 @@ function fixture(overrides: Partial<RawDashboardRows> = {}): RawDashboardRows {
     mentionsPerServiceFamily: [],
     semanticState: [],
     flowsPerService: [],
+    entryCandidatesPerService: [],
     apiRoutesPerService: [],
     callHubs: [],
     recentDocLinks: [],
@@ -140,18 +141,51 @@ describe('buildDashboard', () => {
     expect(result.health.find((h) => h.code === 'zero-flows')).toBeUndefined()
   })
 
-  it('flags a code-only service with zero flows as an err', () => {
+  it('flags zero flows as err only when entry-point candidates exist', () => {
     const services: ServiceRow[] = [
-      { name: 'no-entrypoints', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+      { name: 'starved', scopeId: 'main', language: 'typescript', version: null, repositoryUrl: null, packageName: null }
     ]
-    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'no-entrypoints', c: 12 }]
-    const result = buildDashboard(fixture({ services, nodesByLabel }), META)
+    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'starved', c: 12 }]
+    const entryCandidatesPerService = [{ svc: 'starved', c: 3 }]
+    const result = buildDashboard(fixture({ services, nodesByLabel, entryCandidatesPerService }), META)
 
     const flag = result.health.find((h) => h.code === 'zero-flows')
     expect(flag).toBeDefined()
     expect(flag!.severity).toBe('err')
-    expect(flag!.text).toContain('no-entrypoints')
-    expect(flag!.text).toContain('0 flows generated')
+    expect(flag!.text).toContain('starved')
+    expect(flag!.text).toContain('3 entry-point candidate(s)')
+    expect(flag!.text).toContain('query flows --generate --service="starved"')
+    expect(result.health.find((h) => h.code === 'no-entry-points')).toBeUndefined()
+  })
+
+  it('flags zero flows as err when API routes exist but no root candidates', () => {
+    const services: ServiceRow[] = [
+      { name: 'api-svc', scopeId: 'main', language: 'go', version: null, repositoryUrl: null, packageName: null }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Method', svc: 'api-svc', c: 8 }]
+    const apiRoutesPerService: ApiRoutesPerServiceRow[] = [{ svc: 'api-svc', c: 4 }]
+    const result = buildDashboard(fixture({ services, nodesByLabel, apiRoutesPerService }), META)
+
+    const flag = result.health.find((h) => h.code === 'zero-flows')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('err')
+    expect(flag!.text).toContain('4 API route(s)')
+  })
+
+  it('downgrades zero flows to a warn when nothing is traceable', () => {
+    const services: ServiceRow[] = [
+      { name: 'test-only', scopeId: 'main', language: 'typescript', version: null, repositoryUrl: null, packageName: null }
+    ]
+    // Functions exist but none qualify as entry candidates (e.g. all test functions).
+    const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'test-only', c: 5 }]
+    const result = buildDashboard(fixture({ services, nodesByLabel }), META)
+
+    expect(result.health.find((h) => h.code === 'zero-flows')).toBeUndefined()
+    const flag = result.health.find((h) => h.code === 'no-entry-points')
+    expect(flag).toBeDefined()
+    expect(flag!.severity).toBe('warn')
+    expect(flag!.text).toContain('test-only')
+    expect(flag!.text).toContain('no non-test entry points')
   })
 
   it('flags services sharing a repositoryUrl as a duplicate-repo warning', () => {
@@ -263,6 +297,7 @@ describe('buildDashboard', () => {
       }
     ]
     const nodesByLabel: NodesByLabelRow[] = [{ label: 'Function', svc: 'svc-a', c: 3 }]
+    const entryCandidatesPerService = [{ svc: 'svc-a', c: 1 }]
     const semanticState: SemanticStateRow[] = [
       {
         svc: 'svc-a',
@@ -274,7 +309,10 @@ describe('buildDashboard', () => {
         threshold: null
       }
     ]
-    const result = buildDashboard(fixture({ services, nodesByLabel, semanticState }), META)
+    const result = buildDashboard(
+      fixture({ services, nodesByLabel, entryCandidatesPerService, semanticState }),
+      META
+    )
 
     const severities = result.health.map((h) => h.severity)
     const errIdx = severities.indexOf('err')

@@ -8,6 +8,7 @@ import {
   MENTIONS_PER_SERVICE_FAMILY_QUERY,
   SEMANTIC_STATE_QUERY,
   FLOWS_PER_SERVICE_QUERY,
+  ENTRY_CANDIDATES_PER_SERVICE_QUERY,
   API_ROUTES_PER_SERVICE_QUERY,
   CALL_HUBS_QUERY,
   RECENT_DOC_LINKS_QUERY,
@@ -18,6 +19,7 @@ import {
   type MentionsPerServiceFamilyRow,
   type SemanticStateRow,
   type FlowsPerServiceRow,
+  type EntryCandidatesPerServiceRow,
   type ApiRoutesPerServiceRow,
   type CallHubRow,
   type RecentDocLinkRow
@@ -77,6 +79,7 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     mentionsPerServiceFamily,
     semanticState,
     flowsPerService,
+    entryCandidatesPerService,
     apiRoutesPerService,
     callHubs,
     recentDocLinks
@@ -88,6 +91,7 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     runQuery<MentionsPerServiceFamilyRow>(client, MENTIONS_PER_SERVICE_FAMILY_QUERY, warnings),
     runQuery<SemanticStateRow>(client, SEMANTIC_STATE_QUERY, warnings),
     runQuery<FlowsPerServiceRow>(client, FLOWS_PER_SERVICE_QUERY, warnings),
+    runQuery<EntryCandidatesPerServiceRow>(client, ENTRY_CANDIDATES_PER_SERVICE_QUERY, warnings),
     runQuery<ApiRoutesPerServiceRow>(client, API_ROUTES_PER_SERVICE_QUERY, warnings),
     runQuery<CallHubRow>(client, CALL_HUBS_QUERY, warnings),
     runQuery<RecentDocLinkRow>(client, RECENT_DOC_LINKS_QUERY, warnings)
@@ -101,6 +105,7 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     mentionsPerServiceFamily,
     semanticState,
     flowsPerService,
+    entryCandidatesPerService,
     apiRoutesPerService,
     callHubs,
     recentDocLinks

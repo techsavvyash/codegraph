@@ -12,6 +12,7 @@ import type {
   CallHubRow,
   CallsPerServiceRow,
   EdgesByTypeRow,
+  EntryCandidatesPerServiceRow,
   FlowsPerServiceRow,
   MentionsPerServiceFamilyRow,
   NodesByLabelRow,
@@ -29,6 +30,7 @@ export interface RawDashboardRows {
   mentionsPerServiceFamily: MentionsPerServiceFamilyRow[]
   semanticState: SemanticStateRow[]
   flowsPerService: FlowsPerServiceRow[]
+  entryCandidatesPerService: EntryCandidatesPerServiceRow[]
   apiRoutesPerService: ApiRoutesPerServiceRow[]
   callHubs: CallHubRow[]
   recentDocLinks: RecentDocLinkRow[]
@@ -128,6 +130,12 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
     apiRoutesPerService.set(row.svc, (apiRoutesPerService.get(row.svc) ?? 0) + row.c)
   }
 
+  const entryCandidatesPerService = new Map<string, number>()
+  for (const row of raw.entryCandidatesPerService) {
+    if (row.svc === null) continue
+    entryCandidatesPerService.set(row.svc, (entryCandidatesPerService.get(row.svc) ?? 0) + row.c)
+  }
+
   // ---- service cards ----
   const services: ServiceCard[] = serviceOrder.map((s) => {
     const nodesByLabel = nodesByLabelPerService.get(s.name) ?? {}
@@ -176,14 +184,27 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
   // ---- health flags ----
   const health: HealthFlag[] = []
 
-  // err: zero-flows — services with code (Function/Method) but no flows
+  // Services with code (Function/Method) but no flows. Two distinct situations:
+  //   err  zero-flows — entry-point candidates exist, so flow generation failed
+  //        or was starved (fixable: regenerate).
+  //   warn no-entry-points — nothing detectable to trace (e.g. a service whose
+  //        only functions are test functions); accurate, not actionable.
   for (const s of services) {
     const codeCount = (s.nodesByLabel['Function'] ?? 0) + (s.nodesByLabel['Method'] ?? 0)
-    if (codeCount > 0 && s.flows === 0) {
+    if (codeCount === 0 || s.flows > 0) continue
+    const candidates = entryCandidatesPerService.get(s.name) ?? 0
+    if (candidates > 0 || s.apiRoutes > 0) {
+      const detected = candidates > 0 ? `${candidates} entry-point candidate(s)` : `${s.apiRoutes} API route(s)`
       health.push({
         severity: 'err',
         code: 'zero-flows',
-        text: `${s.name}: 0 flows generated — no entry points detected`
+        text: `${s.name}: ${detected} but 0 flows persisted — run codegraph query flows --generate --service="${s.name}"`
+      })
+    } else {
+      health.push({
+        severity: 'warn',
+        code: 'no-entry-points',
+        text: `${s.name}: no non-test entry points detected — nothing to trace into flows`
       })
     }
   }
