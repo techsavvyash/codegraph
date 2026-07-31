@@ -105,6 +105,11 @@ const (
 	LocalSymbol     SymbolKind = "Local"
 )
 
+// KindSourcePromotion is the SymbolInfo.KindSource value for kinds decided
+// by the declarator-bound-function promotion pass rather than the SCIP
+// descriptor.
+const KindSourcePromotion = "promotion"
+
 // SymbolScope represents the scope/visibility of a symbol
 type SymbolScope string
 
@@ -131,6 +136,11 @@ type SymbolInfo struct {
 	EndLine       int         `json:"endLine"`
 	StartColumn   int         `json:"startColumn"`
 	EndColumn     int         `json:"endColumn"`
+	// KindSource records how Kind was decided when it did not come straight
+	// from the SCIP descriptor — "promotion" marks declarator-bound functions
+	// upgraded by the tree-sitter pass (RFC-010 §4.3). Empty means
+	// descriptor-derived.
+	KindSource string `json:"kindSource,omitempty"`
 }
 
 // IsExported returns true if the symbol is exported (public)

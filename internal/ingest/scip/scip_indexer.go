@@ -1145,6 +1145,9 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		props["isExported"] = si.computeIsExported(symbolInfo.DisplayName)
 		props["docstring"] = symbolInfo.Documentation
 		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
+		if symbolInfo.KindSource != "" {
+			props["kindSource"] = symbolInfo.KindSource
+		}
 	case "Class":
 		props["fqn"] = symbolInfo.Symbol.String()
 		props["accessModifier"] = "public"
