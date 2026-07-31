@@ -118,9 +118,20 @@ func WalkProject(projectRoot string) ([]FileCensus, error) {
 
 		declared := 0
 		for _, fn := range fs.Functions {
-			if fn.Name != "" {
-				declared++
+			if fn.Name == "" {
+				continue
 			}
+			// Function-LOCAL named functions (a `const helper = () => {}`
+			// inside a method body) are SCIP local symbols, never graph
+			// nodes — counting them flagged real khaata files as partial
+			// dropouts (e.g. balance-sheet-export.service.ts: 2 methods +
+			// 1 method-local arrow read as "3 declared, 2 indexed"). Only
+			// top-level and class-member functions (ParentIndex == -1;
+			// classes don't count as function parents) are census-countable.
+			if fn.ParentIndex >= 0 {
+				continue
+			}
+			declared++
 		}
 
 		out = append(out, FileCensus{

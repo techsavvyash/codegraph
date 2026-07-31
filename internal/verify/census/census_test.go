@@ -122,10 +122,15 @@ func TestCompareFiles(t *testing.T) {
 	graphCounts := map[string]int{
 		"src/a.ts": 3, // pass: exact match
 		"src/b.ts": 1, // warn: partial dropout (1 < 2)
-		// src/c.ts: absent entirely -> fail: whole-file dropout
+		// src/c.ts: File node exists, zero functions -> fail: whole-file dropout
+	}
+	knownFiles := map[string]bool{
+		"src/a.ts": true,
+		"src/b.ts": true,
+		"src/c.ts": true,
 	}
 
-	statuses := CompareFiles(declared, graphCounts)
+	statuses := CompareFiles(declared, graphCounts, knownFiles)
 	require.Len(t, statuses, 3, "src/empty.ts (0 declared) must be excluded")
 
 	byPath := make(map[string]FileStatus)
@@ -139,13 +144,40 @@ func TestCompareFiles(t *testing.T) {
 	assert.Equal(t, 0, byPath["src/c.ts"].Indexed)
 }
 
+func TestCompareFiles_UnindexedFileIsWarnNotFail(t *testing.T) {
+	// A file with declarations but NO File node was never seen by the
+	// indexer — usually the project's own excludes (khaata's tsconfig
+	// excludes **/*.spec.ts and api/). That's a warn to verify, not a
+	// whole-file dropout fail.
+	declared := []FileCensus{{RelPath: "src/x.spec.ts", Declared: 10}}
+	graphCounts := map[string]int{}
+	knownFiles := map[string]bool{} // not in graph at all
+
+	statuses := CompareFiles(declared, graphCounts, knownFiles)
+	require.Len(t, statuses, 1)
+	assert.Equal(t, verify.StatusWarn, statuses[0].Status)
+	assert.False(t, statuses[0].InGraph)
+
+	report := BuildReport("svc", statuses, 5)
+	require.Len(t, report.Checks, 4)
+	assert.Equal(t, verify.StatusPass, report.Checks[1].Status, "whole-file dropouts must stay clean")
+	assert.Equal(t, int64(0), report.Checks[1].Count)
+	notIndexed := report.Checks[3]
+	assert.Equal(t, "census: files not indexed", notIndexed.Name)
+	assert.Equal(t, verify.StatusWarn, notIndexed.Status)
+	assert.Equal(t, int64(1), notIndexed.Count)
+	require.Len(t, notIndexed.Samples, 1)
+	assert.Contains(t, notIndexed.Samples[0], "src/x.spec.ts")
+	assert.Contains(t, notIndexed.Samples[0], "no File node")
+}
+
 func TestCompareFiles_ExtraGraphNodesStillPass(t *testing.T) {
 	// More graph nodes than tree-sitter found (promotions, overloads
 	// counted as separate nodes, etc.) is fine — never a failure signal.
 	declared := []FileCensus{{RelPath: "src/a.ts", Declared: 2}}
 	graphCounts := map[string]int{"src/a.ts": 7}
 
-	statuses := CompareFiles(declared, graphCounts)
+	statuses := CompareFiles(declared, graphCounts, map[string]bool{"src/a.ts": true})
 	require.Len(t, statuses, 1)
 	assert.Equal(t, verify.StatusPass, statuses[0].Status)
 }
@@ -158,7 +190,7 @@ func TestBuildReport(t *testing.T) {
 	}
 
 	report := BuildReport("my-service", statuses, 5)
-	require.Len(t, report.Checks, 3)
+	require.Len(t, report.Checks, 4)
 
 	summary := report.Checks[0]
 	assert.Equal(t, verify.StatusFail, summary.Status, "any fail promotes the summary check to fail")
@@ -185,7 +217,7 @@ func TestBuildReport_AllPass(t *testing.T) {
 	}
 	report := BuildReport("svc", statuses, 5)
 	pass, warn, fail := report.Counts()
-	assert.Equal(t, 3, pass)
+	assert.Equal(t, 4, pass)
 	assert.Equal(t, 0, warn)
 	assert.Equal(t, 0, fail)
 }

@@ -50,7 +50,12 @@ func Run(ctx context.Context, client *neo4j.Client, opts Options) (*verify.Repor
 		return nil, fmt.Errorf("census: fetch graph counts: %w", err)
 	}
 
-	statuses := CompareFiles(declared, graphCounts)
+	knownFiles, err := fetchGraphFilePaths(ctx, client, opts.ServiceName, scopeID)
+	if err != nil {
+		return nil, fmt.Errorf("census: fetch graph file paths: %w", err)
+	}
+
+	statuses := CompareFiles(declared, graphCounts, knownFiles)
 
 	scope := opts.ServiceName
 	report := BuildReport(scope, statuses, opts.SampleLimit)
@@ -99,4 +104,32 @@ func fetchGraphDeclarationCounts(ctx context.Context, client *neo4j.Client, serv
 		}
 	}
 	return counts, nil
+}
+
+// fetchGraphFilePaths returns the set of filePaths that exist as File nodes
+// for the service — the basis for distinguishing "indexer saw the file and
+// produced nothing" (whole-file dropout, fail) from "indexer never saw the
+// file" (project exclusion, warn).
+func fetchGraphFilePaths(ctx context.Context, client *neo4j.Client, serviceName, scopeID string) (map[string]bool, error) {
+	query := `
+		MATCH (f:File)
+		WHERE f.serviceName = $serviceName AND f.scopeId = $scopeId
+		RETURN f.filePath AS filePath
+	`
+	records, err := client.ExecuteQuery(ctx, query, map[string]any{
+		"serviceName": serviceName,
+		"scopeId":     scopeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	known := make(map[string]bool, len(records))
+	for _, rec := range records {
+		m := rec.AsMap()
+		if filePath, _ := m["filePath"].(string); filePath != "" {
+			known[filePath] = true
+		}
+	}
+	return known, nil
 }
