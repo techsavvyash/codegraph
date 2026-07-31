@@ -582,6 +582,27 @@ func TestFlows_EmptyResultReturnsValidJSON(t *testing.T) {
 	// Empty, never-used scope: guaranteed to produce zero discovery-mode flows.
 	scopeID := "itest-flows-empty-scope-does-not-exist"
 	_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID})
+	// Discovery over a PR-style scope falls back to main-scope functions by
+	// design, so this handler call persists Flow nodes stamped with scopeID
+	// even though the response reports zero — without this cleanup every run
+	// leaked ~35 Flow nodes into the dev graph (caught by the post-index
+	// scope-hygiene integrity check). Fresh client: the outer one is
+	// defer-closed before t.Cleanup callbacks fire.
+	t.Cleanup(func() {
+		cctx := context.Background()
+		cclient, err := neo4j.NewClient(neo4j.Config{
+			URI: getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"), Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+			Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"), Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+		})
+		if err != nil {
+			t.Errorf("cleanup: connect: %v", err)
+			return
+		}
+		defer cclient.Close(cctx)
+		if _, err := cclient.ExecuteQuery(cctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID}); err != nil {
+			t.Errorf("cleanup failed (leaks %s residue): %v", scopeID, err)
+		}
+	})
 
 	workspaceRoot, _ := os.Getwd()
 	server := &CodeGraphMCPServer{

@@ -31,14 +31,22 @@ func TestCallGraphSameNameMethodsDoNotClobber(t *testing.T) {
 	}
 	client, err := neo4j.NewClient(*config)
 	require.NoError(t, err)
-	defer client.Close(context.Background())
+	// Close via t.Cleanup, registered BEFORE the data cleanup: cleanups run
+	// LIFO, so the delete still has a live client. A `defer client.Close`
+	// here would fire before t.Cleanup callbacks and the delete would
+	// silently no-op against a closed client — that exact bug leaked this
+	// fixture's whole subgraph and was caught by the post-index
+	// scope-hygiene integrity check (RFC-013 L1).
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
 
 	ctx := context.Background()
 	scopeID := "itest-samename-go"
 
 	cleanup := func() {
-		_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scope DETACH DELETE n`,
-			map[string]any{"scope": scopeID})
+		if _, err := client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scope DETACH DELETE n`,
+			map[string]any{"scope": scopeID}); err != nil {
+			t.Errorf("scope cleanup failed (leaks %s residue): %v", scopeID, err)
+		}
 	}
 	cleanup()
 	t.Cleanup(cleanup)

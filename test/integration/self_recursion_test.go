@@ -28,15 +28,20 @@ func TestSelfRecursionSurvivesAndInDegreeExcludesSelfLoops(t *testing.T) {
 	}
 	client, err := neo4j.NewClient(*config)
 	require.NoError(t, err)
-	defer client.Close(context.Background())
+	// Close registered BEFORE the data cleanup (t.Cleanup is LIFO) so the
+	// delete runs on a live client — see call_graph_samename_test.go for the
+	// leak this ordering prevents.
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
 
 	ctx := context.Background()
 	scopeID := "itest-selfrecursion-go"
 	serviceName := "itest-selfrecursion-go-service"
 
 	cleanup := func() {
-		_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scope DETACH DELETE n`,
-			map[string]any{"scope": scopeID})
+		if _, err := client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scope DETACH DELETE n`,
+			map[string]any{"scope": scopeID}); err != nil {
+			t.Errorf("scope cleanup failed (leaks %s residue): %v", scopeID, err)
+		}
 	}
 	cleanup()
 	t.Cleanup(cleanup)
