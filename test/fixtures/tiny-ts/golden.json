@@ -149,6 +149,7 @@
         "inDegree": 1,
         "isExported": true,
         "isTestFunction": false,
+        "kindSource": "promotion",
         "name": "logOne",
         "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
         "outDegree": 2,

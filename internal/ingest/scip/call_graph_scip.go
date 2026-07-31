@@ -129,6 +129,25 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 // ComputeDegreeProperties. Extracted as a pure function so tests can assert
 // the SET target is constrained to a single service (via the bound
 // $serviceName parameter) without a live Neo4j connection.
+//
+// inDegree excludes self-loops (caller = fn): now that
+// collapseToMinLinePerPair keeps self-recursive CALLS edges (RFC-013),
+// counting a function as its own caller would make every recursive
+// function's inDegree >= 1 purely from calling itself, defeating every
+// downstream "inDegree = 0 means no external caller" consumer (dead-code /
+// entry-point / topological-root detection in
+// internal/query/inference/graph_seeds.go and elsewhere) — a recursive
+// function with no OTHER caller must still read as unreachable from
+// outside.
+//
+// outDegree deliberately does NOT exclude self-loops: its purpose is "does
+// this function have any real fan-out/behavior" (the topological-root
+// filter's outDegree>0 check exists to exclude no-op stubs), and a
+// self-call is real behavior — a purely self-recursive function with no
+// external caller (e.g. a standalone factorial helper) should still read
+// as "does something" and qualify as a topological root, not get filtered
+// out as if it were a stub. Excluding self-loops from outDegree too would
+// make such a function invisible to tier-3 seed detection entirely.
 func scipDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	cypher := `
 		MATCH (fn)
@@ -138,6 +157,7 @@ func scipDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, 
 		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		  AND caller <> fn
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 		WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
@@ -170,7 +190,24 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 // byte-based source-code retrieval fail — the former resolved to the wrong
 // function, the latter returned only the ~15-character identifier span
 // instead of the function body.
+//
+// Requires exactly one range update per node ID. selectCallerCandidate
+// already guarantees this by construction (each funcRange resolves to at
+// most one candidate, one-to-one), but this is checked explicitly rather
+// than trusted implicitly: a second write to the same ID silently
+// corrupting the first is exactly the failure mode this whole fix exists to
+// eliminate, so a violation here is a programming error in the caller, not
+// a data condition to paper over — it errors instead of writing.
 func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, callers []callerInfo) error {
+	seen := make(map[string]bool, len(callers))
+	for _, c := range callers {
+		if seen[c.ID] {
+			return fmt.Errorf("updateFunctionBodyRanges: node %s would receive 2+ range updates in one batch — "+
+				"this indicates selectCallerCandidate's one-candidate-per-range invariant was violated upstream", c.ID)
+		}
+		seen[c.ID] = true
+	}
+
 	// rangeSource records provenance per RFC-005 I4 — these ranges come from
 	// the Go AST (exact), vs "treesitter"/"scip-declaration" in the generic
 	// builder.
@@ -278,29 +315,43 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		}
 	}
 
-	// Load graph node IDs for functions in this file, keyed by base name.
-	// We filter to only functions whose SCIP signature matches this file's
-	// Go package path, so cross-package references stored as Function nodes
-	// are excluded.
+	// Load graph node candidates for functions in this file, keyed by base
+	// name. We filter to only functions whose SCIP signature matches this
+	// file's Go package path, so cross-package references stored as
+	// Function nodes are excluded. Multiple candidates per name are
+	// expected (e.g. several types in the file each with a same-named
+	// method) and disambiguated below by definition-position containment,
+	// never by "last one wins".
 	graphNodes, err := cg.graphNodesByName(ctx, filePath)
 	if err != nil {
 		return 0, err
 	}
 
-	// Build callerInfo list: pair each AST func range with its graph ID.
+	// Build callerInfo list: pair each AST func range with its graph node,
+	// selected deterministically by definition-position containment
+	// (selectCallerCandidate). A funcRange with zero or 2+ matching
+	// candidates is skipped rather than guessed — see
+	// skippedAmbiguousRanges below — so a same-name collision never
+	// corrupts a node's stored body range or misattributes its calls.
 	var callers []callerInfo
+	skippedAmbiguousRanges := 0
 	for _, fr := range funcRanges {
 		// Use base name (strip receiver prefix like "SCIPIndexer.")
 		baseName := fr.Name
 		if idx := strings.LastIndex(baseName, "."); idx >= 0 {
 			baseName = baseName[idx+1:]
 		}
-		nodeID, ok := graphNodes[baseName]
+		candidates, ok := graphNodes[baseName]
 		if !ok {
 			continue
 		}
+		selected, ok := selectCallerCandidate(candidates, fr)
+		if !ok {
+			skippedAmbiguousRanges++
+			continue
+		}
 		callers = append(callers, callerInfo{
-			ID:           nodeID,
+			ID:           selected.ID,
 			StartLine:    fr.StartLine,
 			EndLine:      fr.EndLine,
 			StartByte:    fr.StartByte,
@@ -308,6 +359,10 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 			ParamTypes:   fr.ParamTypes,
 			ReceiverType: fr.ReceiverType,
 		})
+	}
+	if skippedAmbiguousRanges > 0 {
+		fmt.Printf("Debug: %s: skipped %d func range(s) with zero or 2+ matching graph node candidates (same-name disambiguation)\n",
+			filePath, skippedAmbiguousRanges)
 	}
 
 	if len(callers) == 0 {
@@ -477,11 +532,32 @@ func (cg *SCIPCallGraphBuilder) upgradeClosureVarsToFunction(ctx context.Context
 	return err
 }
 
-// graphNodesByName returns a map of base function name -> element ID for
-// functions in the given file whose SCIP signature matches the file's
-// Go package directory. This filters out cross-package reference nodes
-// that SCIP stores as Function nodes in the same filePath.
-func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath string) (map[string]string, error) {
+// graphNodeCandidate is one Function/Method node matching a base name in
+// graphNodesByName's result: its element ID plus the pristine SCIP
+// definition-occurrence line (the func/method name token's own line — NOT
+// the AST body range, which processFile overwrites later in the same run
+// via updateFunctionBodyRanges). DefLine is what disambiguates same-named
+// candidates: it is stamped once at initial SCIP ingestion
+// (scip_indexer.go's MergeNodesBatch(Definition), which always runs before
+// BuildCallGraph in the pipeline) and is therefore fresh and exact even on
+// a re-index of a graph a PRIOR run had already corrupted via the bug this
+// type exists to fix.
+type graphNodeCandidate struct {
+	ID      string
+	DefLine int
+}
+
+// graphNodesByName returns, for each base function/method name in the given
+// file, every matching Function/Method node (there can be more than one: Go
+// files routinely declare multiple methods sharing a bare name across
+// different receiver types, e.g. several stage structs each with a Run
+// method). Callers must disambiguate by definition position — see
+// selectCallerCandidate — rather than picking an arbitrary one.
+//
+// This filters out cross-package reference nodes that SCIP stores as
+// Function nodes in the same filePath, matching on the file's Go package
+// directory.
+func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath string) (map[string][]graphNodeCandidate, error) {
 	// Derive the Go package directory from the file path (e.g.,
 	// "pkg/indexer/static/scip_indexer.go" -> "pkg/indexer/static").
 	pkgDir := filepath.Dir(filePath)
@@ -505,7 +581,7 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 		  AND f.signature CONTAINS $pkgDir
 		  AND (f.signature ENDS WITH '().'
 		       OR (f.signature ENDS WITH '.' AND NOT f.signature CONTAINS '#'))
-		RETURN elementId(f) AS id, f.name AS name
+		RETURN elementId(f) AS id, f.name AS name, f.startLine AS defLine
 	`
 
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -518,17 +594,58 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 		return nil, err
 	}
 
-	m := make(map[string]string, len(results))
+	m := make(map[string][]graphNodeCandidate, len(results))
 	for _, rec := range results {
 		rm := rec.AsMap()
 		id := getStringFromMap(rm, "id")
 		name := getStringFromMap(rm, "name")
-		if id != "" && name != "" {
-			baseName := strings.TrimSuffix(name, "().")
-			m[baseName] = id
+		if id == "" || name == "" {
+			continue
 		}
+		baseName := strings.TrimSuffix(name, "().")
+		m[baseName] = append(m[baseName], graphNodeCandidate{
+			ID:      id,
+			DefLine: int(getInt64FromMap(rm, "defLine")),
+		})
 	}
 	return m, nil
+}
+
+// selectCallerCandidate disambiguates same-named graph node candidates for
+// one AST funcRange by exact definition-position containment: the winning
+// candidate is the one whose SCIP definition-occurrence line
+// (graphNodeCandidate.DefLine — the function name token's own line) falls
+// within [fr.DeclLine, fr.EndLine]. fr.DeclLine (not fr.StartLine, the body
+// open-brace line) is used as the lower bound because the definition
+// occurrence is the name token itself, which sits on the declaration line,
+// at or before the opening brace.
+//
+// Ambiguity is never silently resolved: zero matches (a node this AST range
+// doesn't correspond to at all — e.g. a stale/renamed declaration) or two-or
+// -more matches (defensive; should not happen given DefLine's precision, but
+// would indicate a deeper indexing inconsistency) both return ok=false, and
+// the caller must skip the range update for that funcRange rather than
+// guess. This is the fix for the same-name range-clobbering bug: previously
+// graphNodesByName collapsed every same-named candidate to a single
+// map entry (last Cypher row wins, nondeterministically), so multiple
+// distinct AST ranges all resolved to the same node and
+// updateFunctionBodyRanges stamped whichever range happened to be applied
+// last onto ALL of them — corrupting every same-named node but one, and, via
+// findEnclosingCaller, misattributing every call site in the corrupted
+// node's stolen range to the wrong function entirely.
+func selectCallerCandidate(candidates []graphNodeCandidate, fr funcRange) (graphNodeCandidate, bool) {
+	var match graphNodeCandidate
+	matches := 0
+	for _, c := range candidates {
+		if c.DefLine >= fr.DeclLine && c.DefLine <= fr.EndLine {
+			match = c
+			matches++
+		}
+	}
+	if matches != 1 {
+		return graphNodeCandidate{}, false
+	}
+	return match, true
 }
 
 // findEnclosingCaller finds the innermost callerInfo whose body range

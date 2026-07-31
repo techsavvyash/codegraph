@@ -56,11 +56,13 @@ func TestResolveGenericCallEdgesDeterministicMinLine(t *testing.T) {
 	}
 }
 
-// TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers verifies
-// the two skip conditions carried over from the original inline loop: a
-// reference with no enclosing caller is dropped, and a caller calling itself
-// (recursion) does not produce a self-loop edge.
-func TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
+// TestResolveGenericCallEdgesKeepsSelfCallsDropsUnresolvedCallers verifies a
+// reference with no enclosing caller is dropped, while a caller calling
+// itself (recursion) DOES produce a self-loop edge — shared
+// collapseToMinLinePerPair behavior with the Go builder, fixed together
+// under RFC-013 (the oracle found 0 self-loop CALLS edges anywhere in the
+// live graph, Go or otherwise).
+func TestResolveGenericCallEdgesKeepsSelfCallsDropsUnresolvedCallers(t *testing.T) {
 	funcs := []genericFuncInfo{
 		{ID: "main", StartLine: 1, EndLine: 10},
 	}
@@ -70,8 +72,11 @@ func TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.
 	}
 
 	edges := resolveGenericCallEdges(refs, funcs)
-	if len(edges) != 0 {
-		t.Fatalf("expected 0 edges (self-call and unresolved-caller rows both dropped), got %d: %+v", len(edges), edges)
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge (the self-call survives, the unresolved-caller row is dropped), got %d: %+v", len(edges), edges)
+	}
+	if edges[0].CallerID != "main" || edges[0].TargetID != "main" || edges[0].Line != 5 {
+		t.Errorf("unexpected self-call edge: %+v", edges[0])
 	}
 }
 

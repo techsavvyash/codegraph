@@ -364,7 +364,7 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  %s
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
-		WHERE caller:Function OR caller:Method
+		WHERE (caller:Function OR caller:Method) AND caller <> fn
 		WITH fn, head(collect(abstract.name)) AS abstractName, count(caller) AS callerCount
 		WHERE callerCount = 0
 		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
@@ -372,7 +372,8 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		       fn.serviceName AS serviceName,
 		       coalesce(abstractName, '') AS source,
 		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
-		       COUNT { (fn)-[:CALLS]->() } AS outDegree, COUNT { ()-[:CALLS]->(fn) } AS inDegree
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree,
+		       COUNT { (c)-[:CALLS]->(fn) WHERE c <> fn } AS inDegree
 		ORDER BY fn.name`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return "implements " + getStringFromRecord(m, "source") })
 
@@ -385,6 +386,7 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  %s
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+		WHERE caller <> fn
 		WITH fn, count(caller) AS callerCount
 		WHERE callerCount = 0
 		MATCH (fn)-[:CALLS]->(callee)
@@ -395,7 +397,8 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		       fn.serviceName AS serviceName,
 		       toString(calleeCount) AS source,
 		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
-		       COUNT { (fn)-[:CALLS]->() } AS outDegree, COUNT { ()-[:CALLS]->(fn) } AS inDegree
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree,
+		       COUNT { (c)-[:CALLS]->(fn) WHERE c <> fn } AS inDegree
 		ORDER BY calleeCount DESC, fn.name
 		LIMIT 50`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })

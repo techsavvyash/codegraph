@@ -104,9 +104,9 @@ func RunGoOracle(ctx context.Context, client *neo4j.Client, opts GoOracleOptions
 		fmt.Sprintf("graph edges excluded as abstract interface-method symbols: %d", join.Abstract),
 		fmt.Sprintf("graph edges excluded as unmappable symbols: %d", join.Unmappable),
 		fmt.Sprintf("stale-graph edges excluded (endpoint not yet indexed, both sides checked against graph node symbols): %d", cmp.StaleGraphEdges),
-		fmt.Sprintf("self-loop (caller==callee) edges among missing: %d of %d — the indexer's collapseToMinLinePerPair "+
-			"(internal/ingest/scip/call_graph_dedup.go:35) drops every self-call by design (`if t.CallerID == t.TargetID { continue }`), "+
-			"shared by both the Go and generic call-graph builders, so self-recursion is a systematic, language-wide recall gap, not noise",
+		fmt.Sprintf("self-loop (caller==callee) edges among missing: %d of %d — collapseToMinLinePerPair "+
+			"(internal/ingest/scip/call_graph_dedup.go) now KEEPS self-recursive CALLS edges (fixed post-RFC-013 "+
+			"diagnosis); a non-zero count here would indicate a regression, not expected behavior",
 			selfLoopMissing, len(cmp.Missing)),
 	)
 

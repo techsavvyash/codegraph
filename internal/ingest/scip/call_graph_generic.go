@@ -500,6 +500,11 @@ func (cg *GenericCallGraphBuilder) readFile(filePath string) ([]byte, bool) {
 // the SET target is constrained to a single service (via the bound
 // $serviceName parameter, walked through Service-CONTAINS->File-CONTAINS->fn)
 // without a live Neo4j connection.
+//
+// inDegree excludes self-loops (caller = fn); outDegree deliberately does
+// NOT — see scipDegreeQuery's doc comment (call_graph_scip.go) for the full
+// rationale on both halves of this asymmetry. Both builders share the fix
+// since both feed the same stored properties.
 func genericDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	// Scope to service functions only to avoid cross-service contamination.
 	cypher := `
@@ -509,6 +514,7 @@ func genericDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (strin
 		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		  AND caller <> fn
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 		WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')

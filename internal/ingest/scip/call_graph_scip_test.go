@@ -409,11 +409,13 @@ func TestResolveCallEdgesBranchMetadataFollowsWinningLine(t *testing.T) {
 	}
 }
 
-// TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers verifies the two
-// skip conditions carried over from the original inline loop: a reference
-// with no enclosing caller is dropped, and a caller calling itself
-// (recursion) does not produce a self-loop edge.
-func TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
+// TestResolveCallEdgesKeepsSelfCallsDropsUnresolvedCallers verifies a
+// reference with no enclosing caller is dropped, while a caller calling
+// itself (recursion) DOES produce a self-loop edge — the drop-self-calls
+// behavior this test used to assert was the exact bug RFC-013's oracle
+// caught (0 self-loop CALLS edges anywhere in the live graph); recursion
+// must be a real edge like any other call.
+func TestResolveCallEdgesKeepsSelfCallsDropsUnresolvedCallers(t *testing.T) {
 	callers := []callerInfo{
 		{ID: "main", StartLine: 1, EndLine: 10},
 	}
@@ -423,8 +425,11 @@ func TestResolveCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
 	}
 
 	edges := resolveCallEdges(rows, callers, nil)
-	if len(edges) != 0 {
-		t.Fatalf("expected 0 edges (self-call and unresolved-caller rows both dropped), got %d: %+v", len(edges), edges)
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge (the self-call survives, the unresolved-caller row is dropped), got %d: %+v", len(edges), edges)
+	}
+	if edges[0].CallerID != "main" || edges[0].TargetID != "main" || edges[0].Line != 5 {
+		t.Errorf("unexpected self-call edge: %+v", edges[0])
 	}
 }
 
@@ -440,5 +445,85 @@ func TestSCIPBuildCallGraphRequiresServiceName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "service name") {
 		t.Errorf("error should name the missing service name, got: %v", err)
+	}
+}
+
+// TestSelectCallerCandidateDisambiguatesByDefLine is the direct regression
+// test for the same-name range-clobbering bug (RFC-013): a file with two
+// same-named methods on different receivers must resolve each AST funcRange
+// to ITS OWN node, chosen by definition-line containment, never by
+// map-overwrite order.
+func TestSelectCallerCandidateDisambiguatesByDefLine(t *testing.T) {
+	// Mirrors the real-world shape found in internal/ingest/pipeline/stages.go:
+	// two structs, each with a method named "Run", declared in the same file.
+	// FooStage.Run: decl/def line 10, body lines 10-15.
+	// BarStage.Run: decl/def line 20, body lines 20-30.
+	candidates := []graphNodeCandidate{
+		{ID: "node-foo-run", DefLine: 10},
+		{ID: "node-bar-run", DefLine: 20},
+	}
+
+	fooRange := funcRange{Name: "FooStage.Run", DeclLine: 10, StartLine: 10, EndLine: 15}
+	barRange := funcRange{Name: "BarStage.Run", DeclLine: 20, StartLine: 20, EndLine: 30}
+
+	gotFoo, ok := selectCallerCandidate(candidates, fooRange)
+	if !ok {
+		t.Fatalf("FooStage.Run range should resolve unambiguously")
+	}
+	if gotFoo.ID != "node-foo-run" {
+		t.Errorf("FooStage.Run resolved to %s, want node-foo-run (its own node, not BarStage's)", gotFoo.ID)
+	}
+
+	gotBar, ok := selectCallerCandidate(candidates, barRange)
+	if !ok {
+		t.Fatalf("BarStage.Run range should resolve unambiguously")
+	}
+	if gotBar.ID != "node-bar-run" {
+		t.Errorf("BarStage.Run resolved to %s, want node-bar-run (its own node, not FooStage's)", gotBar.ID)
+	}
+}
+
+// TestSelectCallerCandidateSkipsAmbiguousOrUnmatchedRanges verifies the
+// "never guess" contract: zero matches and 2+ matches both return ok=false
+// rather than picking an arbitrary candidate.
+func TestSelectCallerCandidateSkipsAmbiguousOrUnmatchedRanges(t *testing.T) {
+	t.Run("zero matches", func(t *testing.T) {
+		candidates := []graphNodeCandidate{{ID: "node-a", DefLine: 100}}
+		fr := funcRange{Name: "Foo", DeclLine: 10, StartLine: 10, EndLine: 15}
+		if _, ok := selectCallerCandidate(candidates, fr); ok {
+			t.Fatal("expected ok=false when no candidate's DefLine falls in range")
+		}
+	})
+
+	t.Run("two matches", func(t *testing.T) {
+		// Defensive case: should not arise given DefLine's precision in
+		// practice, but the contract must hold regardless.
+		candidates := []graphNodeCandidate{
+			{ID: "node-a", DefLine: 12},
+			{ID: "node-b", DefLine: 13},
+		}
+		fr := funcRange{Name: "Foo", DeclLine: 10, StartLine: 10, EndLine: 15}
+		if _, ok := selectCallerCandidate(candidates, fr); ok {
+			t.Fatal("expected ok=false when 2+ candidates match — must not guess")
+		}
+	})
+}
+
+// TestUpdateFunctionBodyRangesRejectsDuplicateNodeID is the explicit
+// invariant guard requested alongside the disambiguation fix: a batch that
+// would write the same node ID twice must error rather than silently let
+// the second write clobber the first (the exact failure mode being fixed).
+func TestUpdateFunctionBodyRangesRejectsDuplicateNodeID(t *testing.T) {
+	cg := NewSCIPCallGraphBuilder(nil, t.TempDir())
+	callers := []callerInfo{
+		{ID: "dup-node", StartLine: 1, EndLine: 5},
+		{ID: "dup-node", StartLine: 10, EndLine: 20},
+	}
+	err := cg.updateFunctionBodyRanges(context.Background(), callers)
+	if err == nil {
+		t.Fatal("expected an error for a batch writing the same node ID twice, got nil")
+	}
+	if !strings.Contains(err.Error(), "2+ range updates") {
+		t.Errorf("error should describe the duplicate-write condition, got: %v", err)
 	}
 }
