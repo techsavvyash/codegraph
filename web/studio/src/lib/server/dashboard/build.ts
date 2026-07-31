@@ -14,6 +14,7 @@ import type {
   EdgesByTypeRow,
   EntryCandidatesPerServiceRow,
   FlowsPerServiceRow,
+  IndexRunRow,
   MentionsPerServiceFamilyRow,
   NodesByLabelRow,
   RecentDocLinkRow,
@@ -34,6 +35,36 @@ export interface RawDashboardRows {
   apiRoutesPerService: ApiRoutesPerServiceRow[]
   callHubs: CallHubRow[]
   recentDocLinks: RecentDocLinkRow[]
+  indexRuns: IndexRunRow[]
+}
+
+/**
+ * Mirrors driftThreshold in internal/verify/telemetry/drift.go (the source
+ * of truth for drift semantics) — a counter moving more than ±25% between
+ * the two most recent IndexRuns of a service is flagged. Zero-baselines
+ * (0→N, N→0) always flag.
+ */
+const DRIFT_THRESHOLD = 0.25
+
+const DRIFT_COUNTERS = [
+  'files',
+  'functions',
+  'methods',
+  'callsEdges',
+  'implementsEdges',
+  'apiRoutes'
+] as const
+
+function counterDrifts(prev: IndexRunRow, curr: IndexRunRow): string[] {
+  const drifts: string[] = []
+  for (const key of DRIFT_COUNTERS) {
+    const p = prev[key] ?? 0
+    const c = curr[key] ?? 0
+    if (p === c) continue
+    const crossed = p === 0 || c === 0 ? true : Math.abs(c - p) / p > DRIFT_THRESHOLD
+    if (crossed) drifts.push(`${key} ${p}→${c}`)
+  }
+  return drifts
 }
 
 /** Fields collect.ts knows and build.ts doesn't derive from rows. */
@@ -209,6 +240,42 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
     }
   }
 
+  // Index-run telemetry (RFC-013 L3): drift between the last two runs of a
+  // service is an err (something about what the indexer produced changed by
+  // >25% — either a real regression or a legitimately big code change, and a
+  // human should decide which); services with code but no recorded IndexRun
+  // get one aggregate warn (graph predates run telemetry — re-index to arm
+  // drift detection).
+  const runsByService = new Map<string, IndexRunRow[]>()
+  for (const row of raw.indexRuns) {
+    if (row.svc === null) continue
+    const runs = runsByService.get(row.svc) ?? []
+    runs.push(row)
+    runsByService.set(row.svc, runs)
+  }
+  for (const [svc, runs] of runsByService) {
+    if (runs.length < 2) continue
+    const drifts = counterDrifts(runs[1], runs[0])
+    if (drifts.length > 0) {
+      health.push({
+        severity: 'err',
+        code: 'index-drift',
+        text: `${svc}: index drift vs previous run — ${drifts.join(', ')}`
+      })
+    }
+  }
+  const untelemetered = services
+    .filter((s) => (s.nodesByLabel['Function'] ?? 0) + (s.nodesByLabel['Method'] ?? 0) > 0)
+    .filter((s) => !runsByService.has(s.name))
+    .map((s) => s.name)
+  if (untelemetered.length > 0) {
+    health.push({
+      severity: 'warn',
+      code: 'no-index-telemetry',
+      text: `no IndexRun recorded for ${untelemetered.join(', ')} — re-index to arm drift detection`
+    })
+  }
+
   // warn: duplicate-repo — services sharing the same non-null repositoryUrl
   const byRepo = new Map<string, string[]>()
   for (const s of services) {
@@ -243,6 +310,12 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
       text: 'no embedded chunks — semantic search unavailable'
     })
   }
+
+  // err before warn before ok, stable within each severity — the drift/
+  // telemetry flags are emitted between the flow and repo blocks, so the
+  // invariant no longer holds by construction order alone.
+  const severityRank = { err: 0, warn: 1, ok: 2 } as const
+  health.sort((a, b) => severityRank[a.severity] - severityRank[b.severity])
 
   return {
     generatedAt: meta.generatedAt,

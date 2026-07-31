@@ -176,6 +176,33 @@ ORDER BY n.inDegree DESC
 LIMIT 8
 `
 
+export interface IndexRunRow {
+  svc: string | null
+  finishedAt: string | null
+  files: number
+  functions: number
+  methods: number
+  callsEdges: number
+  implementsEdges: number
+  apiRoutes: number
+}
+
+/**
+ * The two most recent IndexRun records per service (RFC-013 Layer 3),
+ * newest first within each service. Stamped by `codegraph index scip`'s
+ * post-index hook; services indexed before the hook existed have none.
+ */
+export const INDEX_RUNS_QUERY = `
+MATCH (r:IndexRun)
+WITH r ORDER BY r.finishedAt DESC
+WITH r.serviceName AS svc, collect(r)[..2] AS rs
+UNWIND rs AS run
+RETURN svc, run.finishedAt AS finishedAt, run.files AS files,
+       run.functions AS functions, run.methods AS methods,
+       run.callsEdges AS callsEdges, run.implementsEdges AS implementsEdges,
+       run.apiRoutes AS apiRoutes
+`
+
 export interface RecentDocLinkRow {
   docPath: string | null
   headingPath: string | null

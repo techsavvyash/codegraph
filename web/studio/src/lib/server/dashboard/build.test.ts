@@ -6,6 +6,7 @@ import type {
   CallsPerServiceRow,
   EdgesByTypeRow,
   FlowsPerServiceRow,
+  IndexRunRow,
   MentionsPerServiceFamilyRow,
   NodesByLabelRow,
   RecentDocLinkRow,
@@ -33,6 +34,22 @@ function fixture(overrides: Partial<RawDashboardRows> = {}): RawDashboardRows {
     apiRoutesPerService: [],
     callHubs: [],
     recentDocLinks: [],
+    indexRuns: [],
+    ...overrides
+  }
+}
+
+/** IndexRunRow with sensible defaults, overridable per-field. */
+function run(svc: string, finishedAt: string, overrides: Partial<IndexRunRow> = {}): IndexRunRow {
+  return {
+    svc,
+    finishedAt,
+    files: 100,
+    functions: 500,
+    methods: 200,
+    callsEdges: 1000,
+    implementsEdges: 50,
+    apiRoutes: 20,
     ...overrides
   }
 }
@@ -399,5 +416,75 @@ describe('buildDashboard', () => {
         targetName: 'HandleRequest'
       }
     ])
+  })
+
+  it('flags index drift when a counter moves more than 25% between the last two runs', () => {
+    const indexRuns: IndexRunRow[] = [
+      run('svc-a', '2026-07-31T12:00:00Z', { callsEdges: 2924, apiRoutes: 169 }),
+      run('svc-a', '2026-07-30T12:00:00Z', { callsEdges: 2000, apiRoutes: 169 })
+    ]
+    const result = buildDashboard(fixture({ indexRuns }), META)
+
+    const flag = result.health.find((h) => h.code === 'index-drift')
+    expect(flag).toBeDefined()
+    expect(flag?.severity).toBe('err')
+    expect(flag?.text).toContain('svc-a')
+    expect(flag?.text).toContain('callsEdges 2000→2924')
+    expect(flag?.text).not.toContain('apiRoutes')
+  })
+
+  it('flags zero-baseline drift (N→0) even though percent math would divide by zero', () => {
+    const indexRuns: IndexRunRow[] = [
+      run('svc-a', '2026-07-31T12:00:00Z', { apiRoutes: 0 }),
+      run('svc-a', '2026-07-30T12:00:00Z', { apiRoutes: 424 })
+    ]
+    const result = buildDashboard(fixture({ indexRuns }), META)
+
+    const flag = result.health.find((h) => h.code === 'index-drift')
+    expect(flag?.text).toContain('apiRoutes 424→0')
+  })
+
+  it('does not flag drift for small deltas or single-run services', () => {
+    const indexRuns: IndexRunRow[] = [
+      run('svc-a', '2026-07-31T12:00:00Z', { callsEdges: 1100 }),
+      run('svc-a', '2026-07-30T12:00:00Z', { callsEdges: 1000 }),
+      run('svc-b', '2026-07-31T12:00:00Z')
+    ]
+    const result = buildDashboard(fixture({ indexRuns }), META)
+
+    expect(result.health.find((h) => h.code === 'index-drift')).toBeUndefined()
+  })
+
+  it('warns once, aggregated, for services with code but no recorded IndexRun', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'svc-a',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      },
+      {
+        name: 'svc-b',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [
+      { label: 'Function', svc: 'svc-a', c: 3 },
+      { label: 'Function', svc: 'svc-b', c: 3 }
+    ]
+    const indexRuns: IndexRunRow[] = [run('svc-b', '2026-07-31T12:00:00Z')]
+    const result = buildDashboard(fixture({ services, nodesByLabel, indexRuns }), META)
+
+    const flags = result.health.filter((h) => h.code === 'no-index-telemetry')
+    expect(flags).toHaveLength(1)
+    expect(flags[0].severity).toBe('warn')
+    expect(flags[0].text).toContain('svc-a')
+    expect(flags[0].text).not.toContain('svc-b')
   })
 })

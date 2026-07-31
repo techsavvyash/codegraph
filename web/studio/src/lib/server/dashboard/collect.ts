@@ -12,6 +12,8 @@ import {
   API_ROUTES_PER_SERVICE_QUERY,
   CALL_HUBS_QUERY,
   RECENT_DOC_LINKS_QUERY,
+  INDEX_RUNS_QUERY,
+  type IndexRunRow,
   type ServiceRow,
   type NodesByLabelRow,
   type EdgesByTypeRow,
@@ -82,7 +84,8 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     entryCandidatesPerService,
     apiRoutesPerService,
     callHubs,
-    recentDocLinks
+    recentDocLinks,
+    indexRuns
   ] = await Promise.all([
     runQuery<ServiceRow>(client, SERVICES_QUERY, warnings),
     runQuery<NodesByLabelRow>(client, NODES_BY_LABEL_QUERY, warnings),
@@ -94,7 +97,8 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     runQuery<EntryCandidatesPerServiceRow>(client, ENTRY_CANDIDATES_PER_SERVICE_QUERY, warnings),
     runQuery<ApiRoutesPerServiceRow>(client, API_ROUTES_PER_SERVICE_QUERY, warnings),
     runQuery<CallHubRow>(client, CALL_HUBS_QUERY, warnings),
-    runQuery<RecentDocLinkRow>(client, RECENT_DOC_LINKS_QUERY, warnings)
+    runQuery<RecentDocLinkRow>(client, RECENT_DOC_LINKS_QUERY, warnings),
+    runQuery<IndexRunRow>(client, INDEX_RUNS_QUERY, warnings)
   ])
 
   const raw: RawDashboardRows = {
@@ -108,7 +112,8 @@ export async function collectDashboard(client: McpClient = mcp): Promise<Dashboa
     entryCandidatesPerService,
     apiRoutesPerService,
     callHubs,
-    recentDocLinks
+    recentDocLinks,
+    indexRuns
   }
 
   const neo4jTarget = process.env.NEO4J_URI ?? 'bolt://localhost:7687'
