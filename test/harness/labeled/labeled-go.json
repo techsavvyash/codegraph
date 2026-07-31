@@ -1,0 +1,117 @@
+{
+  "fixture": "labeled-go",
+  "service": "labeledgo",
+  "mustHaveNodes": [
+    {"label": "Interface", "name": "Storer", "file": "store.go", "props": {}},
+    {
+      "label": "Method",
+      "name": "Save",
+      "file": "store.go",
+      "nodeKeyContains": "MemStore#Save",
+      "props": {"receiverType": "MemStore", "startLine": 16, "endLine": 19, "rangeSource": "go-ast"},
+      "comment": "Value-receiver Save (source lines 16-19, func (m MemStore) Save(...)). Previously mis-attributed FileStore's body range due to a same-file same-method-name collision in the Go-AST body-range enrichment pass (internal/ingest/scip/call_graph_scip.go graphNodesByName/processFile keyed candidates by bare method name); re-verified empirically 2026-08-01 that this is now fixed upstream (concurrent work on a separate task addressed the same-name range clobbering) — receiverType/startLine/endLine/rangeSource now correctly reflect MemStore's own declaration, not FileStore's. This expectation was originally filed as knownGap:true; flipped back to a real (non-skipped) assertion once the fix was confirmed live in this environment."
+    },
+    {
+      "label": "Method",
+      "name": "Save",
+      "file": "store.go",
+      "nodeKeyContains": "FileStore#Save",
+      "props": {"receiverType": "*FileStore", "startLine": 26, "endLine": 29, "rangeSource": "go-ast"},
+      "comment": "Pointer-receiver Save (source lines 26-29, func (f *FileStore) Save(...)). Other half of the same-name collision described above; re-verified empirically 2026-08-01 that FileStore's own receiverType/range now attach correctly (previously left a degenerate 1-line stub with receiverType=NULL). Flipped back from knownGap:true to a real assertion once confirmed fixed."
+    },
+    {"label": "Interface", "name": "Reader", "file": "embed.go", "props": {}},
+    {"label": "Interface", "name": "ReadWriter", "file": "embed.go", "props": {}},
+    {"label": "Function", "name": "a", "file": "chain.go", "props": {}},
+    {"label": "Function", "name": "b", "file": "chain.go", "props": {}}
+  ],
+  "mustNotHaveNodes": [],
+  "mustHaveEdges": [
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Class", "name": "MemStore"},
+      "to": {"label": "Interface", "name": "Storer"},
+      "comment": "Type-level IMPLEMENTS, value-receiver Save. Verified empirically: detectionSource=scip."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Class", "name": "FileStore"},
+      "to": {"label": "Interface", "name": "Storer"},
+      "comment": "Type-level IMPLEMENTS, pointer-receiver Save. Verified empirically: detectionSource=scip."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "MemStore#Save"},
+      "to": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "Storer#Save"},
+      "comment": "Method-level IMPLEMENTS: MemStore.Save -> Storer.Save. Direction/shape confirmed against tiny-go/golden.json's EnglishGreeter.Greet -> Greeter.Greet pattern (concrete Method -> interface Method, detectionSource=scip). This edge is keyed on the SCIP nodeKey identity, which is correct and unaffected by the receiverType/range-attribution bug documented in mustHaveNodes above — verified empirically the edge exists with the right endpoints even though the endpoint node's OWN receiverType property is corrupted."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "FileStore#Save"},
+      "to": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "Storer#Save"},
+      "comment": "Method-level IMPLEMENTS: FileStore.Save -> Storer.Save, pointer receiver. Same nodeKey-identity note as above."
+    },
+    {
+      "type": "CALLS",
+      "from": {"label": "Function", "name": "persist", "file": "store.go"},
+      "to": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "MemStore#Save"},
+      "comment": "Interface dispatch fan-out (RFC-001 Layers 1+2): persist calls s.Save(data) through the Storer interface; the CALLS edge fans out to every concrete implementation, including MemStore.Save. Verified empirically: two CALLS edges exist from persist to Save (one per receiver), correctly keyed by nodeKey despite the unrelated receiverType-property bug on the endpoint node."
+    },
+    {
+      "type": "CALLS",
+      "from": {"label": "Function", "name": "persist", "file": "store.go"},
+      "to": {"label": "Method", "name": "Save", "file": "store.go", "nodeKeyContains": "FileStore#Save"},
+      "comment": "Interface dispatch fan-out: persist -> FileStore.Save, the other half of the fan-out pair above."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Method", "name": "Read", "file": "embed.go", "nodeKeyContains": "Buffer#Read"},
+      "to": {"label": "Method", "name": "Read", "file": "embed.go", "nodeKeyContains": "Reader#Read"},
+      "comment": "Embedded-interface IMPLEMENTS: Buffer.Read must link to the EMBEDDED Reader.Read member, not to a synthesized ReadWriter.Read (ReadWriter has no own Read method — it embeds Reader). Verified empirically via nodeKey: endKey contains '/Reader#Read.', not '/ReadWriter#Read.'. Buffer only has one method named Read, so this pair is not subject to the same-file-same-name bug documented above (that bug requires TWO DIFFERENT TYPES sharing a method name in one file; Buffer.Read has no name-sharing sibling in embed.go)."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Method", "name": "Write", "file": "embed.go", "nodeKeyContains": "Buffer#Write"},
+      "to": {"label": "Method", "name": "Write", "file": "embed.go", "nodeKeyContains": "ReadWriter#Write"},
+      "comment": "Buffer.Write -> ReadWriter.Write (ReadWriter's own directly-declared method, not embedded)."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Class", "name": "Buffer"},
+      "to": {"label": "Interface", "name": "Reader"},
+      "comment": "Type-level IMPLEMENTS: Buffer implements the embedded Reader interface directly (both Buffer->Reader and Buffer->ReadWriter type-level edges are emitted; verified empirically both exist)."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"label": "Class", "name": "Buffer"},
+      "to": {"label": "Interface", "name": "ReadWriter"},
+      "comment": "Type-level IMPLEMENTS: Buffer implements ReadWriter (the embedding interface) as well as Reader."
+    },
+    {
+      "type": "CALLS",
+      "from": {"label": "Function", "name": "a", "file": "chain.go"},
+      "to": {"label": "Function", "name": "b", "file": "chain.go"},
+      "comment": "Plain call chain: a() calls b()."
+    }
+  ],
+  "mustNotHaveEdges": [
+    {
+      "type": "CALLS",
+      "from": {"label": "Function", "name": "b", "file": "chain.go"},
+      "to": {"label": "Function", "name": "a", "file": "chain.go"},
+      "knownGap": false,
+      "comment": "Direction sanity: b() never calls a() in the source; no CALLS edge may exist in this direction."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "to": {"name": "Numeric"},
+      "knownGap": false,
+      "comment": "Go generics constraint (~int | ~float64): verified empirically that the pipeline creates ZERO IMPLEMENTS edges touching the Numeric symbol at all (0 edges found querying (n)-[:IMPLEMENTS]-(m) WHERE n.name='Numeric' OR m.name='Numeric'). Go generic constraint satisfaction is compiler-resolved structural typing, not nominal interface implementation, and this pipeline's resolvers (scip-go native + the in-repo Go structural resolver) correctly do not attempt to synthesize IMPLEMENTS edges for it. 'from' is omitted deliberately (matches ANY source node) since no concrete node is expected to implement Numeric — this asserts zero IMPLEMENTS edges land on Numeric from anywhere, not one specific missing pair. Separate observation (not asserted here, reported as an additional finding): Numeric is itself classified label=Class rather than Interface in the graph, unlike Storer/Reader/ReadWriter — internal/ingest/scip/scip_parser.go's inferSymbolKindWith only marks a '#'-suffixed symbol Interface when something IS_IMPLEMENTATION_OF it; since nothing implements Numeric (generics aren't nominal), it falls back to the Class classification path. This is a real classification gap but is a Class-vs-Interface LABEL issue, not an edge-existence issue, so it isn't asserted as a mustHaveNodes/mustNotHaveNodes entry here to keep this fixture's scope to the RFC-013 brief's edge-focused generics question; see the final report."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {"name": "Numeric"},
+      "knownGap": false,
+      "comment": "Symmetric check: Numeric itself must not appear as the SOURCE of an IMPLEMENTS edge either (it implements nothing)."
+    }
+  ]
+}
