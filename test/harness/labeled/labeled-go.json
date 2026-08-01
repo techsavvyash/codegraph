@@ -104,6 +104,13 @@
         "deadCluster": false
       },
       "comment": "RFC-014: nothing calls bodyValueUse (it only takes addresses) \u2014 genuinely dead, not a cluster member (no callers)."
+    },
+    {
+      "label": "Interface",
+      "name": "Numeric",
+      "file": "generic.go",
+      "props": {},
+      "comment": "Generic constraint interface (~int | ~float64) must be labeled Interface, not Class. Nothing implements it (structural constraint satisfaction is compiler-resolved), so the impl-relationship heuristic can't see it; classification now also reads scip-go's hover documentation ('```go\\ntype Numeric interface```', AST-generated). Previously reported as a known classification gap in the IMPLEMENTS-edge comments below."
     }
   ],
   "mustNotHaveNodes": [],

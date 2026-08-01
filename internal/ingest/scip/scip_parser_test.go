@@ -751,3 +751,47 @@ func TestGetServiceInfo_NoIndexLoaded(t *testing.T) {
 		t.Error("expected error when no index loaded")
 	}
 }
+
+// --- Doc-declared interface detection (generic constraint interfaces) -------
+
+func TestSymbolDocsDeclareGoInterface(t *testing.T) {
+	// Exact shapes scip-go emits (verified against a live index of
+	// test/fixtures/labeled-go: Numeric's docs[0] and MemStore's docs[0]).
+	if !symbolDocsDeclareGoInterface([]string{"```go\ntype Numeric interface\n```", "prose", "```go\ninterface {\n    ~int | ~float64\n}\n```"}) {
+		t.Error("constraint interface declaration not detected")
+	}
+	if symbolDocsDeclareGoInterface([]string{"```go\ntype MemStore struct\n```"}) {
+		t.Error("struct declaration wrongly detected as interface")
+	}
+	// Prose mentioning the word interface outside a go fence must not match.
+	if symbolDocsDeclareGoInterface([]string{"this type acts as an interface"}) {
+		t.Error("prose wrongly detected")
+	}
+	if symbolDocsDeclareGoInterface(nil) {
+		t.Error("nil docs wrongly detected")
+	}
+}
+
+func TestInferSymbolKindWith_DocDeclaredInterface(t *testing.T) {
+	numeric := "scip-go gomod example.com/labeledgo . `example.com/labeledgo`/Numeric#"
+	save := "scip-go gomod example.com/labeledgo . `example.com/labeledgo`/Quiet#Save."
+	quiet := "scip-go gomod example.com/labeledgo . `example.com/labeledgo`/Quiet#"
+
+	interfaceLike := map[string]bool{numeric: true, quiet: true}
+
+	if got := inferSymbolKindWith(numeric, interfaceLike); got != models.InterfaceSymbol {
+		t.Errorf("doc-declared constraint interface: got %v, want InterfaceSymbol", got)
+	}
+	// Member of a known interface with no impl relationships of its own:
+	// parent lookup must classify it Method, not Field.
+	if got := inferSymbolKindWith(save, interfaceLike); got != models.MethodSymbol {
+		t.Errorf("unimplemented interface's method: got %v, want MethodSymbol", got)
+	}
+	// Without any interface signal it stays the legacy Class/Field path.
+	if got := inferSymbolKindWith(numeric, nil); got != models.TypeSymbol {
+		t.Errorf("no signal: got %v, want TypeSymbol", got)
+	}
+	if got := inferSymbolKindWith(save, nil); got != models.FieldSymbol {
+		t.Errorf("no signal member: got %v, want FieldSymbol", got)
+	}
+}
