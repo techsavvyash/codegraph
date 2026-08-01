@@ -249,6 +249,20 @@ func (s *CodeGraphMCPServer) handleToolsList(request MCPRequest) {
 			},
 		},
 		{
+			Name:        "codegraph_deadcode",
+			Description: "RFC-014 reachability report for one service: classify every function as live / test_only / dead / possibly_live / unknown via BFS over CALLS ∪ USES_VALUE from tiered roots (API-exposed; Go main/init + scheduled/broker consumers; module-load call sites). Dead entries flag deadCluster (all callers are themselves dead — invisible to inDegree checks) and isExported. Default view returns only non-live entries; use verdict to filter to one class. Read-only (verdicts are stamped by the index pipeline, not this tool).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"service_name": map[string]interface{}{"type": "string", "description": "Service to classify (required)"},
+					"scope_id":     map[string]interface{}{"type": "string", "description": "Scope ID (default: main)", "default": "main"},
+					"verdict":      map[string]interface{}{"type": "string", "enum": []string{"live", "test_only", "dead", "possibly_live", "unknown"}, "description": "Filter entries to one verdict; omit for all non-live"},
+					"limit":        map[string]interface{}{"type": "number", "description": "Max entries returned (default 100)", "default": 100},
+				},
+				"required": []string{"service_name"},
+			},
+		},
+		{
 			Name:        "codegraph_cypher",
 			Description: "Advanced/escape-hatch tool: run a read-only Cypher query directly against Neo4j. Prefer find/expand/path/source for common questions. Write operations (CREATE, MERGE, DELETE, SET, REMOVE, DROP, FOREACH, LOAD CSV) are rejected. Queries are EXPLAIN-validated first; plans containing AllNodesScan get a warning. Hard caps: timeout 120000ms, 1000 rows.",
 			InputSchema: map[string]interface{}{
@@ -555,6 +569,8 @@ func (s *CodeGraphMCPServer) handleToolCall(request MCPRequest) {
 		response = s.handleEntryPointsToolV2(ctx, toolCall.Arguments)
 	case "codegraph_flows":
 		response = s.handleFlowsToolV2(ctx, toolCall.Arguments)
+	case "codegraph_deadcode":
+		response = s.handleDeadcodeTool(ctx, toolCall.Arguments)
 	case "codegraph_render":
 		response = s.handleRenderTool(ctx, toolCall.Arguments)
 	default:

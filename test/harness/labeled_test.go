@@ -28,6 +28,7 @@ import (
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/ingest/resolve"
 	static "github.com/context-maximiser/code-graph/internal/ingest/scip"
+	"github.com/context-maximiser/code-graph/internal/query/reachability"
 	neo4jdrv "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/stretchr/testify/require"
 )
@@ -489,6 +490,18 @@ func registerLabeledCleanup(t *testing.T, ctx context.Context, client *neo4j.Cli
 
 // ---- Tests -----------------------------------------------------------------
 
+// stampReachability runs the RFC-014 classifier for a fixture service and
+// stamps verdicts, so labeled expectations can assert reachability props
+// (live/dead/tier) exactly like any other node property. cmd_index does this
+// after every real index run; the harness indexes via the library API, which
+// deliberately does not stamp.
+func stampReachability(t *testing.T, ctx context.Context, client *neo4j.Client, service string) {
+	t.Helper()
+	result, err := reachability.Compute(ctx, client, reachability.Options{ServiceName: service})
+	require.NoError(t, err, "reachability compute for %s", service)
+	require.NoError(t, reachability.Stamp(ctx, client, result), "reachability stamp for %s", service)
+}
+
 // TestLabeledGo indexes test/fixtures/labeled-go and checks every hand-derived
 // expectation in test/harness/labeled/labeled-go.json.
 func TestLabeledGo(t *testing.T) {
@@ -512,6 +525,8 @@ func TestLabeledGo(t *testing.T) {
 		t.Fatalf("IndexProject: %v", err)
 	}
 	defer os.Remove(filepath.Join(fixturePath, "index.scip"))
+
+	stampReachability(t, ctx, client, "labeledgo")
 
 	exp := loadExpectations(t, filepath.Join(repoRoot, "test", "harness", "labeled", "labeled-go.json"))
 	require.Equal(t, "labeledgo", exp.Service, "expectations file service mismatch")
@@ -552,6 +567,8 @@ func TestLabeledTS(t *testing.T) {
 		t.Fatalf("IndexProject: %v", err)
 	}
 	defer os.Remove(filepath.Join(fixturePath, "index.scip"))
+
+	stampReachability(t, ctx, client, "labeledts")
 
 	exp := loadExpectations(t, filepath.Join(repoRoot, "test", "harness", "labeled", "labeled-ts.json"))
 	require.Equal(t, "labeledts", exp.Service, "expectations file service mismatch")

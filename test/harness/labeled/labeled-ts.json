@@ -77,6 +77,36 @@
       "file": "registry.ts",
       "props": {},
       "comment": "Classification fixture (tasks #18/#19): module-scope call target."
+    },
+    {
+      "label": "Function",
+      "name": "registerThing",
+      "file": "registry.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: called at module scope in toplevel.ts \u2014 tier-3 module-load root."
+    },
+    {
+      "label": "Function",
+      "name": "valueOnly",
+      "file": "registry.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: address-taken at module scope (export const savedRef = valueOnly) \u2014 conservatively live."
+    },
+    {
+      "label": "Method",
+      "name": "list",
+      "file": "items-controller.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 1
+      },
+      "comment": "RFC-014: @Get()-decorated route \u2192 EXPOSES_API \u2192 tier-1 root."
     }
   ],
   "mustNotHaveNodes": [],

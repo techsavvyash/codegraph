@@ -64,6 +64,46 @@
       "file": "toplevel.go",
       "props": {},
       "comment": "Classification fixture (tasks #18/#19): module-scope call target."
+    },
+    {
+      "label": "Function",
+      "name": "main",
+      "file": "main.go",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 2
+      },
+      "comment": "RFC-014: Go main() is a tier-2 runtime root."
+    },
+    {
+      "label": "Function",
+      "name": "buildTable",
+      "file": "toplevel.go",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: called at module scope (var precomputedTable = buildTable()) \u2014 tier-3 module-load root."
+    },
+    {
+      "label": "Function",
+      "name": "handleValue",
+      "file": "toplevel.go",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: address-taken at module scope (var savedHandler = handleValue \u2192 File-USES_VALUE) \u2014 conservatively live, never dead."
+    },
+    {
+      "label": "Function",
+      "name": "bodyValueUse",
+      "file": "toplevel.go",
+      "props": {
+        "reachability": "dead",
+        "deadCluster": false
+      },
+      "comment": "RFC-014: nothing calls bodyValueUse (it only takes addresses) \u2014 genuinely dead, not a cluster member (no callers)."
     }
   ],
   "mustNotHaveNodes": [],

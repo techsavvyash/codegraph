@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
+| **Status** | Implemented (2026-08-02) — see Implementation notes |
 | **Created** | 2026-08-02 |
 | **Authors** | @techsavvyash |
 | **Relates to** | RFC-001 phases 7–8, RFC-013 (correctness foundation), `internal/query/inference/graph_seeds.go` |
@@ -113,3 +113,36 @@ degree computation, and by `codegraph verify` consumers on demand.
   the conservative catch-all).
 - Cross-service reachability (a service's API surface is its boundary; the
   CALLS_SERVICE layer already models the coupling).
+
+## Implementation notes (2026-08-02)
+
+Shipped as `internal/query/reachability` (+ `codegraph query deadcode`, MCP
+`codegraph_deadcode`, post-index stamping in cmd_index). Deviations from the
+draft, each forced by live findings:
+
+- **`exported_unreached` dropped as a verdict**: `isExported` is degenerate on
+  TS (scip-typescript marks ~everything exported), so exported-ness is a
+  report ANNOTATION on dead entries, not a verdict class.
+- **`possibly_live` added**: Go methods matching stdlib dynamic-dispatch slots
+  (`Error`, `String`, `MarshalJSON`, `ServeHTTP`, io/sort/sql method names)
+  cannot be proven dead structurally — those interfaces live outside the
+  graph. First live run flagged every error type's `Error()` as dead; now
+  they're their own honest category.
+- **Abstract declarations excluded from the population**: interface method
+  slots (scip-go bare-dot descriptor; IMPLEMENTS-target methods) are
+  contracts, not code — 29 excluded on codegraph, 17 on khaata.
+- **Constructor-liveness fixpoint added**: a class with any live method is
+  instantiated (NestJS DI), so its constructor and the constructor's callees
+  are live — 72 khaata functions rescued from false-dead.
+- **Test-file functions classify `test_only` directly** (not via root
+  traversal), and anything only they reach inherits it.
+
+First-run numbers: codegraph 1620 functions → live 773, test_only 827,
+dead 16 (3 grep-verified true positives), possibly_live 4. khaata/backend
+1791 → live 1527, dead 264 including 48 dead-cluster members invisible to
+inDegree checks. Labeled fixtures assert verdicts as node props (module-load
+tier 3, address-taken liveness, decorator-route tier 1, true-dead).
+
+Open follow-up: the CHA cross-check (every `dead` must be CHA-unreachable in
+the Go oracle's may-call graph) is designed but not wired into `verify
+oracle` yet.
