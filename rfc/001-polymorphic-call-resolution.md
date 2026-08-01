@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | In Progress (Layers 1 + 2 + Go Layer 3 implemented; TS Layer 3 in progress) |
+| **Status** | Implemented for Go + TypeScript (Layers 1–3; Go resolver `internal/ingest/resolve`, TS resolver `tools/ts-resolver` closed 2026-07-30). Phases 7–8 (reachability engine + dead-code classifier) remain open — building on RFC-013's verified graph. Python untouched. |
 | **Created** | 2026-03-07 |
-| **Updated** | 2026-07-30 |
+| **Updated** | 2026-08-02 |
 | **Authors** | @techsavvyash |
 | **Relates to** | `internal/ingest/scip/call_graph_generic.go`, `internal/ingest/scip/scip_relationships.go`, `internal/ingest/scip/scip_indexer.go`, `internal/ingest/resolve/` |
 
