@@ -147,3 +147,32 @@ Phases 7–8 (reachability engine, dead-code classifier) consume this RFC's outp
 telemetry provides root-coverage counters that gate `unknown` verdicts, and oracle
 precision/recall numbers calibrate how much to trust CALLS completeness per language.
 Correctness first, then verdicts on top of it.
+
+## Addendum (2026-08-02): call-vs-value classification + module-scope attribution
+
+Two of the recall/precision gaps the oracles surfaced on day one are now fixed
+at the indexer level rather than merely recorded:
+
+- **Function-VALUE references** (`embedder.Fn = semlinkVectors`) no longer
+  fabricate CALLS edges. Both builders classify every reference against the
+  file's call sites (Go AST `CallExpr` callee identifiers; tree-sitter
+  call-node callee identifiers across all 8 grammars, `internal/ingest/
+  structure` `CallSites`). Value references become
+  `(caller|File)-[:USES_VALUE]->(fn)` — kept in-graph because liveness must
+  treat address-taken functions as conservatively live (`cobra.OnInitialize
+  (initConfig)` is the canonical case).
+- **Module-scope call sites** (package-level `var x = compute()`, top-level TS
+  statements, load-time decorators) now produce `(File)-[:CALLS]->(fn)` —
+  import-time invocation attributed to the file itself. Degree properties
+  deliberately still count Function/Method callers only; the RFC-001 phase-7
+  reachability engine consumes File-CALLS and USES_VALUE explicitly.
+- The TS oracle gained a `decorator` skip category: decorator invocations
+  execute at class-definition time and are attributed to the File, outside the
+  oracle's Function/Method-caller model (previously misread as recall gaps).
+
+Post-fix numbers: Go oracle on codegraph **100% recall, 0 precision
+suspects**; TS oracle on khaata **100% recall** (was 98.9% with 2 Go suspects
+and decorator-shaped false gaps). khaata CALLS 1591 → 1137 with the removed
+454 reappearing among 556 USES_VALUE edges — the drift detector flagged the
+transition at -28.5%, which is the system working as designed. `usesValueEdges`
+is now an IndexRun counter; integrity checks the USES_VALUE endpoint shape.
