@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Implemented for Go + TypeScript (Layers 1–3; Go resolver `internal/ingest/resolve`, TS resolver `tools/ts-resolver` closed 2026-07-30). Phases 7–8 (reachability engine + dead-code classifier) remain open — building on RFC-013's verified graph. Python untouched. |
+| **Status** | Implemented for Go + TypeScript (Layers 1–3; Go resolver `internal/ingest/resolve`, TS resolver `tools/ts-resolver` closed 2026-07-30). Phases 7–8 closed 2026-08-02 by RFC-014 (`internal/query/reachability`, `codegraph query deadcode`). Python untouched. |
 | **Created** | 2026-03-07 |
 | **Updated** | 2026-08-02 |
 | **Authors** | @techsavvyash |
