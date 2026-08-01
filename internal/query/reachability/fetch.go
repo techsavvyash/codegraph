@@ -6,6 +6,7 @@ package reachability
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
@@ -214,8 +215,30 @@ func fetchRoots(ctx context.Context, client *neo4j.Client, serviceName, scopeID 
 
 // Stamp writes each verdict back onto its node: fn.reachability, and for
 // live nodes fn.reachabilityTier + fn.reachabilityRoot (removed otherwise so
-// stale values from a previous run can't linger).
+// stale values from a previous run can't linger). Before writing, ALL
+// reachability props in the service/scope are removed: nodes that left the
+// population between runs (abstract declarations once the exclusion landed,
+// deleted-and-recreated functions) must not carry a stale verdict — the CHA
+// cross-check caught exactly this (45 dead-stamped nodes vs 16 real).
 func Stamp(ctx context.Context, client *neo4j.Client, result *Result) error {
+	scopeID := result.ScopeID
+	if scopeID == "" {
+		scopeID = "main"
+	}
+	clear := `
+		MATCH (fn)
+		WHERE (fn:Function OR fn:Method)
+		  AND fn.serviceName = $serviceName
+		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
+		  AND fn.reachability IS NOT NULL
+		REMOVE fn.reachability, fn.reachabilityTier, fn.reachabilityRoot, fn.deadCluster
+	`
+	if err := client.ExecuteQueryWithoutRecords(ctx, clear, map[string]any{
+		"serviceName": result.ServiceName,
+		"scopeId":     scopeID,
+	}); err != nil {
+		return fmt.Errorf("clear stale verdicts: %w", err)
+	}
 	updates := make([]map[string]any, 0, len(result.Verdicts))
 	for _, v := range result.Verdicts {
 		u := map[string]any{

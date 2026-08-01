@@ -110,5 +110,31 @@ func RunGoOracle(ctx context.Context, client *neo4j.Client, opts GoOracleOptions
 			selfLoopMissing, len(cmp.Missing)),
 	)
 
+	// RFC-014 CHA cross-check: dead verdicts must be CHA-unreachable from
+	// main. CHA over-approximates dispatch, so a disagreement means the
+	// reachability classifier (or the graph it read) lost an edge.
+	deadSymbols, err := fetchDeadStampedSymbols(ctx, client, opts.ServiceName, opts.ScopeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(deadSymbols) == 0 {
+		report.Notes = append(report.Notes,
+			"dead-verdict CHA cross-check: no reachability='dead' verdicts stamped for this service — run codegraph query deadcode (or re-index) first")
+	} else {
+		disagreements := crossCheckDeadVerdicts(deadSymbols, chaReachableFromMain(extraction.MayEdges))
+		for i, id := range disagreements {
+			if i >= sampleLimit {
+				break
+			}
+			report.PrecisionSuspects = append(report.PrecisionSuspects, EdgeSample{
+				From: "main",
+				To:   funcIDString(id),
+				Note: "stamped reachability='dead' but CHA-reachable from main — classifier false-dead",
+			})
+		}
+		report.Notes = append(report.Notes,
+			fmt.Sprintf("dead-verdict CHA cross-check: %d dead-stamped functions checked, %d CHA-reachable disagreements", len(deadSymbols), len(disagreements)))
+	}
+
 	return report, nil
 }
