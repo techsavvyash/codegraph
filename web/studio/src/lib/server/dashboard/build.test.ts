@@ -35,6 +35,7 @@ function fixture(overrides: Partial<RawDashboardRows> = {}): RawDashboardRows {
     callHubs: [],
     recentDocLinks: [],
     indexRuns: [],
+    reachability: [],
     ...overrides
   }
 }
@@ -486,5 +487,96 @@ describe('buildDashboard', () => {
     expect(flags[0].severity).toBe('warn')
     expect(flags[0].text).toContain('svc-a')
     expect(flags[0].text).not.toContain('svc-b')
+  })
+
+  it('flags dead-code when the dead fraction crosses the threshold', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'khaata/backend',
+        scopeId: 'main',
+        language: 'typescript',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      },
+      {
+        name: 'codegraph',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      }
+    ]
+    const reachability = [
+      // khaata: 264/1791 classified app fns ≈ 15% dead → flag
+      { svc: 'khaata/backend', verdict: 'live', c: 1527, clusters: 0 },
+      { svc: 'khaata/backend', verdict: 'dead', c: 264, clusters: 48 },
+      // codegraph: 16 dead of ~793 ≈ 2% → no flag
+      { svc: 'codegraph', verdict: 'live', c: 773, clusters: 0 },
+      { svc: 'codegraph', verdict: 'test_only', c: 827, clusters: 0 },
+      { svc: 'codegraph', verdict: 'dead', c: 16, clusters: 0 },
+      { svc: 'codegraph', verdict: 'possibly_live', c: 4, clusters: 0 }
+    ]
+    const result = buildDashboard(fixture({ services, reachability }), META)
+
+    const flags = result.health.filter((h) => h.code === 'dead-code')
+    expect(flags).toHaveLength(1)
+    expect(flags[0].severity).toBe('warn')
+    expect(flags[0].text).toContain('khaata/backend')
+    expect(flags[0].text).toContain('264 dead')
+    expect(flags[0].text).toContain('48 in dead clusters')
+
+    // Per-service summary lands on the cards.
+    const khaata = result.services.find((s) => s.name === 'khaata/backend')
+    expect(khaata?.reachability).toEqual({
+      live: 1527,
+      testOnly: 0,
+      dead: 264,
+      deadCluster: 48,
+      possiblyLive: 0,
+      unknown: 0
+    })
+    const cg = result.services.find((s) => s.name === 'codegraph')
+    expect(cg?.reachability?.testOnly).toBe(827)
+  })
+
+  it('small dead counts never flag, and unclassified coded services get the aggregated warn', () => {
+    const services: ServiceRow[] = [
+      {
+        name: 'tiny',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      },
+      {
+        name: 'unclassified',
+        scopeId: 'main',
+        language: 'go',
+        version: null,
+        repositoryUrl: null,
+        packageName: null
+      }
+    ]
+    const nodesByLabel: NodesByLabelRow[] = [
+      { label: 'Function', svc: 'tiny', c: 10 },
+      { label: 'Function', svc: 'unclassified', c: 10 }
+    ]
+    const reachability = [
+      // 4 dead of 10 = 40%, but below the 5-dead floor → no dead-code flag.
+      { svc: 'tiny', verdict: 'live', c: 6, clusters: 0 },
+      { svc: 'tiny', verdict: 'dead', c: 4, clusters: 0 }
+    ]
+    const result = buildDashboard(fixture({ services, nodesByLabel, reachability }), META)
+
+    expect(result.health.filter((h) => h.code === 'dead-code')).toHaveLength(0)
+
+    const noReach = result.health.filter((h) => h.code === 'no-reachability')
+    expect(noReach).toHaveLength(1)
+    expect(noReach[0].text).toContain('unclassified')
+    expect(noReach[0].text).not.toContain('tiny')
+    expect(result.services.find((s) => s.name === 'unclassified')?.reachability).toBeNull()
   })
 })

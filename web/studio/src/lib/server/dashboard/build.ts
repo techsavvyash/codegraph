@@ -1,4 +1,5 @@
 import type {
+  ReachabilitySummary,
   CallHub,
   DashboardData,
   DocLinkCounts,
@@ -16,6 +17,7 @@ import type {
   FlowsPerServiceRow,
   IndexRunRow,
   MentionsPerServiceFamilyRow,
+  ReachabilityRow,
   NodesByLabelRow,
   RecentDocLinkRow,
   SemanticStateRow,
@@ -36,6 +38,7 @@ export interface RawDashboardRows {
   callHubs: CallHubRow[]
   recentDocLinks: RecentDocLinkRow[]
   indexRuns: IndexRunRow[]
+  reachability: ReachabilityRow[]
 }
 
 /**
@@ -45,6 +48,15 @@ export interface RawDashboardRows {
  * (0→N, N→0) always flag.
  */
 const DRIFT_THRESHOLD = 0.25
+
+/**
+ * Dead-code warn threshold: fraction of classified application functions
+ * (live + dead + possibly_live; test_only and unknown excluded) that are
+ * dead before the dashboard flags the service. khaata's first
+ * classification (264/1791 ≈ 15%) should flag; codegraph (16/1620 ≈ 1%)
+ * should not.
+ */
+const DEAD_CODE_WARN_FRACTION = 0.1
 
 const DRIFT_COUNTERS = [
   'files',
@@ -167,6 +179,38 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
     entryCandidatesPerService.set(row.svc, (entryCandidatesPerService.get(row.svc) ?? 0) + row.c)
   }
 
+  const reachabilityPerService = new Map<string, ReachabilitySummary>()
+  for (const row of raw.reachability) {
+    if (row.svc === null || row.verdict === null) continue
+    const summary = reachabilityPerService.get(row.svc) ?? {
+      live: 0,
+      testOnly: 0,
+      dead: 0,
+      deadCluster: 0,
+      possiblyLive: 0,
+      unknown: 0
+    }
+    switch (row.verdict) {
+      case 'live':
+        summary.live += row.c
+        break
+      case 'test_only':
+        summary.testOnly += row.c
+        break
+      case 'dead':
+        summary.dead += row.c
+        summary.deadCluster += row.clusters
+        break
+      case 'possibly_live':
+        summary.possiblyLive += row.c
+        break
+      case 'unknown':
+        summary.unknown += row.c
+        break
+    }
+    reachabilityPerService.set(row.svc, summary)
+  }
+
   // ---- service cards ----
   const services: ServiceCard[] = serviceOrder.map((s) => {
     const nodesByLabel = nodesByLabelPerService.get(s.name) ?? {}
@@ -185,7 +229,8 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
       docs,
       chunks,
       docLinks: docLinksPerService.get(s.name) ?? emptyDocLinks(),
-      semantic: semanticPerService.get(s.name) ?? null
+      semantic: semanticPerService.get(s.name) ?? null,
+      reachability: reachabilityPerService.get(s.name) ?? null
     }
   })
 
@@ -273,6 +318,36 @@ export function buildDashboard(raw: RawDashboardRows, meta: DashboardMeta): Dash
       severity: 'warn',
       code: 'no-index-telemetry',
       text: `no IndexRun recorded for ${untelemetered.join(', ')} — re-index to arm drift detection`
+    })
+  }
+
+  // warn: dead-code — RFC-014 verdicts show a significant dead fraction.
+  // Threshold: >10% of classified application functions (dead / (live +
+  // dead + possiblyLive)) with at least 5 dead — small services would
+  // otherwise flag on a single leftover helper.
+  for (const s of services) {
+    const r = s.reachability
+    if (!r) continue
+    const appFns = r.live + r.dead + r.possiblyLive
+    if (appFns === 0 || r.dead < 5) continue
+    const deadPct = r.dead / appFns
+    if (deadPct > DEAD_CODE_WARN_FRACTION) {
+      health.push({
+        severity: 'warn',
+        code: 'dead-code',
+        text: `${s.name}: ${r.dead} dead functions (${Math.round(deadPct * 100)}% of ${appFns} classified, ${r.deadCluster} in dead clusters) — codegraph query deadcode --service="${s.name}"`
+      })
+    }
+  }
+  const unclassified = services
+    .filter((s) => (s.nodesByLabel['Function'] ?? 0) + (s.nodesByLabel['Method'] ?? 0) > 0)
+    .filter((s) => !reachabilityPerService.has(s.name))
+    .map((s) => s.name)
+  if (unclassified.length > 0) {
+    health.push({
+      severity: 'warn',
+      code: 'no-reachability',
+      text: `no reachability verdicts for ${unclassified.join(', ')} — re-index (or run codegraph query deadcode) to classify dead code`
     })
   }
 

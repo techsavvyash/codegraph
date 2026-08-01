@@ -203,6 +203,28 @@ RETURN svc, run.finishedAt AS finishedAt, run.files AS files,
        run.apiRoutes AS apiRoutes
 `
 
+export interface ReachabilityRow {
+  svc: string | null
+  verdict: string | null
+  c: number
+  clusters: number
+}
+
+/**
+ * RFC-014 verdict counts per service, read from the stamped
+ * fn.reachability props (written by the post-index hook / `codegraph
+ * query deadcode`). Services never classified return no rows.
+ */
+export const REACHABILITY_QUERY = `
+MATCH (fn)
+WHERE (fn:Function OR fn:Method)
+  AND fn.reachability IS NOT NULL
+  AND fn.scopeId = 'main'
+  AND fn.serviceName IS NOT NULL
+RETURN fn.serviceName AS svc, fn.reachability AS verdict, count(fn) AS c,
+       sum(CASE WHEN fn.deadCluster THEN 1 ELSE 0 END) AS clusters
+`
+
 export interface RecentDocLinkRow {
   docPath: string | null
   headingPath: string | null

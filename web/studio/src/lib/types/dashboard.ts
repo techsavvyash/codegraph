@@ -26,6 +26,16 @@ export interface SemanticState {
   embeddedChunks: number
 }
 
+export interface ReachabilitySummary {
+  live: number
+  testOnly: number
+  dead: number
+  /** Dead functions whose callers are all themselves dead. */
+  deadCluster: number
+  possiblyLive: number
+  unknown: number
+}
+
 export interface ServiceCard {
   name: string
   scopeId: string
@@ -42,6 +52,12 @@ export interface ServiceCard {
   docLinks: DocLinkCounts
   /** null when the service has no embedded chunks at all */
   semantic: SemanticState | null
+  /**
+   * RFC-014 verdict counts from stamped fn.reachability props; null when
+   * the service carries no verdicts yet (not re-indexed since the
+   * classifier shipped).
+   */
+  reachability: ReachabilitySummary | null
 }
 
 export interface CallHub {
