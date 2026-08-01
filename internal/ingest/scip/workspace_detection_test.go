@@ -132,3 +132,66 @@ func TestWorkspacePackageLanguagePrefersTypeScript(t *testing.T) {
 		t.Errorf("empty dir: got %q, want \"\"", got)
 	}
 }
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDetectAllLanguages_SvelteKitShape reproduces the web/studio detection
+// failure: pnpm-workspace.yaml present but declaring no packages (pure
+// config, e.g. onlyBuiltDependencies), package.json with a typescript
+// devDependency, NO root tsconfig.json (SvelteKit generates it under
+// .svelte-kit/). Detection must return one TypeScript root, not zero roots.
+func TestDetectAllLanguages_SvelteKitShape(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "pnpm-workspace.yaml"), "onlyBuiltDependencies:\n  - esbuild\n")
+	mustWriteFile(t, filepath.Join(dir, "package.json"),
+		`{"name":"studio","devDependencies":{"typescript":"^5.6.0","svelte":"^5.0.0"}}`)
+
+	roots, err := DetectAllLanguages(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].Language != LanguageTypeScript {
+		t.Fatalf("expected exactly one TypeScript root, got %+v", roots)
+	}
+}
+
+// TestDetectAllLanguages_PackageJSONWithoutTypeScript: package.json with no
+// typescript dependency and no tsconfig stays JavaScript.
+func TestDetectAllLanguages_PackageJSONWithoutTypeScript(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "package.json"), `{"name":"plainjs","dependencies":{"express":"^4.0.0"}}`)
+
+	roots, err := DetectAllLanguages(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].Language != LanguageJavaScript {
+		t.Fatalf("expected exactly one JavaScript root, got %+v", roots)
+	}
+}
+
+// TestDetectAllLanguages_RealWorkspaceStillClaimsRoot: a pnpm workspace WITH
+// packages must keep the original behavior — per-package roots, no phantom
+// root service.
+func TestDetectAllLanguages_RealWorkspaceStillClaimsRoot(t *testing.T) {
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "pnpm-workspace.yaml"), "packages:\n  - \"apps/*\"\n")
+	mustWriteFile(t, filepath.Join(dir, "package.json"), `{"name":"root","devDependencies":{"typescript":"^5.0.0"}}`)
+	mustWriteFile(t, filepath.Join(dir, "apps", "web", "package.json"), `{"name":"web","devDependencies":{"typescript":"^5.0.0"}}`)
+
+	roots, err := DetectAllLanguages(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].Language != LanguageTypeScript || filepath.Base(roots[0].Path) != "web" {
+		t.Fatalf("expected exactly the apps/web TypeScript root, got %+v", roots)
+	}
+}
