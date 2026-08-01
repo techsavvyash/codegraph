@@ -70,6 +70,20 @@ type ClassNode struct {
 	Decorators []DecoratorInfo
 }
 
+// CallSite is the callee-identifier position of one call-like expression:
+// the exact source location a SCIP Reference occurrence covers when the
+// reference is a genuine invocation (`foo()`, `obj.foo()`, `new Foo()`,
+// `@decorator`), as opposed to a function-VALUE use (`handler = foo`).
+type CallSite struct {
+	Line int // 1-based, matching FunctionNode.StartLine
+	Col  int // 0-based (tree-sitter convention), matching FunctionNode.StartCol
+	// Name is the callee identifier's text (`foo` for both `foo()` and
+	// `obj.foo()`), used for the line+name fallback when a consumer's column
+	// convention drifts from tree-sitter's byte columns (e.g. UTF-16-unit
+	// SCIP occurrences on non-ASCII lines).
+	Name string
+}
+
 // FileStructure is every function-like node in one file, in source order.
 type FileStructure struct {
 	Functions []FunctionNode
@@ -79,12 +93,41 @@ type FileStructure struct {
 	// nesting, but ClassDecoratorsAt lets callers attribute a method's
 	// position to its enclosing class's decorators.
 	Classes []ClassNode
+	// CallSites holds the callee-identifier position of every call-like
+	// expression in the file, in walk order. Only positions that resolve to
+	// a plain identifier path are recorded: computed callees (`f()()`,
+	// `arr[i]()`, `$dynamic()`) have no identifier to match a SCIP reference
+	// against and are deliberately absent.
+	CallSites []CallSite
 	// HasErrors reports that the parse tree contains ERROR or MISSING
 	// nodes. Extracted spans are still exact — tree-sitter error recovery
 	// localizes damage — but definitions inside error regions may be
 	// missing from Functions, so callers must fall back per definition,
 	// not per file.
 	HasErrors bool
+
+	// callSiteExact and callSiteNames are lookup indexes over CallSites,
+	// built once in Extract after the walk.
+	callSiteExact map[[2]int]bool
+	callSiteNames map[int]map[string]bool
+}
+
+// IsCallSiteAt reports whether a call-like expression's callee identifier
+// starts exactly at the 1-based line and 0-based column.
+func (fs *FileStructure) IsCallSiteAt(line, col int) bool {
+	return fs != nil && fs.callSiteExact[[2]int{line, col}]
+}
+
+// HasCallSiteOnLine reports whether any call site on the given line has the
+// given callee name — the fallback when exact column matching fails (column
+// encoding drift). Sound for edge existence: it can only confirm a name that
+// IS called on that line, so a value reference sharing the line with a
+// same-named call (`foo(foo)`) resolves to an edge the call itself justifies.
+func (fs *FileStructure) HasCallSiteOnLine(line int, name string) bool {
+	if fs == nil || name == "" {
+		return false
+	}
+	return fs.callSiteNames[line][name]
 }
 
 // Extract parses content and returns its function structure. It is safe for
@@ -105,6 +148,18 @@ func Extract(lang *Language, content []byte) (*FileStructure, error) {
 
 	fs := &FileStructure{HasErrors: tree.RootNode().HasError()}
 	collect(lang, tree.RootNode(), content, -1, fs)
+
+	fs.callSiteExact = make(map[[2]int]bool, len(fs.CallSites))
+	fs.callSiteNames = make(map[int]map[string]bool)
+	for _, cs := range fs.CallSites {
+		fs.callSiteExact[[2]int{cs.Line, cs.Col}] = true
+		names := fs.callSiteNames[cs.Line]
+		if names == nil {
+			names = make(map[string]bool)
+			fs.callSiteNames[cs.Line] = names
+		}
+		names[cs.Name] = true
+	}
 	return fs, nil
 }
 
@@ -151,6 +206,34 @@ func collect(lang *Language, n *sitter.Node, src []byte, parentIdx int, fs *File
 
 		fs.Functions = append(fs.Functions, fn)
 		nextParent = len(fs.Functions) - 1
+	}
+
+	if calleeField, ok := lang.callKinds[n.Kind()]; ok && n.IsNamed() {
+		if id := calleeIdentifier(calleeChild(n, calleeField)); id != nil {
+			fs.CallSites = append(fs.CallSites, CallSite{
+				Line: int(id.StartPosition().Row) + 1,
+				Col:  int(id.StartPosition().Column),
+				Name: nodeText(id, src),
+			})
+		}
+	}
+
+	// A bare decorator (`@foo` with no parens) still invokes foo(target) at
+	// definition time in TS/Python; when the decorator wraps a call
+	// (`@Get('/x')`) the inner call_expression records the site itself, so
+	// only the no-call shape is handled here.
+	if lang.hasCallDecorators && n.Kind() == "decorator" && n.IsNamed() {
+		if inner := firstNamedChild(n); inner != nil {
+			if _, isCall := lang.callKinds[inner.Kind()]; !isCall {
+				if id := calleeIdentifier(inner); id != nil {
+					fs.CallSites = append(fs.CallSites, CallSite{
+						Line: int(id.StartPosition().Row) + 1,
+						Col:  int(id.StartPosition().Column),
+						Name: nodeText(id, src),
+					})
+				}
+			}
+		}
 	}
 
 	if lang.hasDecorators && n.Kind() == "class_declaration" && n.IsNamed() {
@@ -371,6 +454,97 @@ func nodeText(n *sitter.Node, src []byte) string {
 		return ""
 	}
 	return string(src[s:e])
+}
+
+// calleeChild resolves a call-like node's callee expression: the named field
+// when the grammar has one, else per the descent tables (Java's
+// method_reference carries its name LAST: `Type::method`), else the first
+// named child (grammars like Kotlin put the callee first with no field name).
+func calleeChild(call *sitter.Node, field string) *sitter.Node {
+	if field != "" {
+		return call.ChildByFieldName(field)
+	}
+	if calleeDescendLast[call.Kind()] {
+		return lastNamedChild(call)
+	}
+	return firstNamedChild(call)
+}
+
+// calleeDescendField maps container node kinds to the field holding the
+// name-bearing part of a callee path (`obj.foo` → `foo`). Kinds here are
+// checked BEFORE the identifier-leaf test because some container kinds
+// ("scoped_identifier") contain "identifier" as a substring.
+var calleeDescendField = map[string]string{
+	"member_expression": "property",  // JS/TS: obj.prop
+	"attribute":         "attribute", // Python: obj.attr
+	"field_expression":  "field",     // Scala: obj.field
+	"scoped_identifier": "name",      // Java: a.b.C
+	"generic_type":      "type",      // Java: new Foo<T>() type wrapper
+}
+
+// calleeDescendLast are container kinds whose name-bearing part is the LAST
+// named child (grammars without a usable field on the container).
+var calleeDescendLast = map[string]bool{
+	"navigation_expression":  true, // Kotlin: obj.foo
+	"navigation_suffix":      true, // Kotlin: .foo
+	"scoped_type_identifier": true, // Java: a.b.C in new-expressions
+	"qualified_name":         true, // PHP: \App\foo
+	"method_reference":       true, // Java: Type::method
+}
+
+// calleeDescendFirst are transparent wrapper kinds whose sole meaningful
+// child carries the callee.
+var calleeDescendFirst = map[string]bool{
+	"parenthesized_expression": true, // (foo)()
+	"non_null_expression":      true, // TS: foo!()
+	"await_expression":         true,
+}
+
+// calleeIdentifier descends from a callee expression to the identifier a
+// SCIP reference occurrence would cover, or nil when the callee has no
+// static identifier (computed callees: `f()()`, `arr[i]()`, `$dyn()`).
+// The descent is a whitelist — an unrecognized container kind returns nil
+// rather than guessing, so an argument identifier is never mistaken for a
+// callee. Depth-capped defensively; real callee paths are shallow.
+func calleeIdentifier(n *sitter.Node) *sitter.Node {
+	for depth := 0; n != nil && depth < 12; depth++ {
+		kind := n.Kind()
+		if field, ok := calleeDescendField[kind]; ok {
+			n = n.ChildByFieldName(field)
+			continue
+		}
+		if calleeDescendLast[kind] {
+			n = lastNamedChild(n)
+			continue
+		}
+		if calleeDescendFirst[kind] {
+			n = firstNamedChild(n)
+			continue
+		}
+		if strings.Contains(kind, "identifier") || kind == "name" {
+			return n
+		}
+		return nil
+	}
+	return nil
+}
+
+func firstNamedChild(n *sitter.Node) *sitter.Node {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); c.IsNamed() {
+			return c
+		}
+	}
+	return nil
+}
+
+func lastNamedChild(n *sitter.Node) *sitter.Node {
+	for i := n.ChildCount(); i > 0; i-- {
+		if c := n.Child(i - 1); c.IsNamed() {
+			return c
+		}
+	}
+	return nil
 }
 
 // InnermostAt returns the index of the innermost function containing the

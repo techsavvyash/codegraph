@@ -511,3 +511,145 @@ func TestByteRangesMatchSource(t *testing.T) {
 		t.Errorf("b text = %q", got)
 	}
 }
+
+// --- Call-site extraction (call vs function-value distinction) --------------
+
+// callSiteNames returns the set of callee names recorded for src.
+func callSiteNames(t *testing.T, lang, src string) map[string]bool {
+	t.Helper()
+	fs := extract(t, lang, src)
+	names := make(map[string]bool)
+	for _, cs := range fs.CallSites {
+		names[cs.Name] = true
+	}
+	return names
+}
+
+func TestCallSites_TypeScript(t *testing.T) {
+	src := `const saved = helper;
+const eager = compute();
+const obj = { fn: byValue };
+function run() {
+  const local = helper;
+  helper();
+  service.doWork();
+  const x = new Widget();
+  return arr.map((v) => square(v));
+}`
+	fs := extract(t, "typescript", src)
+
+	names := make(map[string]bool)
+	for _, cs := range fs.CallSites {
+		names[cs.Name] = true
+	}
+	for _, want := range []string{"compute", "helper", "doWork", "Widget", "square"} {
+		if !names[want] {
+			t.Errorf("call site %q not recorded; got %v", want, fs.CallSites)
+		}
+	}
+	for _, notWant := range []string{"saved", "byValue", "local", "arr"} {
+		if names[notWant] {
+			t.Errorf("value reference %q wrongly recorded as call site", notWant)
+		}
+	}
+
+	// compute() on line 2: callee identifier starts at col 14 (0-based).
+	if !fs.IsCallSiteAt(2, 14) {
+		t.Errorf("IsCallSiteAt(2, 14) = false for compute(); sites: %v", fs.CallSites)
+	}
+	// helper on line 1 is a value ref: no call site anywhere on that line.
+	if fs.IsCallSiteAt(1, 14) || fs.HasCallSiteOnLine(1, "helper") {
+		t.Error("value reference on line 1 must not be a call site")
+	}
+	// Fallback: helper() on line 6 by name.
+	if !fs.HasCallSiteOnLine(6, "helper") {
+		t.Error("HasCallSiteOnLine(6, helper) = false")
+	}
+	// doWork is the property of a member call: the recorded position must be
+	// the METHOD identifier, not the object.
+	if !fs.HasCallSiteOnLine(7, "doWork") || fs.HasCallSiteOnLine(7, "service") {
+		t.Errorf("member call must record the property identifier only; sites: %v", fs.CallSites)
+	}
+}
+
+func TestCallSites_ComputedCalleesAbsent(t *testing.T) {
+	src := `function run() {
+  factory()();
+  table[i]();
+  (cond ? a : b)();
+}`
+	fs := extract(t, "typescript", src)
+	// factory() itself is a call; the outer () and the other computed callees
+	// must record nothing.
+	if len(fs.CallSites) != 1 || fs.CallSites[0].Name != "factory" {
+		t.Errorf("computed callees must not be recorded; got %v", fs.CallSites)
+	}
+}
+
+func TestCallSites_Decorators(t *testing.T) {
+	tsSrc := `@Injectable
+@Controller('users')
+class UsersController {
+  @Get()
+  list() { return []; }
+}`
+	names := callSiteNames(t, "typescript", tsSrc)
+	for _, want := range []string{"Injectable", "Controller", "Get"} {
+		if !names[want] {
+			t.Errorf("decorator %q not recorded as call site; got %v", want, names)
+		}
+	}
+
+	pySrc := "@login_required\n@app.route('/x')\ndef view():\n    pass\n"
+	pyNames := callSiteNames(t, "python", pySrc)
+	if !pyNames["login_required"] || !pyNames["route"] {
+		t.Errorf("python decorators not recorded: %v", pyNames)
+	}
+
+	// Java annotations are NOT calls and must not be recorded.
+	javaSrc := "class A {\n  @Override\n  public void run() { helper(); }\n}"
+	javaNames := callSiteNames(t, "java", javaSrc)
+	if javaNames["Override"] {
+		t.Error("java annotation wrongly recorded as call site")
+	}
+	if !javaNames["helper"] {
+		t.Errorf("java method invocation missing: %v", javaNames)
+	}
+}
+
+func TestCallSites_AllLanguages(t *testing.T) {
+	cases := []struct {
+		lang, src string
+		want      []string
+		notWant   []string
+	}{
+		{"javascript", "const v = fn;\nrun();\nobj.method();\nconst w = new Thing();", []string{"run", "method", "Thing"}, []string{"fn", "v", "obj"}},
+		{"python", "saved = handler\nresult = compute()\nobj.method()\n", []string{"compute", "method"}, []string{"handler", "saved"}},
+		{"java", "class A { void m() { helper(); obj.call2(); A a = new A(); Runnable r = A::m; } }", []string{"helper", "call2", "A", "m"}, []string{"r"}},
+		{"scala", "object Main { val saved = handler _\n  def m(): Unit = { helper(); obj.method() } }", []string{"helper", "method"}, nil},
+		{"kotlin", "fun m() { helper()\n  obj.method()\n  val saved = ::handler }", []string{"helper", "method"}, []string{"handler", "saved"}},
+		{"php", "<?php\n$saved = 'fn';\nhelper();\n$obj->method();\nApp\\Util::stat1();\nnew Widget();\n", []string{"helper", "method", "stat1", "Widget"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			names := callSiteNames(t, tc.lang, tc.src)
+			for _, w := range tc.want {
+				if !names[w] {
+					t.Errorf("%s: call site %q missing; got %v", tc.lang, w, names)
+				}
+			}
+			for _, nw := range tc.notWant {
+				if names[nw] {
+					t.Errorf("%s: %q wrongly recorded as call site", tc.lang, nw)
+				}
+			}
+		})
+	}
+}
+
+func TestCallSites_NilStructureSafe(t *testing.T) {
+	var fs *FileStructure
+	if fs.IsCallSiteAt(1, 0) || fs.HasCallSiteOnLine(1, "x") {
+		t.Error("nil FileStructure must report no call sites")
+	}
+}
