@@ -188,10 +188,10 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	totalCalls := 0
-	for _, filePath := range files {
-		n, err := cg.processFile(ctx, filePath)
+	for _, f := range files {
+		n, err := cg.processFile(ctx, f.Path, f.ID)
 		if err != nil {
-			fmt.Printf("Warning: call graph for %s: %v\n", filePath, err)
+			fmt.Printf("Warning: call graph for %s: %v\n", f.Path, err)
 			continue
 		}
 		totalCalls += n
@@ -207,12 +207,13 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	return nil
 }
 
-// listFiles returns file paths owned by the service.
-func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, error) {
+// listFiles returns the files owned by the service, with element IDs so
+// module-scope call sites can be attributed to the File node.
+func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]fileRef, error) {
 	query := `
 		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
 		WHERE f.scopeId = $scopeId
-		RETURN f.path AS path
+		RETURN f.path AS path, elementId(f) AS id
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
 		"scopeId":     cg.scopeCtx.ScopeID,
@@ -222,24 +223,29 @@ func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, err
 		return nil, err
 	}
 
-	paths := make([]string, 0, len(results))
+	files := make([]fileRef, 0, len(results))
 	for _, rec := range results {
-		p := getStringFromMap(rec.AsMap(), "path")
-		if p != "" {
-			paths = append(paths, p)
+		m := rec.AsMap()
+		p := getStringFromMap(m, "path")
+		id := getStringFromMap(m, "id")
+		if p != "" && id != "" {
+			files = append(files, fileRef{Path: p, ID: id})
 		}
 	}
-	return paths, nil
+	return files, nil
 }
 
 // processFile computes function body ranges from the file's tree-sitter
-// structure (RFC-010), then maps references to enclosing callers and creates
-// CALLS edges.
-func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath string) (int, error) {
+// structure (RFC-010), then classifies references against the file's call
+// sites and creates CALLS edges — from the enclosing Function/Method for
+// in-body calls, from the File node (fileID) for module-scope calls.
+func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath, fileID string) (int, error) {
 	// Step 1: Get all Function/Method nodes in this file with their SCIP
-	// identifier positions.
+	// identifier positions. A file with zero function nodes can still hold
+	// module-scope call sites (a top-level bootstrap script), so processing
+	// continues on empty.
 	funcs, err := cg.getFunctionsInFile(ctx, filePath)
-	if err != nil || len(funcs) == 0 {
+	if err != nil {
 		return 0, err
 	}
 
@@ -258,8 +264,10 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 
 	// Step 3: Write the resolved ranges to Neo4j so downstream tools have
 	// body ranges.
-	if err := cg.updateBodyRanges(ctx, funcs); err != nil {
-		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+	if len(funcs) > 0 {
+		if err := cg.updateBodyRanges(ctx, funcs); err != nil {
+			fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+		}
 	}
 
 	// Step 4: Query references in this file that point to project-internal symbols.
@@ -268,8 +276,10 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 		return 0, err
 	}
 
-	// Step 5: Map references to enclosing callers and create CALLS edges.
-	edges := resolveGenericCallEdges(refs, funcs)
+	// Step 5: Classify references against call sites (nil when no grammar is
+	// wired — then the legacy in-body-only behavior applies) and create
+	// CALLS edges.
+	edges := resolveGenericCallEdges(refs, funcs, callSiteIndexFromStructure(fs), fileID)
 
 	created := 0
 	for _, e := range edges {
@@ -297,23 +307,38 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 // sites in this file.
 type genericCallEdge = minLineEdge
 
-// resolveGenericCallEdges maps raw reference rows to their enclosing caller
-// and collapses multiple call sites between the same (caller, target) pair
-// into a single edge, deterministically keeping the smallest call-site line.
-// Shares its dedup logic with the Go/SCIP builder's resolveCallEdges via
-// collapseToMinLinePerPair — see that function's doc for why order-dependent
-// "first wins" resolution is wrong here (this was the same nondeterministic
-// CALLS.line bug found and fixed in call_graph_scip.go).
+// resolveGenericCallEdges classifies raw reference rows against the file's
+// call sites, maps genuine calls to their enclosing caller (or the File node
+// for module-scope sites), and collapses multiple call sites between the
+// same (caller, target) pair into a single edge, deterministically keeping
+// the smallest call-site line. Shares dedup with the Go builder via
+// collapseToMinLinePerPair, and mirrors its classification exactly (see
+// resolveCallEdges in call_graph_scip.go):
+//
+//   - sites == nil (no grammar wired / unreadable file): legacy behavior —
+//     every in-body reference becomes an edge, module-scope refs drop.
+//     Filtering or attributing on zero evidence would be guessing.
+//   - not a call site → no edge (function-VALUE reference)
+//   - call site inside a body → (Function|Method)-[:CALLS]->
+//   - call site outside every body → (File)-[:CALLS]-> (fileID), covering
+//     top-level statements AND class property initializers (`x = compute()`
+//     runs at construction; File attribution over-approximates to load time,
+//     which is the conservative direction for liveness).
 //
 // Pure function, no I/O — testable without Neo4j.
-func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo) []genericCallEdge {
+func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo, sites *callSiteIndex, fileID string) []genericCallEdge {
 	triples := make([]minLineEdge, 0, len(refs))
 	for _, ref := range refs {
-		caller := findEnclosingGenericFunc(funcs, ref.line)
-		if caller == nil {
+		if sites != nil && !sites.isCallSite(ref.line, ref.col, ref.name) {
 			continue
 		}
-		triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+		caller := findEnclosingGenericFunc(funcs, ref.line)
+		switch {
+		case caller != nil:
+			triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+		case sites != nil && fileID != "":
+			triples = append(triples, minLineEdge{CallerID: fileID, TargetID: ref.targetID, Line: ref.line})
+		}
 	}
 	return collapseToMinLinePerPair(triples)
 }
@@ -359,9 +384,14 @@ func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, fileP
 	return funcs, nil
 }
 
-// refInfo holds a reference's line and the target function's element ID.
+// refInfo holds a reference's position, the referenced function's name as it
+// appears at the site (the DIRECT target's name, stable across IMPLEMENTS
+// fan-out), and the target function's element ID. col is -1 when the
+// Reference node predates column stamping.
 type refInfo struct {
 	line     int
+	col      int
+	name     string
 	targetID string
 }
 
@@ -398,6 +428,8 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 		       ELSE [directTarget]
 		  END AS target
 		RETURN ref.startLine AS refLine,
+		       coalesce(ref.startColumn, -1) AS refCol,
+		       directTarget.name AS refName,
 		       elementId(target) AS targetId
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -416,7 +448,12 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 		line := int(getInt64FromMap(rm, "refLine"))
 		targetID := getStringFromMap(rm, "targetId")
 		if line > 0 && targetID != "" {
-			refs = append(refs, refInfo{line: line, targetID: targetID})
+			refs = append(refs, refInfo{
+				line:     line,
+				col:      int(getInt64FromMap(rm, "refCol")),
+				name:     getStringFromMap(rm, "refName"),
+				targetID: targetID,
+			})
 		}
 	}
 	return refs, nil

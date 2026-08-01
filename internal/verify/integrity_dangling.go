@@ -47,8 +47,11 @@ func hasAnyLabelSet(nodeLabels []string, allowed [][]string) bool {
 func danglingEndpointShapes() []relShape {
 	return []relShape{
 		{
-			relType:    "CALLS",
-			fromLabels: [][]string{{"Function"}, {"Method"}},
+			relType: "CALLS",
+			// File callers are module-scope call sites (package-level var
+			// initializers, top-level statements) attributed to the file
+			// itself — import-time invocation, see call_sites.go.
+			fromLabels: [][]string{{"Function"}, {"Method"}, {"File"}},
 			toLabels:   [][]string{{"Function"}, {"Method"}},
 		},
 		{

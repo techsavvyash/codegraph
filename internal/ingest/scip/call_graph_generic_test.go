@@ -34,8 +34,8 @@ func TestResolveGenericCallEdgesDeterministicMinLine(t *testing.T) {
 		{line: 15, targetID: "greet"},
 	}
 
-	edgesA := resolveGenericCallEdges(refsLine15First, funcs)
-	edgesB := resolveGenericCallEdges(refsLine10First, funcs)
+	edgesA := resolveGenericCallEdges(refsLine15First, funcs, nil, "")
+	edgesB := resolveGenericCallEdges(refsLine10First, funcs, nil, "")
 
 	for name, edges := range map[string][]genericCallEdge{"line15First": edgesA, "line10First": edgesB} {
 		if len(edges) != 1 {
@@ -71,7 +71,7 @@ func TestResolveGenericCallEdgesKeepsSelfCallsDropsUnresolvedCallers(t *testing.
 		{line: 100, targetID: "helper"}, // line 100 has no enclosing caller
 	}
 
-	edges := resolveGenericCallEdges(refs, funcs)
+	edges := resolveGenericCallEdges(refs, funcs, nil, "")
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge (the self-call survives, the unresolved-caller row is dropped), got %d: %+v", len(edges), edges)
 	}
@@ -95,7 +95,7 @@ func TestResolveGenericCallEdgesMultipleDistinctPairs(t *testing.T) {
 		{line: 45, targetID: "greet"}, // different caller (helper), same target
 	}
 
-	edges := resolveGenericCallEdges(refs, funcs)
+	edges := resolveGenericCallEdges(refs, funcs, nil, "")
 	if len(edges) != 2 {
 		t.Fatalf("expected 2 distinct edges, got %d: %+v", len(edges), edges)
 	}

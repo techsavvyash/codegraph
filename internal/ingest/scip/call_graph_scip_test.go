@@ -355,8 +355,8 @@ func TestResolveCallEdgesDeterministicMinLine(t *testing.T) {
 		{Line: 15, TargetID: "greet"},
 	}
 
-	edgesA := resolveCallEdges(rowsLine15First, callers, nil)
-	edgesB := resolveCallEdges(rowsLine10First, callers, nil)
+	edgesA := resolveCallEdges(rowsLine15First, callers, nil, nil, "")
+	edgesB := resolveCallEdges(rowsLine10First, callers, nil, nil, "")
 
 	for name, edges := range map[string][]callEdge{"line15First": edgesA, "line10First": edgesB} {
 		if len(edges) != 1 {
@@ -394,7 +394,7 @@ func TestResolveCallEdgesBranchMetadataFollowsWinningLine(t *testing.T) {
 		{Line: 10, TargetID: "greet"}, // not inside any conditional, and smaller
 	}
 
-	edges := resolveCallEdges(rows, callers, branches)
+	edges := resolveCallEdges(rows, callers, branches, nil, "")
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge, got %d: %+v", len(edges), edges)
 	}
@@ -424,7 +424,7 @@ func TestResolveCallEdgesKeepsSelfCallsDropsUnresolvedCallers(t *testing.T) {
 		{Line: 100, TargetID: "helper"}, // line 100 has no enclosing caller
 	}
 
-	edges := resolveCallEdges(rows, callers, nil)
+	edges := resolveCallEdges(rows, callers, nil, nil, "")
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge (the self-call survives, the unresolved-caller row is dropped), got %d: %+v", len(edges), edges)
 	}

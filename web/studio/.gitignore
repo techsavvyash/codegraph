@@ -5,3 +5,4 @@ node_modules
 /playwright-report
 vite.config.ts.timestamp-*
 .server.log
+server.log
