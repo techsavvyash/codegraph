@@ -14,6 +14,7 @@ import (
 	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
 	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/query/reachability"
 	"github.com/context-maximiser/code-graph/internal/verify"
 	"github.com/context-maximiser/code-graph/internal/verify/telemetry"
 	"github.com/spf13/cobra"
@@ -170,6 +171,20 @@ func runPostIndexChecks(ctx context.Context, client *graphneo4j.Client, serviceN
 				fmt.Printf("  ⚠ %-25s %.0f → %.0f  %s\n", d.Counter, d.Previous, d.Current, d.Detail)
 			}
 		}
+	}
+
+	// RFC-014 reachability verdicts, stamped so they're fresh after every
+	// index (same best-effort contract as the checks around it).
+	if reach, rerr := reachability.Compute(ctx, client, reachability.Options{
+		ServiceName: serviceName,
+		ScopeID:     scopeID,
+	}); rerr != nil {
+		fmt.Printf("WARNING: reachability classification failed: %v\n", rerr)
+	} else if serr := reachability.Stamp(ctx, client, reach); serr != nil {
+		fmt.Printf("WARNING: reachability verdicts not stamped: %v\n", serr)
+	} else {
+		fmt.Printf("Reachability: live=%d test_only=%d dead=%d (%d in clusters) unknown=%d [roots: %d app, %d test]\n",
+			reach.Live, reach.TestOnly, reach.Dead, reach.DeadCluster, reach.Unknown, reach.Roots, reach.TestRoots)
 	}
 
 	report, err := verify.RunIntegrity(ctx, client, verify.IntegrityOptions{
