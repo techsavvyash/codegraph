@@ -15,6 +15,7 @@ type counters struct {
 	Methods             int64
 	Symbols             int64
 	CallsEdges          int64
+	UsesValueEdges      int64
 	ImplementsEdges     int64
 	APIRoutes           int64
 	RangeSourceDist     map[string]int64
@@ -75,6 +76,15 @@ func computeCounters(ctx context.Context, client *neo4j.Client, serviceName, sco
 		RETURN count(r) AS n
 	`, params, &c.CallsEdges); err != nil {
 		return nil, fmt.Errorf("calls edges: %w", err)
+	}
+
+	if err := scanScalar(ctx, client, `
+		MATCH (a)-[r:USES_VALUE]->(b)
+		WHERE a.serviceName = $serviceName AND a.scopeId = $scopeId
+		  AND b.serviceName = $serviceName AND b.scopeId = $scopeId
+		RETURN count(r) AS n
+	`, params, &c.UsesValueEdges); err != nil {
+		return nil, fmt.Errorf("uses_value edges: %w", err)
 	}
 
 	if err := scanScalar(ctx, client, `

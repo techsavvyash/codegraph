@@ -68,6 +68,10 @@ type TSOracleStats struct {
 	SkippedUnresolved      int `json:"skippedUnresolved"`
 	SkippedNoEnclosure     int `json:"skippedNoEnclosure"`
 	SkippedSuperOrDynamic  int `json:"skippedSuperOrDynamic"`
+	// SkippedDecorator counts call sites inside decorator expressions —
+	// module-load-time executions the graph attributes to the File node,
+	// outside this oracle's Function/Method-caller model.
+	SkippedDecorator int `json:"skippedDecorator"`
 }
 
 // TSOracleOutput is the full JSON document oracle.mjs writes to stdout/--out.
@@ -440,9 +444,10 @@ func RunTSOracle(ctx context.Context, client *neo4j.Client, opts TSOracleOptions
 	report.Notes = append(report.Notes,
 		fmt.Sprintf("sample size requested=%d, qualifying call sites in project=%d, sampled=%d",
 			opts.SampleSize, output.Stats.Qualifying, output.Stats.Sampled),
-		fmt.Sprintf("skip taxonomy: external=%d, anonymousCaller=%d, anonymousCallee=%d, unresolved=%d, noEnclosure=%d, superOrDynamic=%d",
+		fmt.Sprintf("skip taxonomy: external=%d, anonymousCaller=%d, anonymousCallee=%d, unresolved=%d, noEnclosure=%d, superOrDynamic=%d, decorator=%d",
 			output.Stats.SkippedExternal, output.Stats.SkippedAnonymousCaller, output.Stats.SkippedAnonymousCallee,
-			output.Stats.SkippedUnresolved, output.Stats.SkippedNoEnclosure, output.Stats.SkippedSuperOrDynamic),
+			output.Stats.SkippedUnresolved, output.Stats.SkippedNoEnclosure, output.Stats.SkippedSuperOrDynamic,
+			output.Stats.SkippedDecorator),
 		fmt.Sprintf("%d/%d sampled sites excluded from the recall denominator: caller or callee node missing from the graph entirely (census territory, not a recall/precision signal for this oracle)",
 			missingNodes, len(output.Sites)),
 	)

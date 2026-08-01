@@ -25,6 +25,7 @@ func diffRuns(previous, current *RunRecord) []Drift {
 		{name: "methods", prev: previous.Methods, cur: current.Methods},
 		{name: "symbols", prev: previous.Symbols, cur: current.Symbols},
 		{name: "callsEdges", prev: previous.CallsEdges, cur: current.CallsEdges},
+		{name: "usesValueEdges", prev: previous.UsesValueEdges, cur: current.UsesValueEdges},
 		{name: "implementsEdges", prev: previous.ImplementsEdges, cur: current.ImplementsEdges},
 		{name: "apiRoutes", prev: previous.APIRoutes, cur: current.APIRoutes},
 		{name: "promotedFunctions", prev: previous.PromotedFunctions, cur: current.PromotedFunctions},

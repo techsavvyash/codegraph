@@ -158,6 +158,21 @@ function isNonDeclarationProjectFile(fileName, projectRootAbs) {
 // callback nested inside a named outer function still means the call site's
 // direct enclosure is anonymous, and per the brief such sites are skipped
 // entirely — we do not attribute the call to the outer named function).
+// insideDecorator reports whether `node` sits anywhere inside a Decorator
+// node (`@Get()`, `@RequirePermission('perm')`, including calls nested in
+// decorator arguments). Such calls run at class-definition (module-load)
+// time, so the graph's File-caller attribution is correct and this oracle's
+// Function/Method-caller model deliberately excludes them.
+function insideDecorator(ts, node) {
+  for (let cur = node.parent; cur; cur = cur.parent) {
+    if (ts.isDecorator(cur)) return true;
+    // A decorator cannot span a function/class-body boundary upward; stop
+    // at the first declaration-like ancestor to keep the walk cheap.
+    if (ts.isFunctionLike(cur) || ts.isSourceFile(cur)) return false;
+  }
+  return false;
+}
+
 function namedEnclosure(ts, node, sourceFile) {
   let cur = node.parent;
   while (cur) {
@@ -314,6 +329,7 @@ function main() {
     skippedUnresolved: 0,
     skippedNoEnclosure: 0,
     skippedSuperOrDynamic: 0,
+    skippedDecorator: 0,
   };
 
   /** @type {object[]} */
@@ -335,6 +351,19 @@ function main() {
         // useful for them.
         if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
           stats.skippedSuperOrDynamic++;
+          ts.forEachChild(node, visit);
+          return;
+        }
+
+        // Decorator invocations (`@RequirePermission('x')` above a method)
+        // execute at CLASS-DEFINITION time (module load), not when the
+        // decorated function runs. The graph attributes them to the File
+        // node ((File)-[:CALLS]->, module-scope semantics); this oracle only
+        // models Function/Method callers, and walking up from the call would
+        // wrongly land on the DECORATED declaration — so they're their own
+        // skip category, not a recall gap.
+        if (insideDecorator(ts, node)) {
+          stats.skippedDecorator++;
           ts.forEachChild(node, visit);
           return;
         }

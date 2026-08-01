@@ -29,6 +29,7 @@ type RunRecord struct {
 	Methods             int64            `json:"methods"`
 	Symbols             int64            `json:"symbols"`
 	CallsEdges          int64            `json:"callsEdges"`
+	UsesValueEdges      int64            `json:"usesValueEdges"`
 	ImplementsEdges     int64            `json:"implementsEdges"`
 	APIRoutes           int64            `json:"apiRoutes"`
 	CallsPerFunction    float64          `json:"callsPerFunction"`
@@ -83,6 +84,7 @@ func RecordIndexRun(ctx context.Context, client *neo4j.Client, serviceName, scop
 		Methods:             c.Methods,
 		Symbols:             c.Symbols,
 		CallsEdges:          c.CallsEdges,
+		UsesValueEdges:      c.UsesValueEdges,
 		ImplementsEdges:     c.ImplementsEdges,
 		APIRoutes:           c.APIRoutes,
 		CallsPerFunction:    callsPerFunction(c.CallsEdges, c.Functions, c.Methods),
@@ -137,6 +139,7 @@ func persistRun(ctx context.Context, client *neo4j.Client, r *RunRecord) error {
 		"methods":             r.Methods,
 		"symbols":             r.Symbols,
 		"callsEdges":          r.CallsEdges,
+		"usesValueEdges":      r.UsesValueEdges,
 		"implementsEdges":     r.ImplementsEdges,
 		"apiRoutes":           r.APIRoutes,
 		"callsPerFunction":    r.CallsPerFunction,
@@ -158,6 +161,7 @@ func persistRun(ctx context.Context, client *neo4j.Client, r *RunRecord) error {
 			methods: $methods,
 			symbols: $symbols,
 			callsEdges: $callsEdges,
+			usesValueEdges: $usesValueEdges,
 			implementsEdges: $implementsEdges,
 			apiRoutes: $apiRoutes,
 			callsPerFunction: $callsPerFunction,

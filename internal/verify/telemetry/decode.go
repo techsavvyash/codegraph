@@ -31,6 +31,7 @@ func recordFromProps(props map[string]any) (*RunRecord, error) {
 		Methods:          asInt64(props["methods"]),
 		Symbols:          asInt64(props["symbols"]),
 		CallsEdges:       asInt64(props["callsEdges"]),
+		UsesValueEdges:   asInt64(props["usesValueEdges"]),
 		ImplementsEdges:  asInt64(props["implementsEdges"]),
 		APIRoutes:        asInt64(props["apiRoutes"]),
 		CallsPerFunction: asFloat64(props["callsPerFunction"]),
