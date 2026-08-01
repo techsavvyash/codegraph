@@ -1410,6 +1410,23 @@
     {
       "type": "CALLS",
       "startLabels": [
+        "File"
+      ],
+      "startKey": "file:polyglot/frontend:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:polyglot/frontend:src/index.ts#scip-typescript npm tiny-polyglot-frontend 1.0.0 src/`index.ts`/main().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 23,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
         "Function"
       ],
       "startKey": "func:polyglot/backend:server.go#scip-go gomod example.com/polyglot/backend . `example.com/polyglot/backend`/main().",

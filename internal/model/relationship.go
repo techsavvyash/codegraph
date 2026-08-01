@@ -10,9 +10,17 @@ const (
 	ReferencesRel RelationshipType = "REFERENCES"
 
 	// Behavioral Relationships
-	CallsRel    RelationshipType = "CALLS"
-	FlowsToRel  RelationshipType = "FLOWS_TO"
-	NextExecRel RelationshipType = "NEXT_EXECUTION"
+	CallsRel RelationshipType = "CALLS"
+	// UsesValueRel records a function-VALUE reference (`handler = fn`,
+	// `wrap(fn)`) from the enclosing Function/Method — or the File for
+	// module-scope references — to the referenced function. NOT a call:
+	// kept as a distinct edge so liveness analysis can treat address-taken
+	// functions as conservatively live (a callback passed by value and
+	// invoked dynamically must never be classified dead) without the CALLS
+	// graph fabricating invocations that never happen.
+	UsesValueRel RelationshipType = "USES_VALUE"
+	FlowsToRel   RelationshipType = "FLOWS_TO"
+	NextExecRel  RelationshipType = "NEXT_EXECUTION"
 
 	// Object-Oriented Relationships
 	InheritsFromRel RelationshipType = "INHERITS_FROM"

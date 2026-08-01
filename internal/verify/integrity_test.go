@@ -134,8 +134,10 @@ func TestToStringSlice(t *testing.T) {
 
 func TestDanglingEndpointShapesCoverAllSevenRelTypes(t *testing.T) {
 	// RFC-013 lists CALLS, IMPLEMENTS, CONTAINS, DEFINES, REFERENCES,
-	// EXPOSES_API as the endpoint-checked relationship types.
-	want := []string{"CALLS", "IMPLEMENTS", "CONTAINS", "DEFINES", "REFERENCES", "EXPOSES_API"}
+	// EXPOSES_API as the endpoint-checked relationship types; USES_VALUE
+	// (address-taken function references) joined with the call-vs-value
+	// classification work (tasks #18/#19).
+	want := []string{"CALLS", "USES_VALUE", "IMPLEMENTS", "CONTAINS", "DEFINES", "REFERENCES", "EXPOSES_API"}
 	shapes := danglingEndpointShapes()
 	got := make([]string, 0, len(shapes))
 	for _, s := range shapes {

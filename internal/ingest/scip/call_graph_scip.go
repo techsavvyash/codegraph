@@ -452,7 +452,7 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath, fileI
 		})
 	}
 
-	edges := resolveCallEdges(rows, callers, branches, callSites, fileID)
+	edges, valueEdges := resolveCallEdges(rows, callers, branches, callSites, fileID)
 
 	created := 0
 	for _, e := range edges {
@@ -471,6 +471,23 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath, fileI
 			continue
 		}
 		created++
+	}
+
+	// Address-taken references (`cfg.Fn = handler`) — distinct edge type so
+	// liveness can keep such functions conservatively alive without CALLS
+	// fabricating invocations. Not counted in `created`: the returned count
+	// feeds the "CALLS relationships" log line and telemetry expectations.
+	for _, e := range valueEdges {
+		if _, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID, string(models.UsesValueRel),
+			nil,
+			map[string]any{
+				"line":     e.Line,
+				"filePath": filePath,
+				"scope":    cg.scopeCtx.Scope,
+				"scopeId":  cg.scopeCtx.ScopeID,
+			}); err != nil {
+			fmt.Printf("Warning: failed to create USES_VALUE edge: %v\n", err)
+		}
 	}
 
 	return created, nil
@@ -508,23 +525,35 @@ type callEdge struct {
 // that was actually kept.
 //
 // Classification (RFC-013 follow-up, tasks #18/#19):
-//   - not a call site (function-VALUE reference, `handler = fn`) → no edge
+//   - not a call site (function-VALUE reference, `handler = fn`) →
+//     (caller|File)-[:USES_VALUE]-> — returned separately, NOT a CALLS
+//     edge. Kept in-graph so liveness can treat address-taken functions as
+//     conservatively live (dynamic dispatch through a stored callback).
 //   - call site inside a function body → (Function|Method)-[:CALLS]->
 //   - call site outside every body (package-level var initializer) →
 //     (File)-[:CALLS]->, import-time invocation
 //
-// A nil sites index disables both behaviors (legacy: every in-body ref is an
-// edge, module-scope refs drop) — the Go path always has one, but the shared
-// shape keeps the generic builder's no-grammar fallback honest.
+// A nil sites index disables classification entirely (legacy: every in-body
+// ref is a CALLS edge, module-scope refs drop, no USES_VALUE) — the Go path
+// always has one, but the shared shape keeps the generic builder's
+// no-grammar fallback honest.
 //
 // Pure function, no I/O — testable without Neo4j.
-func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branchRange, sites *callSiteIndex, fileID string) []callEdge {
+func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branchRange, sites *callSiteIndex, fileID string) ([]callEdge, []minLineEdge) {
 	triples := make([]minLineEdge, 0, len(rows))
+	var valueTriples []minLineEdge
 	for _, row := range rows {
-		if sites != nil && !sites.isCallSite(row.Line, row.Col, row.Name) {
-			continue // function-value reference, not an invocation
-		}
 		caller := findEnclosingCaller(callers, row.Line)
+		if sites != nil && !sites.isCallSite(row.Line, row.Col, row.Name) {
+			// Function-value reference: record who takes the address.
+			switch {
+			case caller != nil:
+				valueTriples = append(valueTriples, minLineEdge{CallerID: caller.ID, TargetID: row.TargetID, Line: row.Line})
+			case fileID != "":
+				valueTriples = append(valueTriples, minLineEdge{CallerID: fileID, TargetID: row.TargetID, Line: row.Line})
+			}
+			continue
+		}
 		switch {
 		case caller != nil:
 			triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: row.TargetID, Line: row.Line})
@@ -548,7 +577,7 @@ func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branch
 			IsConditional: isCond,
 		})
 	}
-	return out
+	return out, collapseToMinLinePerPair(valueTriples)
 }
 
 // upgradeClosureVarsToFunction adds the :Function label to Variable nodes

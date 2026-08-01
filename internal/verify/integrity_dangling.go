@@ -55,6 +55,13 @@ func danglingEndpointShapes() []relShape {
 			toLabels:   [][]string{{"Function"}, {"Method"}},
 		},
 		{
+			relType: "USES_VALUE",
+			// Address-taken function references (`cfg.Fn = handler`): same
+			// caller shapes as CALLS, same targets — see call_sites.go.
+			fromLabels: [][]string{{"Function"}, {"Method"}, {"File"}},
+			toLabels:   [][]string{{"Function"}, {"Method"}},
+		},
+		{
 			relType:    "IMPLEMENTS",
 			fromLabels: [][]string{{"Method"}, {"Variable"}, {"Class"}, {"Interface"}},
 			toLabels:   [][]string{{"Method"}, {"Class"}, {"Interface"}, {"Symbol"}},

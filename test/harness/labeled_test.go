@@ -144,7 +144,10 @@ func (m *labeledMatcher) nodeWhereClause(v, paramPrefix string, spec nodeSpec) (
 		params[paramPrefix+"name"] = spec.Name
 	}
 	if spec.File != "" {
-		conds = append(conds, fmt.Sprintf("%s.filePath ENDS WITH $%sfile", v, paramPrefix))
+		// File nodes carry `path`; code nodes carry `filePath`. coalesce
+		// lets one spec shape address both (needed for File-CALLS module-
+		// scope caller assertions).
+		conds = append(conds, fmt.Sprintf("coalesce(%[1]s.filePath, %[1]s.path) ENDS WITH $%[2]sfile", v, paramPrefix))
 		params[paramPrefix+"file"] = spec.File
 	}
 	if spec.NodeKeyContains != "" {

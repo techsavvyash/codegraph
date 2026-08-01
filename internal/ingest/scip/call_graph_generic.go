@@ -278,8 +278,8 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath, fi
 
 	// Step 5: Classify references against call sites (nil when no grammar is
 	// wired — then the legacy in-body-only behavior applies) and create
-	// CALLS edges.
-	edges := resolveGenericCallEdges(refs, funcs, callSiteIndexFromStructure(fs), fileID)
+	// CALLS + USES_VALUE edges.
+	edges, valueEdges := resolveGenericCallEdges(refs, funcs, callSiteIndexFromStructure(fs), fileID)
 
 	created := 0
 	for _, e := range edges {
@@ -295,6 +295,21 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath, fi
 			continue
 		}
 		created++
+	}
+
+	// Address-taken references — see resolveGenericCallEdges. Not counted in
+	// `created` (that count is the CALLS log/telemetry figure).
+	for _, e := range valueEdges {
+		if _, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID,
+			string(models.UsesValueRel), nil,
+			map[string]any{
+				"line":     e.Line,
+				"filePath": filePath,
+				"scope":    cg.scopeCtx.Scope,
+				"scopeId":  cg.scopeCtx.ScopeID,
+			}); err != nil {
+			fmt.Printf("Warning: failed to create USES_VALUE edge: %v\n", err)
+		}
 	}
 
 	return created, nil
@@ -316,9 +331,11 @@ type genericCallEdge = minLineEdge
 // resolveCallEdges in call_graph_scip.go):
 //
 //   - sites == nil (no grammar wired / unreadable file): legacy behavior —
-//     every in-body reference becomes an edge, module-scope refs drop.
-//     Filtering or attributing on zero evidence would be guessing.
-//   - not a call site → no edge (function-VALUE reference)
+//     every in-body reference becomes a CALLS edge, module-scope refs drop,
+//     no USES_VALUE. Filtering or attributing on zero evidence would be
+//     guessing.
+//   - not a call site → (caller|File)-[:USES_VALUE]-> (second return):
+//     address-taken, kept for liveness, never a CALLS edge
 //   - call site inside a body → (Function|Method)-[:CALLS]->
 //   - call site outside every body → (File)-[:CALLS]-> (fileID), covering
 //     top-level statements AND class property initializers (`x = compute()`
@@ -326,13 +343,20 @@ type genericCallEdge = minLineEdge
 //     which is the conservative direction for liveness).
 //
 // Pure function, no I/O — testable without Neo4j.
-func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo, sites *callSiteIndex, fileID string) []genericCallEdge {
+func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo, sites *callSiteIndex, fileID string) ([]genericCallEdge, []minLineEdge) {
 	triples := make([]minLineEdge, 0, len(refs))
+	var valueTriples []minLineEdge
 	for _, ref := range refs {
+		caller := findEnclosingGenericFunc(funcs, ref.line)
 		if sites != nil && !sites.isCallSite(ref.line, ref.col, ref.name) {
+			switch {
+			case caller != nil:
+				valueTriples = append(valueTriples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+			case fileID != "":
+				valueTriples = append(valueTriples, minLineEdge{CallerID: fileID, TargetID: ref.targetID, Line: ref.line})
+			}
 			continue
 		}
-		caller := findEnclosingGenericFunc(funcs, ref.line)
 		switch {
 		case caller != nil:
 			triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
@@ -340,7 +364,7 @@ func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo, sites *cal
 			triples = append(triples, minLineEdge{CallerID: fileID, TargetID: ref.targetID, Line: ref.line})
 		}
 	}
-	return collapseToMinLinePerPair(triples)
+	return collapseToMinLinePerPair(triples), collapseToMinLinePerPair(valueTriples)
 }
 
 // getFunctionsInFile returns all Function/Method nodes in a file with their IDs
