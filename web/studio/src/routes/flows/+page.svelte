@@ -7,9 +7,10 @@
    * also has to avoid (stable callback identities, untrack on RMW inside
    * effects, stable object identity into Inspector's `node` prop).
    */
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { goto, replaceState } from '$app/navigation'
   import { page } from '$app/state'
+  import { scope } from '$lib/stores/scope.svelte'
   import EntryRail from '$lib/components/flows/EntryRail.svelte'
   import FlowSpine from '$lib/components/flows/FlowSpine.svelte'
   import Inspector from '$lib/components/inspector/Inspector.svelte'
@@ -128,12 +129,20 @@
 
     void (async () => {
       await loadServices()
-      const svc =
-        qsService && services.includes(qsService)
-          ? qsService
-          : services.includes('codegraph')
-            ? 'codegraph'
-            : (services[0] ?? '')
+      // Precedence: an explicit ?service= deep-link wins and is promoted to the
+      // global scope store (it's an explicit choice); otherwise a concrete
+      // global scope selection drives the pane; otherwise fall back to the
+      // local default heuristic WITHOUT writing that fallback into the store
+      // (a heuristic default must not masquerade as a user's global choice).
+      let svc = ''
+      if (qsService && services.includes(qsService)) {
+        svc = qsService
+        scope.setService(qsService)
+      } else if (scope.service && services.includes(scope.service)) {
+        svc = scope.service
+      } else {
+        svc = services.includes('codegraph') ? 'codegraph' : (services[0] ?? '')
+      }
       activeService = svc
       if (svc) await loadEntries(svc)
 
@@ -183,8 +192,29 @@
     await loadEntries(next)
   }
   function onServiceChange(ev: Event) {
-    void changeService((ev.target as HTMLSelectElement).value)
+    const next = (ev.target as HTMLSelectElement).value
+    // An explicit selection in this pane is a global choice — publish it so
+    // every other pane follows. The follow-effect below reads it back, but
+    // changeService no-ops when the value is unchanged, so no loop.
+    scope.setService(next)
+    void changeService(next)
   }
+
+  // ── follow the global scope store ───────────────────────
+  // After bootstrap, a concrete global selection (from the header selector or
+  // another pane) switches this pane. When the store is null ("All services")
+  // we leave the pane on its current/default service — flows requires a
+  // concrete service, and we must not write that fallback back into the store.
+  $effect(() => {
+    const globalSvc = scope.service
+    if (!globalSvc) return
+    untrack(() => {
+      if (!bootstrapped) return
+      if (globalSvc === activeService) return
+      if (!services.includes(globalSvc)) return
+      void changeService(globalSvc)
+    })
+  })
 
   // ── entry select ─────────────────────────────────────────
   const selectEntry = (entry: EntryPoint) => {

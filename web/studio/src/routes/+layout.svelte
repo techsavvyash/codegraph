@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css'
   import { page } from '$app/state'
+  import ScopeSelector from '$lib/components/ScopeSelector.svelte'
 
   let { children } = $props()
 
@@ -19,6 +20,7 @@
       <span class="mark"></span>
       CodeGraph <small>Studio</small>
     </a>
+    <ScopeSelector />
     <div class="tabs">
       {#each tabs as tab}
         {#if tab.built}

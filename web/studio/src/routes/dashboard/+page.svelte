@@ -6,6 +6,8 @@
   import RecentDocLinks from '$lib/components/dashboard/RecentDocLinks.svelte'
   import Skeleton from '$lib/components/dashboard/Skeleton.svelte'
   import ErrorBanner from '$lib/components/dashboard/ErrorBanner.svelte'
+  import { scope } from '$lib/stores/scope.svelte'
+  import { filterServiceCards, filterHealthFlags } from '$lib/dashboard/scopeFilter'
 
   let { data } = $props()
 
@@ -44,7 +46,18 @@
       </div>
     {/if}
 
+    {@const knownServices = dash.services.map((s) => s.name)}
+    {@const scopedService =
+      scope.service && knownServices.includes(scope.service) ? scope.service : null}
+    {@const shownServices = filterServiceCards(dash.services, scopedService)}
+    {@const shownHealth = filterHealthFlags(dash.health, scopedService, knownServices)}
+
     <KpiStrip totals={dash.totals} />
+    {#if scopedService}
+      <div class="scopenote">
+        filtered to <b>{scopedService}</b> — showing graph-wide totals
+      </div>
+    {/if}
 
     <div class="secttl">Services</div>
     {#if dash.services.length === 0}
@@ -52,15 +65,19 @@
         <p>No services indexed yet</p>
         <code class="well">codegraph index scip &lt;path&gt; --service=&lt;name&gt;</code>
       </div>
+    {:else if shownServices.length === 0}
+      <div class="empty-services">
+        <p>No card for <b>{scopedService}</b> in this snapshot</p>
+      </div>
     {:else}
       <div class="services">
-        {#each dash.services as service (service.name)}
+        {#each shownServices as service (service.name)}
           <ServiceCard {service} />
         {/each}
       </div>
     {/if}
 
-    <HealthFlags flags={dash.health} />
+    <HealthFlags flags={shownHealth} />
 
     <div class="bottom">
       <CallHubs hubs={dash.callHubs} />
@@ -124,6 +141,15 @@
   .wline {
     font-size: 11px;
     color: var(--warn);
+  }
+  .scopenote {
+    margin: var(--s-2) 0 var(--s-4);
+    font-size: var(--text-sm);
+    color: var(--ink-3);
+  }
+  .scopenote b {
+    color: var(--ink);
+    font-weight: 600;
   }
   .secttl {
     font-size: 10px;

@@ -11,6 +11,7 @@
   import Omnibox from '$lib/components/omnibox/Omnibox.svelte'
   import Inspector from '$lib/components/inspector/Inspector.svelte'
   import { ExplorerStore } from '$lib/stores/explorer.svelte'
+  import { scope } from '$lib/stores/scope.svelte'
   import type { FoundNode } from '$lib/types/graph'
 
   const store = new ExplorerStore()
@@ -190,7 +191,7 @@
   {/if}
 </div>
 
-<Omnibox bind:open={omniboxOpen} onAdd={addFound} onOpen={openFound} />
+<Omnibox bind:open={omniboxOpen} service={scope.service} onAdd={addFound} onOpen={openFound} />
 
 <style>
   .explorer {

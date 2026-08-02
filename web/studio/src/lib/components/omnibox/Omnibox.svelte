@@ -43,6 +43,14 @@
   /** Flattened view of the grouped results, for keyboard nav across group boundaries. */
   const flatResults = $derived(groups.flatMap((g) => g.nodes))
 
+  /**
+   * The service filter actually applied to find queries, made visible so
+   * scoping is never silent: an explicit `svc:` token wins; otherwise the
+   * global scope (the `service` prop) applies. null = unscoped (All services).
+   */
+  const effectiveService = $derived(parseQuery(query).service ?? service ?? null)
+  const scopeFromToken = $derived(parseQuery(query).service != null)
+
   $effect(() => {
     if (open) {
       queueMicrotask(() => inputEl?.focus())
@@ -212,6 +220,16 @@
           spellcheck="false"
           autocomplete="off"
         />
+        {#if effectiveService}
+          <span
+            class="scope-chip"
+            title={scopeFromToken
+              ? `Scoped to ${effectiveService} (svc: token)`
+              : `Scoped to ${effectiveService} (global scope)`}
+          >
+            svc:{effectiveService}
+          </span>
+        {/if}
         <button
           class="semantic-chip"
           class:on={semanticEnabled}
@@ -338,6 +356,17 @@
     padding: 1px 5px;
     color: var(--ink-3);
     white-space: nowrap;
+  }
+  .scope-chip {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--accent-ink);
+    background: var(--accent-subtle);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--r-full);
+    padding: 1px 10px;
+    white-space: nowrap;
+    font-family: var(--font-mono);
   }
   .semantic-chip {
     font-size: var(--text-xs);
