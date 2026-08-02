@@ -3,8 +3,8 @@
    * Cytoscape canvas for the service Overview. Presentational: the visible
    * node/edge set comes in as props (RenderNode/RenderEdge from the pure model
    * via OverviewStore.graph), selection comes in, and tap/double-tap intents go
-   * back out through hoisted callback props. Layout is fcose (already registered
-   * by canvas/elements.ts, which we import for its color tokens).
+   * back out through hoisted callback props. Layout is ELK layered (registered
+   * below) — a hierarchical top→down layout, NOT the workbench's fcose.
    *
    * Landmines honored (see canvas/elements.ts + visibility.test.ts):
    *  - never width:'label' (aborts the stylesheet → invisible nodes); node width
@@ -15,10 +15,18 @@
    */
   import cytoscape from 'cytoscape'
   import type { Core, ElementDefinition, EventObject, LayoutOptions, NodeSingular } from 'cytoscape'
+  import elk from 'cytoscape-elk'
   import { onMount, onDestroy } from 'svelte'
   import type { RenderEdge, RenderNode } from '$lib/types/overview'
   import { nodeColors } from '$lib/components/canvas/elements'
   import { overviewStyle } from './style'
+
+  // Same double-registration guard as canvas/elements.ts uses for fcose.
+  const elkRegistered = (cytoscape as unknown as { __elkRegistered?: boolean }).__elkRegistered
+  if (!elkRegistered) {
+    cytoscape.use(elk)
+    ;(cytoscape as unknown as { __elkRegistered?: boolean }).__elkRegistered = true
+  }
 
   let {
     nodes,
@@ -78,68 +86,77 @@
     return new Set(list.map((x) => x.id))
   }
 
+  /**
+   * Ghost wrap edges: ELK layered assigns symbols with the same call
+   * relationships to the SAME layer, so a file with many sibling symbols (all
+   * leaves, or all calling one hub) expands into a needle-thin column.
+   * Chaining ALL of a compound's children alphabetically into ~sqrt(n) chunks
+   * with invisible edges makes ELK lay the compound out as a compact,
+   * scannable grid — real intra-file call edges still pull callees rightward
+   * (ghost chains that conflict with real structure are just cycle-broken by
+   * ELK), and because ELK knows the true compound size, surrounding nodes
+   * never overlap it.
+   */
+  function ghostWrapEdges(): ElementDefinition[] {
+    const byParent = new Map<string, RenderNode[]>()
+    for (const n of nodes) {
+      if (n.kind !== 'symbol' || !n.parentId) continue
+      const list = byParent.get(n.parentId) ?? []
+      list.push(n)
+      byParent.set(n.parentId, list)
+    }
+    const ghosts: ElementDefinition[] = []
+    for (const [parentId, children] of byParent) {
+      if (children.length < 4) continue
+      const ordered = [...children].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
+      const col = Math.ceil(Math.sqrt(ordered.length))
+      for (let i = 0; i + col < ordered.length; i += 1) {
+        ghosts.push({
+          group: 'edges',
+          data: {
+            id: `ghost:${parentId}:${i}`,
+            source: ordered[i].id,
+            target: ordered[i + col].id,
+            weight: 0,
+            wlabel: '',
+            kind: 'ghost'
+          }
+        })
+      }
+    }
+    return ghosts
+  }
+
   /** Incrementally reconcile the cy instance to the current props. */
   function sync() {
     if (!cy) return
     const nextNodeIds = idSet(nodes)
-    const nextEdgeIds = idSet(edges)
+    const edgeDefs: ElementDefinition[] = [...edges.map(toEdgeEl), ...ghostWrapEdges()]
+    const nextEdgeIds = new Set(edgeDefs.map((d) => String(d.data.id)))
     const curNodeIds = new Set(cy.nodes().map((n) => n.id()))
     const curEdgeIds = new Set(cy.edges().map((e) => e.id()))
 
     const addNodes = nodes.filter((n) => !curNodeIds.has(n.id))
-    const addEdges = edges.filter((e) => !curEdgeIds.has(e.id))
+    const addEdgeDefs = edgeDefs.filter((d) => !curEdgeIds.has(String(d.data.id)))
     const removeNodeIds = [...curNodeIds].filter((id) => !nextNodeIds.has(id))
     const removeEdgeIds = [...curEdgeIds].filter((id) => !nextEdgeIds.has(id))
 
     const structuralChange =
-      addNodes.length > 0 || addEdges.length > 0 || removeNodeIds.length > 0 || removeEdgeIds.length > 0
+      addNodes.length > 0 || addEdgeDefs.length > 0 || removeNodeIds.length > 0 || removeEdgeIds.length > 0
 
     // Not batched — see the landmine note above.
     for (const id of removeEdgeIds) cy.getElementById(id).remove()
     for (const id of removeNodeIds) cy.getElementById(id).remove()
 
-    // Seed positions for new nodes: fcose with randomize:false starts from
-    // current coordinates, and a pile of nodes at the same spot is a degenerate
-    // start it cannot untangle (same fix as the workbench canvas controller).
-    // Anchor each new node near a connected already-placed node — symbols near
-    // their parent file — then scatter on a deterministic golden-angle spiral.
-    const placed = new Set(curNodeIds)
-    for (const id of removeNodeIds) placed.delete(id)
-    const anchorFor = (n: RenderNode): { x: number; y: number } => {
-      if (n.parentId && placed.has(n.parentId)) {
-        const pos = cy!.getElementById(n.parentId).position()
-        return { x: pos.x, y: pos.y }
-      }
-      for (const e of edges) {
-        const other = e.source === n.id ? e.target : e.target === n.id ? e.source : null
-        if (other && placed.has(other)) {
-          const pos = cy!.getElementById(other).position()
-          return { x: pos.x, y: pos.y }
-        }
-      }
-      if (cy!.nodes().length > 0) {
-        const bb = cy!.nodes().boundingBox()
-        return { x: (bb.x1 + bb.x2) / 2, y: (bb.y1 + bb.y2) / 2 }
-      }
-      return { x: 0, y: 0 }
-    }
-    let seedIndex = 0
-    const seeded = (n: RenderNode): ElementDefinition => {
-      const el = toEl(n)
-      const anchor = anchorFor(n)
-      const angle = seedIndex * 2.39996 // golden angle — stable, no Math.random
-      const radius = 90 + 24 * Math.sqrt(seedIndex)
-      seedIndex += 1
-      el.position = { x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius }
-      return el
-    }
-
+    // No position seeding needed here: ELK computes a full deterministic
+    // layered layout on every structural change (unlike the workbench's
+    // incremental fcose, which needs golden-angle seeds).
     const toAdd: ElementDefinition[] = [
       // parents (files) must exist before their symbol children reference them,
       // so add non-symbol nodes first
-      ...addNodes.filter((n) => n.kind !== 'symbol').map(seeded),
-      ...addNodes.filter((n) => n.kind === 'symbol').map(seeded),
-      ...addEdges.map(toEdgeEl)
+      ...addNodes.filter((n) => n.kind !== 'symbol').map(toEl),
+      ...addNodes.filter((n) => n.kind === 'symbol').map(toEl),
+      ...addEdgeDefs
     ]
     if (toAdd.length > 0) cy.add(toAdd)
 
@@ -160,6 +177,7 @@
         litNodeIds.add(d.id())
       })
       sel.connectedEdges().forEach((e) => {
+        if (e.data('kind') === 'ghost') return
         litNodeIds.add(e.source().id())
         litNodeIds.add(e.target().id())
       })
@@ -169,6 +187,7 @@
       n.toggleClass('dimmed', hasSel && !litNodeIds.has(n.id()))
     })
     cy.edges().forEach((e) => {
+      if (e.data('kind') === 'ghost') return // invisible layout-only edges
       const incident = hasSel && (e.source().id() === selected || e.target().id() === selected)
       e.toggleClass('focus', incident)
       e.toggleClass(
@@ -179,19 +198,28 @@
 
     if (structuralChange && cy.nodes().length > 0) {
       const animate = cy.container() !== null
+      // ELK layered: call direction flows top→down (callers above callees), so
+      // the codebase reads as an architecture diagram instead of a force-
+      // directed hairball. INCLUDE_CHILDREN layers symbols inside an expanded
+      // file compound by their own call order; label dimensions count toward
+      // spacing so the chips below dots never overlap.
       const layout = cy.layout({
-        name: 'fcose',
+        name: 'elk',
         animate,
         animationDuration: 300,
-        randomize: false,
         fit: false,
-        // give compound (expanded file) nodes room for their symbol children
-        nodeSeparation: 90,
-        packComponents: true,
-        // overview nodes are large boxes (up to ~100px) — fcose defaults assume
-        // small dots and leave them overlapping
-        nodeRepulsion: 12000,
-        idealEdgeLength: 220
+        nodeDimensionsIncludeLabels: true,
+        elk: {
+          algorithm: 'layered',
+          // RIGHT: callers left, callees right — landscape canvases get a wide
+          // architecture diagram instead of a tall narrow column
+          'elk.direction': 'RIGHT',
+          'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+          'elk.layered.spacing.nodeNodeBetweenLayers': 80,
+          'elk.spacing.nodeNode': 28,
+          'elk.spacing.componentComponent': 70,
+          'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES'
+        }
       } as unknown as LayoutOptions)
       if (animate) {
         layout.one('layoutstop', () => {

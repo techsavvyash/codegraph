@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "cytoscape": "^3.34.0",
+    "cytoscape-elk": "^2.3.0",
     "cytoscape-fcose": "^2.2.0",
     "dompurify": "^3.4.12",
     "marked": "^18.0.7",

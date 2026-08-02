@@ -137,6 +137,17 @@ export const overviewStyle: StylesheetStyle[] = [
       'target-arrow-color': '#1C7ED6'
     }
   },
+  // ghost wrap edges exist only to make ELK grid the leaf symbols of an
+  // expanded file (see OverviewCanvas.ghostWrapEdges) — never drawn, never hit
+  {
+    selector: 'edge[kind = "ghost"]',
+    style: {
+      opacity: 0,
+      events: 'no',
+      'target-arrow-shape': 'none',
+      label: ''
+    }
+  },
   // everything outside the selection neighborhood recedes
   {
     selector: '.dimmed',
