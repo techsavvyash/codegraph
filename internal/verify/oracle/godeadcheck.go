@@ -4,6 +4,18 @@
 // on a CHA-reachable function means the classifier (or the graph it read)
 // lost an edge. The sandwich discipline again: two independent derivations,
 // disagreement = bug.
+//
+// Reachability is taken from goExtraction.MainReachable, which is computed by
+// a RAW BFS over the whole cha.CallGraph (see computeMainReachable in
+// goextract.go). It deliberately does NOT reuse the folded MayEdges set: fold()
+// drops every cross-module edge, so a reachability walk over MayEdges is
+// severed at the first framework hop — main -> cobra.Execute (a different
+// module) -> the RunE handler back in ours never connects. That made this
+// check vacuous for everything behind the cobra CLI (only ~179 in-module
+// identities counted as reachable, essentially just the in-module MCP
+// dispatch), silently reporting 0 disagreements where real classifier
+// false-deads existed. The raw graph keeps the cross-module and
+// synthetic-wrapper hops that make the framework dispatch traversable.
 package oracle
 
 import (
@@ -46,41 +58,6 @@ func fetchDeadStampedSymbols(ctx context.Context, client *neo4j.Client, serviceN
 		}
 	}
 	return symbols, nil
-}
-
-// chaReachableFromMain BFS-expands the CHA may-edge set from every package
-// `main` function (the roots a compiled binary actually starts from) and
-// returns the reachable identity set. Synthetic init/closure endpoints were
-// already folded/excluded during extraction, so this is a plain traversal
-// over named-function identities.
-func chaReachableFromMain(mayEdges map[edgeKey]bool) map[goFuncID]bool {
-	adj := make(map[goFuncID][]goFuncID, len(mayEdges))
-	nodes := make(map[goFuncID]bool, len(mayEdges)*2)
-	for k := range mayEdges {
-		adj[k.from] = append(adj[k.from], k.to)
-		nodes[k.from] = true
-		nodes[k.to] = true
-	}
-
-	reachable := make(map[goFuncID]bool)
-	var queue []goFuncID
-	for id := range nodes {
-		if id.funcName == "main" && id.typeName == "" {
-			reachable[id] = true
-			queue = append(queue, id)
-		}
-	}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, next := range adj[cur] {
-			if !reachable[next] {
-				reachable[next] = true
-				queue = append(queue, next)
-			}
-		}
-	}
-	return reachable
 }
 
 // crossCheckDeadVerdicts compares dead-stamped symbols against CHA

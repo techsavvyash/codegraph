@@ -102,7 +102,14 @@ func isExcludedFunc(fn *ssa.Function) bool {
 	if fn.Synthetic != "" && !strings.HasPrefix(fn.Synthetic, "instance of ") {
 		return true
 	}
-	if fn.Name() == "init" {
+	if fn.Name() == "init" || strings.HasPrefix(fn.Name(), "init#") {
+		// The synthesized package initializer is `init`; declared init
+		// functions are `init#1`, `init#2`, … . Both are load-time toolchain
+		// entry points with no corresponding CALLS edge in the indexed graph,
+		// so leaking their `init#N` form into the folded must/may sets would
+		// manufacture recall/precision noise. (They are still BFS roots for
+		// the raw-graph MainReachable walk — see computeMainReachable in
+		// goextract.go — which does not consult isExcludedFunc.)
 		return true
 	}
 	if fn.Parent() != nil {

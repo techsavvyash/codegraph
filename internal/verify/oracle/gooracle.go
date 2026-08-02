@@ -121,7 +121,7 @@ func RunGoOracle(ctx context.Context, client *neo4j.Client, opts GoOracleOptions
 		report.Notes = append(report.Notes,
 			"dead-verdict CHA cross-check: no reachability='dead' verdicts stamped for this service — run codegraph query deadcode (or re-index) first")
 	} else {
-		disagreements := crossCheckDeadVerdicts(deadSymbols, chaReachableFromMain(extraction.MayEdges))
+		disagreements := crossCheckDeadVerdicts(deadSymbols, extraction.MainReachable)
 		for i, id := range disagreements {
 			if i >= sampleLimit {
 				break
@@ -133,7 +133,8 @@ func RunGoOracle(ctx context.Context, client *neo4j.Client, opts GoOracleOptions
 			})
 		}
 		report.Notes = append(report.Notes,
-			fmt.Sprintf("dead-verdict CHA cross-check: %d dead-stamped functions checked, %d CHA-reachable disagreements", len(deadSymbols), len(disagreements)))
+			fmt.Sprintf("dead-verdict CHA cross-check: %d dead-stamped functions checked, %d CHA-reachable disagreements (reachable identities: %d)",
+				len(deadSymbols), len(disagreements), len(extraction.MainReachable)))
 	}
 
 	return report, nil

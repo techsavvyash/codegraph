@@ -2,6 +2,7 @@ package oracle
 
 import (
 	"fmt"
+	"strings"
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/callgraph/cha"
@@ -31,6 +32,19 @@ type goExtraction struct {
 	ModulePath string
 	MustEdges  map[edgeKey]bool
 	MayEdges   map[edgeKey]bool
+
+	// MainReachable is the set of in-module function identities reachable
+	// from a binary's true entry points (package `main` and every init) over
+	// the RAW, unfolded CHA call graph, augmented with the address-taken
+	// escape rule (see computeMainReachable). Unlike MustEdges/MayEdges —
+	// which are folded to intra-module edges (fold() drops every cross-module
+	// edge) — this reachability is computed by traversing the raw
+	// cha.CallGraph with NO exclusions, straight through synthetic wrappers
+	// and closures. Folding severs main -> cobra.Execute -> RunE handler, so a
+	// reachability set derived from the folded edges is vacuous for anything
+	// behind a framework; MainReachable exists precisely to avoid that. See
+	// the dead-verdict cross-check in godeadcheck.go.
+	MainReachable map[goFuncID]bool
 
 	// Notes-worthy counts, surfaced in the final report.
 	SyntheticExcluded int // synthetic/init/closure functions skipped as callers or callees
@@ -81,13 +95,39 @@ func extractGoCallGraphs(projectRoot string) (*goExtraction, error) {
 		return nil, fmt.Errorf("could not determine main module path for %s", projectRoot)
 	}
 
+	// ssautil.Packages (NOT AllPackages): build SSA bodies for the initial
+	// (in-module) packages and leave their dependencies as "from type
+	// information" stubs. This is deliberate and load-bearing for the
+	// dead-verdict cross-check.
+	//
+	// The tempting alternative — AllPackages, which builds every dependency
+	// body so the raw BFS can walk THROUGH a framework (cobra
+	// ExecuteC -> (*Command).execute -> the RunE closure) — was measured and
+	// rejected: whole-program CHA then resolves every dependency's dynamic
+	// dispatch (interface invokes, func-value calls) against the entire loaded
+	// world, and that noise floods back into in-module space. Concretely, with
+	// AllPackages the codegraph self-run produced 3 SPURIOUS dead-verdict
+	// disagreements on top of the 1 real one, each via a nonsense chain:
+	// graph.NewClient -[func-value]-> protobuf/flag/testing internals
+	// -[interface Reset()/Set()]-> an unrelated in-module method that merely
+	// shares a signature (e.g. proto.Reset resolving to benchmarks.PhaseTimer.Reset).
+	// Reachable identities ballooned 389 -> 1722, i.e. near-total connectivity.
+	//
+	// Instead, MainReachable reaches framework-dispatched handlers WITHOUT
+	// dependency bodies, via the address-taken escape rule in
+	// computeMainReachable: a cobra RunE handler is stored as a function VALUE
+	// into cobra.Command, so it is reachable the moment the storing in-module
+	// code is reached, regardless of whether cobra's own body is built. That
+	// mirrors the classifier's graph-side USES_VALUE (address-taken) liveness
+	// exactly, so the two derivations stay in agreement.
 	prog, _ := ssautil.Packages(initial, ssa.InstantiateGenerics)
 	prog.Build()
 
 	extraction := &goExtraction{
-		ModulePath: modulePath,
-		MustEdges:  make(map[edgeKey]bool),
-		MayEdges:   make(map[edgeKey]bool),
+		ModulePath:    modulePath,
+		MustEdges:     make(map[edgeKey]bool),
+		MayEdges:      make(map[edgeKey]bool),
+		MainReachable: make(map[goFuncID]bool),
 	}
 
 	staticGraph := static.CallGraph(prog)
@@ -95,8 +135,129 @@ func extractGoCallGraphs(projectRoot string) (*goExtraction, error) {
 
 	chaGraph := cha.CallGraph(prog)
 	extraction.fold(chaGraph, extraction.MayEdges)
+	extraction.computeMainReachable(chaGraph)
 
 	return extraction, nil
+}
+
+// computeMainReachable does a raw BFS over the CHA call graph — no folding,
+// no exclusions — from the program's true entry points, augmented by the
+// address-taken escape rule, and projects every reached node onto its
+// in-module named-function identity. The projection (enclosingNamedFunc +
+// funcIdentity) matches how the graph attributes calls, so a resulting
+// MainReachable[id] means "the classifier's tier-2/tier-3 roots can reach id
+// through some may-call chain or by taking its address".
+//
+// This deliberately does NOT reuse fold()/isExcludedFunc: the whole point is
+// to keep the synthetic-wrapper edges and closure hops that fold() discards.
+// It also does not build dependency bodies (see the ssautil.Packages rationale
+// in extractGoCallGraphs) — instead the escape rule below recovers reachability
+// of handlers a dependency invokes internally (cobra RunE, http.HandleFunc
+// callbacks), because those handlers are address-taken by in-module code before
+// control ever enters the dependency.
+func (ex *goExtraction) computeMainReachable(g *callgraph.Graph) {
+	var queue []*callgraph.Node
+	seen := make(map[*callgraph.Node]bool, len(g.Nodes))
+
+	// Roots: package main() and every init (synthesized `init` covering
+	// package-level var initialization, plus declared `init#N`), restricted
+	// to in-module, non-test-driver functions — mirroring the reachability
+	// classifier's tier-2 (name IN ['main','init']) and tier-3
+	// (module-load/package-init) roots.
+	for fn, node := range g.Nodes {
+		if node == nil || fn == nil || !isMainReachableRoot(fn, ex.ModulePath) {
+			continue
+		}
+		if !seen[node] {
+			seen[node] = true
+			queue = append(queue, node)
+		}
+	}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		if named := enclosingNamedFunc(cur.Func); named != nil {
+			if id, ok := funcIdentity(named); ok && pkgInModule(id.pkgPath, ex.ModulePath) {
+				ex.MainReachable[id] = true
+			}
+		}
+
+		for _, edge := range cur.Out {
+			nxt := edge.Callee
+			if nxt == nil || seen[nxt] {
+				continue
+			}
+			seen[nxt] = true
+			queue = append(queue, nxt)
+		}
+
+		// Escape rule: any function referenced as a VALUE by a reachable
+		// function is itself reachable. A cobra RunE handler, an
+		// errgroup.Go closure, an http.HandleFunc callback — all escape
+		// into a dependency (whose body is a type-info stub here, see the
+		// load-mode comment above) and are invoked by code this BFS
+		// deliberately does not traverse, so no call edge ever enters
+		// them. Scanning instruction operands for *ssa.Function values
+		// catches MakeClosure fns and stored/passed function constants
+		// (a superset of static callees, which the edge walk above
+		// already covers — the seen-set dedupes the overlap). The
+		// classifier makes the identical choice graph-side: USES_VALUE
+		// (address-taken) is liveness-preserving, so reachable ⊇
+		// address-taken on both sides and the rule can never manufacture
+		// a false disagreement. Dependency stubs have no blocks, so this
+		// scan is a no-op for them and imports none of the whole-program
+		// CHA noise that ssautil.AllPackages would.
+		if cur.Func == nil {
+			continue
+		}
+		var rands []*ssa.Value
+		for _, b := range cur.Func.Blocks {
+			for _, instr := range b.Instrs {
+				rands = instr.Operands(rands[:0])
+				for _, rand := range rands {
+					if rand == nil || *rand == nil {
+						continue
+					}
+					escaped, ok := (*rand).(*ssa.Function)
+					if !ok {
+						continue
+					}
+					nxt := g.Nodes[escaped]
+					if nxt == nil || seen[nxt] {
+						continue
+					}
+					seen[nxt] = true
+					queue = append(queue, nxt)
+				}
+			}
+		}
+	}
+}
+
+// isMainReachableRoot reports whether fn is a binary entry point the
+// reachability classifier would treat as a root: an in-module package `main`
+// or any init (synthesized `init` or a declared `init#N`). Test-driver
+// packages (`<pkg>.test`) are excluded — their synthesized main is a
+// toolchain artifact with no graph node, exactly as isExcludedFunc excludes
+// it from the folded edge sets.
+func isMainReachableRoot(fn *ssa.Function, modulePath string) bool {
+	if fn.Pkg == nil || fn.Pkg.Pkg == nil {
+		return false
+	}
+	pkgPath := fn.Pkg.Pkg.Path()
+	if !pkgInModule(pkgPath, modulePath) {
+		return false
+	}
+	if strings.HasSuffix(pkgPath, ".test") {
+		return false
+	}
+	name := fn.Name()
+	if name == "main" && fn.Pkg.Pkg.Name() == "main" {
+		return true
+	}
+	return name == "init" || strings.HasPrefix(name, "init#")
 }
 
 // fold walks every edge in g and inserts intra-module, non-excluded edges
