@@ -269,6 +269,22 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 					added,
 				)
 			}
+
+			// RFC-001 follow-up: dispatch through graph-invisible interfaces
+			// (function-local named, anonymous literal, anonymous generic
+			// constraint) is expressible by neither scip-go (which gives such
+			// interfaces `local N` symbols the indexer creates no Reference
+			// node for) nor the IMPLEMENTS machinery (which only enumerates
+			// package-scope named types). Synthesize DIRECT dispatch edges at
+			// those call sites so the callees don't read as dead code. These
+			// merge as CALLS/USES_VALUE (not IMPLEMENTS) below, before the call
+			// graph builder computes degrees. Best-effort, same as above.
+			if err := si.indexLocalInterfaceCalls(ctx, knownSymbols, symIdx); err != nil {
+				// Only merge failures surface here (resolver-run failures are
+				// warned about inside) — data-affecting, so fatal like the
+				// IMPLEMENTS merge above.
+				return err
+			}
 		} else if si.language == LanguageTypeScript || si.language == LanguageJavaScript {
 			// RFC-001 Layer 3 (TS/JS side): scip-typescript only emits
 			// is_implementation for explicit `implements`/heritage clauses
@@ -560,6 +576,70 @@ func (si *SCIPIndexer) runTSStructuralResolver(scipRels []SCIPRelationship, know
 	)
 
 	return scipRels
+}
+
+// indexLocalInterfaceCalls runs the Go local/anonymous-interface dispatch
+// resolver (internal/ingest/resolve.ResolveLocalInterfaceCallsJoined) and
+// merges the synthesized dispatch edges into the graph as CALLS/USES_VALUE
+// relationships tagged detectionSource "local-interface".
+//
+// It runs inside Step 6b, BEFORE the call-graph builder's
+// ComputeDegreeProperties (Step 10), so the synthesized CALLS edges are
+// counted in in/out degrees — degree is a CALLS-only computation, so
+// USES_VALUE edges (method values) correctly do not affect it, matching the
+// call-graph builder's own treatment.
+//
+// Idempotency: MergeRelsBatch MERGEs one edge per (from, to) per rel type and
+// SET-overwrites props, so re-indexing unchanged source produces the same
+// edges, not duplicates. On re-index, deletePreviousSubgraph DETACH DELETEs
+// this service's Function/Method definition nodes; since both endpoints of a
+// local-interface edge are such nodes, the synthesized edges die with their
+// endpoints — no orphan leak.
+//
+// Best-effort by design: a resolver failure (no go.mod, packages.Load error)
+// is warned about here and swallowed; a merge failure IS returned (and the
+// caller propagates it as fatal), mirroring the IMPLEMENTS merge, because a
+// graph silently missing structural edges is wrong in a way that must not
+// pass silently.
+func (si *SCIPIndexer) indexLocalInterfaceCalls(ctx context.Context, knownSymbols []string, symIdx *symbolIndex) error {
+	rels, stats, joinStats, err := resolve.ResolveLocalInterfaceCallsJoined(si.projectPath, knownSymbols)
+	if err != nil {
+		// Resolver-run failure (no go.mod, packages.Load error, non-Go root):
+		// best-effort by design, warn and index on — mirroring the
+		// ResolveImplementations block. Merge failures below stay fatal.
+		fmt.Printf("WARNING: local-interface dispatch resolver skipped: %v\n", err)
+		si.report.AddWarning(fmt.Sprintf("local-interface dispatch resolver skipped: %v", err))
+		return nil
+	}
+
+	fmt.Printf(
+		"Local-interface dispatch resolver: %d sites (%d handled, %d package-named skipped, %d module-scope skipped), %d relations found, %d edges joined, %d dropped (symbol not in index)\n",
+		stats.SitesSeen, stats.HandledSites, stats.PackageNamedSkipped, stats.ModuleScopeSkipped,
+		stats.RelationsFound, joinStats.Emitted, joinStats.DroppedMissingSymbol,
+	)
+
+	callsBatch := buildLocalCallBatch(rels, resolve.LocalCallInvoke, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
+	valueBatch := buildLocalCallBatch(rels, resolve.LocalCallValue, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
+
+	if len(callsBatch) > 0 {
+		if err := si.client.MergeRelsBatch(ctx, string(models.CallsRel), callsBatch, batchSize); err != nil {
+			si.report.IncrementFailed("Local-interface CALLS", 1)
+			return fmt.Errorf("merge local-interface CALLS: %w", err)
+		}
+		fmt.Printf("Merged %d local-interface CALLS relationships\n", len(callsBatch))
+		si.report.IncrementWritten("Local-interface CALLS", len(callsBatch))
+	}
+
+	if len(valueBatch) > 0 {
+		if err := si.client.MergeRelsBatch(ctx, string(models.UsesValueRel), valueBatch, batchSize); err != nil {
+			si.report.IncrementFailed("Local-interface USES_VALUE", 1)
+			return fmt.Errorf("merge local-interface USES_VALUE: %w", err)
+		}
+		fmt.Printf("Merged %d local-interface USES_VALUE relationships\n", len(valueBatch))
+		si.report.IncrementWritten("Local-interface USES_VALUE", len(valueBatch))
+	}
+
+	return nil
 }
 
 // IndexProjectPolyglot detects all languages present under projectPath, installs

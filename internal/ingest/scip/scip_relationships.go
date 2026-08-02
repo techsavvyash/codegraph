@@ -3,6 +3,7 @@ package static
 import (
 	"fmt"
 
+	"github.com/context-maximiser/code-graph/internal/ingest/resolve"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -120,6 +121,52 @@ func buildImplementsBatch(
 				"scope":           scope.Scope,
 				"scopeId":         scope.ScopeID,
 				"detectionSource": detectionSourceOrDefault(rel),
+			},
+		})
+	}
+
+	return batch
+}
+
+// buildLocalCallBatch constructs the Neo4j relationship batch items for
+// synthesized local-interface dispatch edges of a single kind (CALLS or
+// USES_VALUE), resolving each relation's FromSymbol/ToSymbol to definition
+// node IDs the same way buildImplementsBatch does. Only relations whose Kind
+// matches `kind` are included, so the caller can build one batch per rel type.
+//
+// Edge properties mirror the call-graph builder's own CALLS/USES_VALUE edges
+// (line, scope, scopeId — see call_graph_scip.go) plus detectionSource
+// "local-interface" so these resolver-synthesized edges stay distinguishable
+// from scip-native ones. No filePath is set: the resolver reports a line but
+// not a service-relative file path, and downstream consumers treat filePath as
+// optional metadata on CALLS edges.
+func buildLocalCallBatch(
+	rels []resolve.LocalCallRelation,
+	kind resolve.LocalCallKind,
+	symbolIDs map[string]string,
+	defIDs map[string]string,
+	symbolToDefKey map[string]string,
+	scope models.ScopeContext,
+) []map[string]any {
+	var batch []map[string]any
+
+	for _, rel := range rels {
+		if rel.Kind != kind {
+			continue
+		}
+		fromID := resolveNodeID(rel.FromSymbol, symbolIDs, defIDs, symbolToDefKey)
+		toID := resolveNodeID(rel.ToSymbol, symbolIDs, defIDs, symbolToDefKey)
+		if fromID == "" || toID == "" {
+			continue
+		}
+		batch = append(batch, map[string]any{
+			"fromId": fromID,
+			"toId":   toID,
+			"props": map[string]any{
+				"line":            rel.Line,
+				"scope":           scope.Scope,
+				"scopeId":         scope.ScopeID,
+				"detectionSource": "local-interface",
 			},
 		})
 	}
