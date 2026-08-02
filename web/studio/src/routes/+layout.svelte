@@ -2,14 +2,15 @@
   import '../app.css'
   import { page } from '$app/state'
   import ScopeSelector from '$lib/components/ScopeSelector.svelte'
+  import ChatDock from '$lib/components/chat/ChatDock.svelte'
 
   let { children } = $props()
 
   const tabs = [
     { label: 'Graph', href: '/graph', built: true },
     { label: 'Flows', href: '/flows', built: true },
-    { label: 'Docs', href: '/docs', built: false },
-    { label: 'Console', href: '/console', built: false },
+    { label: 'Docs', href: '/docs', built: true },
+    { label: 'Console', href: '/console', built: true },
     { label: 'Dashboard', href: '/dashboard', built: true }
   ]
 </script>
@@ -38,6 +39,7 @@
   <main class="main">
     {@render children()}
   </main>
+  <ChatDock />
 </div>
 
 <style>
