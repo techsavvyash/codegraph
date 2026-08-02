@@ -206,6 +206,22 @@ export function visibleFor(tree: OverviewTree, filePath: string, state: Overview
   }
 }
 
+/**
+ * Builds the `visibleOf` resolver the lens math consumes: a service-relative
+ * file path → the id of the render node currently standing in for it, or null
+ * when the path isn't in this service's tree (edges/flows can reference files
+ * outside the loaded set). Reuses visibleFor — the tree-walk is NOT duplicated.
+ */
+export function makeVisibleOf(
+  tree: OverviewTree,
+  state: OverviewVisibility
+): (filePath: string) => string | null {
+  return (filePath: string) => {
+    if (!tree.fileByPath.has(filePath)) return null
+    return visibleFor(tree, filePath, state)
+  }
+}
+
 /** True when `dirPath` is a strict ancestor directory of `filePath`. */
 function isAncestorPath(dirPath: string, filePath: string): boolean {
   if (dirPath === '') return true

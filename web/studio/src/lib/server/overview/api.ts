@@ -16,11 +16,16 @@
 import type { McpClient } from '$lib/server/mcp/client'
 import type { ApiEnvelope } from '$lib/types/graph'
 import type {
+  DeadCounts,
+  DeadEntry,
+  DeadReportResponse,
   FileEdge,
   FileSymbol,
   FileSymbolsResponse,
   OverviewFile,
   OverviewResponse,
+  SymbolCaller,
+  SymbolCallersResponse,
   SymbolOutCall
 } from '$lib/types/overview'
 
@@ -305,5 +310,134 @@ export async function fetchFileSymbols(
   return {
     warnings,
     data: { file: { nodeId: head.nodeId, path: head.path ?? '' }, symbols }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// symbol callers (Usage lens drilldown): 1-hop callers of one symbol
+
+interface CallerRow {
+  name: string | null
+  label: string | null
+  filePath: string | null
+  service: string | null
+}
+
+/**
+ * The direct callers of one node (by elementId). Module-scope callers are File
+ * nodes calling the target directly, so the caller's file path is coalesced onto
+ * the caller's own path (a File caller has no CONTAINS parent File). ORDER BY is
+ * present and the row set is 1-hop, so a single row_limit=500 page suffices — no
+ * SKIP/LIMIT paging needed.
+ */
+export const SYMBOL_CALLERS_QUERY = `MATCH (t) WHERE elementId(t) = $id
+MATCH (caller)-[:CALLS]->(t)
+OPTIONAL MATCH (f:File)-[:CONTAINS]->(caller)
+RETURN caller.name AS name,
+       head(labels(caller)) AS label,
+       coalesce(f.path, caller.path) AS filePath,
+       coalesce(f.serviceName, caller.serviceName) AS service
+ORDER BY filePath, name`
+
+function toSymbolCaller(row: CallerRow): SymbolCaller {
+  return {
+    name: row.name ?? '(anonymous)',
+    label: row.label ?? 'Function',
+    filePath: row.filePath ?? '',
+    service: row.service ?? null
+  }
+}
+
+export interface FetchSymbolCallersParams {
+  nodeId: string
+}
+
+export async function fetchSymbolCallers(
+  client: McpClient,
+  params: FetchSymbolCallersParams
+): Promise<ApiEnvelope<SymbolCallersResponse>> {
+  const id = requireNonEmptyString(params.nodeId, 'node_id')
+  const env = await runCypher<CallerRow>(client, SYMBOL_CALLERS_QUERY, { id })
+  const callers = (env.data.rows ?? []).map(toSymbolCaller)
+  return { warnings: [...new Set(env.warnings)], data: { callers } }
+}
+
+// ---------------------------------------------------------------------------
+// dead-code report (Dead lens): RFC-014 reachability via codegraph_deadcode
+
+/**
+ * The raw shape the codegraph_deadcode MCP tool returns: service-wide counts at
+ * the top level plus an `entries` array of the non-live verdicts. We pass a high
+ * limit so the whole actionable set comes back for one service.
+ */
+interface DeadToolPayload {
+  service?: string
+  total?: number
+  live?: number
+  testOnly?: number
+  dead?: number
+  deadCluster?: number
+  possiblyLive?: number
+  unknown?: number
+  entries?: Array<{
+    name?: string
+    label?: string
+    filePath?: string
+    startLine?: number
+    verdict?: string
+    deadCluster?: boolean
+    isExported?: boolean
+  }> | null
+}
+
+function toDeadEntry(raw: NonNullable<DeadToolPayload['entries']>[number]): DeadEntry {
+  return {
+    name: raw.name ?? '(anonymous)',
+    label: raw.label ?? 'Function',
+    filePath: raw.filePath ?? '',
+    startLine: typeof raw.startLine === 'number' ? raw.startLine : 0,
+    verdict: raw.verdict ?? 'unknown',
+    deadCluster: raw.deadCluster ?? false,
+    isExported: raw.isExported ?? false
+  }
+}
+
+function toDeadCounts(p: DeadToolPayload): DeadCounts {
+  const num = (v: number | undefined) => (typeof v === 'number' ? v : 0)
+  return {
+    total: num(p.total),
+    live: num(p.live),
+    testOnly: num(p.testOnly),
+    dead: num(p.dead),
+    deadCluster: num(p.deadCluster),
+    possiblyLive: num(p.possiblyLive),
+    unknown: num(p.unknown)
+  }
+}
+
+export interface FetchDeadReportParams {
+  service: string
+  scopeId?: string
+}
+
+/**
+ * The service's dead-code report (default view: all non-live verdicts). Anchors
+ * on service_name; scope_id is forwarded only when set. limit is pushed to 1000
+ * (the tool's default is 100) so a whole service's actionable set is returned.
+ */
+export async function fetchDeadReport(
+  client: McpClient,
+  params: FetchDeadReportParams
+): Promise<ApiEnvelope<DeadReportResponse>> {
+  const service = requireNonEmptyString(params.service, 'service')
+  const args: Record<string, unknown> = { service_name: service, limit: 1000 }
+  if (params.scopeId) args.scope_id = params.scopeId
+
+  const env = await client.callTool<DeadToolPayload>('codegraph_deadcode', args)
+  const payload = env.data
+  const entries = (payload.entries ?? []).map(toDeadEntry)
+  return {
+    warnings: [...new Set(env.warnings)],
+    data: { service: payload.service ?? service, counts: toDeadCounts(payload), entries }
   }
 }

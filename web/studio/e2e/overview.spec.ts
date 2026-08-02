@@ -101,3 +101,71 @@ test.describe('service overview', () => {
     await expect(page.getByRole('application', { name: 'Graph canvas' })).toBeVisible()
   })
 })
+
+/**
+ * Overview lens system (additive). Against the live 'codegraph' service. Canvas
+ * pixel/tap behavior is not asserted (headless taps flake) — everything goes
+ * through the lens bar, the flow rail, the legends, and the edge-mode chip.
+ */
+test.describe('overview lenses', () => {
+  test.beforeEach(async ({ page }) => {
+    // Seed the scope so overview loads directly (no picker) with the lens bar up.
+    await page.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      [SCOPE_KEY, JSON.stringify({ service: 'codegraph', scopeId: 'main' })] as const
+    )
+  })
+
+  test('flows lens: rail + entries appear, clicking one projects onto the canvas', async ({ page }) => {
+    await page.goto('/graph?view=overview')
+    await expect(page.getByTestId('overview-stats')).toBeVisible({ timeout: 60_000 })
+
+    // Switch to the flows lens → the rail mounts and entries load (live graph).
+    await page.getByTestId('lens-flows').click()
+    const rail = page.getByTestId('flow-rail')
+    await expect(rail).toBeVisible({ timeout: 30_000 })
+    const firstEntry = page.getByTestId('flow-entry').first()
+    await expect(firstEntry).toBeVisible({ timeout: 60_000 })
+
+    // Trace the first entry → the status chip shows a non-zero "on screen" count.
+    await firstEntry.click()
+    const status = page.getByTestId('flow-status')
+    await expect(status).toBeVisible({ timeout: 60_000 })
+    await expect
+      .poll(async () => {
+        const t = (await status.textContent()) ?? ''
+        return Number(/·\s*(\d+)\s*on screen/.exec(t)?.[1] ?? '0')
+      }, { timeout: 60_000 })
+      .toBeGreaterThan(0)
+  })
+
+  test('dead lens: the legend appears with a dead count', async ({ page }) => {
+    await page.goto('/graph?view=overview')
+    await expect(page.getByTestId('overview-stats')).toBeVisible({ timeout: 60_000 })
+
+    await page.getByTestId('lens-dead').click()
+    const legend = page.getByTestId('dead-legend')
+    await expect(legend).toBeVisible({ timeout: 60_000 })
+    // reachability compute can take a moment; wait for the count text to land
+    await expect(legend).toHaveText(/dead \d+ · possibly \d+ · test-only \d+/, { timeout: 90_000 })
+  })
+
+  test('structure lens: edge-mode toggle flips strong ⇄ all', async ({ page }) => {
+    // A top dir expanded so there are real aggregate edges to filter.
+    await page.goto('/graph?view=overview&open=internal')
+    const toggle = page.getByTestId('edge-mode-toggle')
+    await expect(toggle).toBeVisible({ timeout: 60_000 })
+    await expect(toggle).toHaveText(/edges: strong/, { timeout: 30_000 })
+    await toggle.click()
+    await expect(toggle).toHaveText(/edges: all/)
+    await toggle.click()
+    await expect(toggle).toHaveText(/edges: strong/)
+  })
+
+  test('lens is deep-linked via &lens=', async ({ page }) => {
+    await page.goto('/graph?view=overview&lens=hotspots')
+    // hotspots legend confirms the lens restored from the URL
+    await expect(page.getByTestId('hotspot-legend')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByTestId('lens-hotspots')).toHaveAttribute('aria-selected', 'true')
+  })
+})

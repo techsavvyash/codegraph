@@ -3,9 +3,12 @@ import {
   mergeEdges,
   fetchOverview,
   fetchFileSymbols,
+  fetchSymbolCallers,
+  fetchDeadReport,
   ValidationError,
   OVERVIEW_FILES_QUERY,
-  FILE_SYMBOLS_QUERY
+  FILE_SYMBOLS_QUERY,
+  SYMBOL_CALLERS_QUERY
 } from './api'
 import type { McpClient } from '$lib/server/mcp/client'
 
@@ -203,6 +206,131 @@ describe('fetchFileSymbols', () => {
   })
 })
 
+describe('fetchSymbolCallers', () => {
+  const client = fakeClient([
+    {
+      match: /MATCH \(caller\)-\[:CALLS\]->\(t\)/,
+      rows: [
+        { name: 'Connect', label: 'Method', filePath: 'internal/graph/client.go', service: 'codegraph' },
+        // module-scope File caller: no CONTAINS parent, path coalesced onto its own
+        { name: 'main.go', label: 'File', filePath: 'main.go', service: 'codegraph' },
+        { name: null, label: null, filePath: null, service: null }
+      ],
+      warnings: ['callers-warn', 'callers-warn']
+    }
+  ])
+
+  it('maps caller rows, defaulting nulls, and dedupes warnings', async () => {
+    const env = await fetchSymbolCallers(client, { nodeId: 'sym1' })
+    expect(env.data.callers).toHaveLength(3)
+    expect(env.data.callers[0]).toEqual({
+      name: 'Connect',
+      label: 'Method',
+      filePath: 'internal/graph/client.go',
+      service: 'codegraph'
+    })
+    expect(env.data.callers[1]).toMatchObject({ name: 'main.go', label: 'File', filePath: 'main.go' })
+    expect(env.data.callers[2]).toEqual({ name: '(anonymous)', label: 'Function', filePath: '', service: null })
+    expect(env.warnings).toEqual(['callers-warn'])
+  })
+
+  it('rejects a blank node id', async () => {
+    await expect(fetchSymbolCallers(client, { nodeId: '' })).rejects.toBeInstanceOf(ValidationError)
+  })
+
+  it('returns an empty caller list when the row set is empty', async () => {
+    const empty = fakeClient([{ match: /MATCH \(caller\)-\[:CALLS\]->\(t\)/, rows: [] }])
+    const env = await fetchSymbolCallers(empty, { nodeId: 'sym1' })
+    expect(env.data.callers).toEqual([])
+  })
+})
+
+describe('fetchDeadReport', () => {
+  /**
+   * The deadcode tool is not cypher — it takes {service_name, scope_id?, limit}
+   * and returns a report payload directly. This fake asserts the tool name and
+   * the pushed limit, then returns a canned report.
+   */
+  function deadClient(payload: unknown, opts: { expectScope?: string } = {}): {
+    client: McpClient
+    calls: Array<Record<string, unknown>>
+  } {
+    const calls: Array<Record<string, unknown>> = []
+    const client = {
+      async callTool<T>(name: string, args: Record<string, unknown>) {
+        calls.push({ name, ...args })
+        expect(name).toBe('codegraph_deadcode')
+        expect(args.limit).toBe(1000)
+        if (opts.expectScope !== undefined) expect(args.scope_id).toBe(opts.expectScope)
+        return { warnings: ['dead-warn'], data: payload as T }
+      }
+    } as unknown as McpClient
+    return { client, calls }
+  }
+
+  it('maps top-level counts and non-live entries', async () => {
+    const { client } = deadClient({
+      service: 'codegraph',
+      total: 100,
+      live: 80,
+      testOnly: 3,
+      dead: 16,
+      deadCluster: 4,
+      possiblyLive: 1,
+      unknown: 0,
+      entries: [
+        { name: 'Unused', label: 'Function', filePath: 'internal/x.go', startLine: 12, verdict: 'dead', deadCluster: false, isExported: true },
+        { name: null, label: null, filePath: null, startLine: null, verdict: null, deadCluster: true, isExported: false }
+      ]
+    })
+    const env = await fetchDeadReport(client, { service: 'codegraph' })
+    expect(env.data.service).toBe('codegraph')
+    expect(env.data.counts).toEqual({
+      total: 100,
+      live: 80,
+      testOnly: 3,
+      dead: 16,
+      deadCluster: 4,
+      possiblyLive: 1,
+      unknown: 0
+    })
+    expect(env.data.entries).toHaveLength(2)
+    expect(env.data.entries[0]).toMatchObject({ name: 'Unused', verdict: 'dead', isExported: true })
+    expect(env.data.entries[1]).toMatchObject({ name: '(anonymous)', verdict: 'unknown', startLine: 0 })
+    expect(env.warnings).toEqual(['dead-warn'])
+  })
+
+  it('forwards scope_id only when provided', async () => {
+    const withScope = deadClient({ entries: [] }, { expectScope: 'branch-x' })
+    await fetchDeadReport(withScope.client, { service: 'codegraph', scopeId: 'branch-x' })
+    expect(withScope.calls[0].scope_id).toBe('branch-x')
+
+    const noScope = deadClient({ entries: [] })
+    await fetchDeadReport(noScope.client, { service: 'codegraph' })
+    expect('scope_id' in noScope.calls[0]).toBe(false)
+  })
+
+  it('defaults counts to 0 and entries to [] on a sparse payload', async () => {
+    const { client } = deadClient({})
+    const env = await fetchDeadReport(client, { service: 'codegraph' })
+    expect(env.data.counts).toEqual({
+      total: 0,
+      live: 0,
+      testOnly: 0,
+      dead: 0,
+      deadCluster: 0,
+      possiblyLive: 0,
+      unknown: 0
+    })
+    expect(env.data.entries).toEqual([])
+  })
+
+  it('rejects a blank service', async () => {
+    const { client } = deadClient({ entries: [] })
+    await expect(fetchDeadReport(client, { service: '' })).rejects.toBeInstanceOf(ValidationError)
+  })
+})
+
 describe('query anchors', () => {
   it('files query is anchored on the File label + service param (no AllNodesScan)', () => {
     expect(OVERVIEW_FILES_QUERY).toContain('(f:File {serviceName: $service, scopeId: $scope})')
@@ -210,5 +338,9 @@ describe('query anchors', () => {
   it('symbols query anchors on elementId and filters same-service out-calls', () => {
     expect(FILE_SYMBOLS_QUERY).toContain('elementId(f) = $id')
     expect(FILE_SYMBOLS_QUERY).toContain('o.targetService = svc')
+  })
+  it('callers query anchors on elementId and coalesces module-scope File callers', () => {
+    expect(SYMBOL_CALLERS_QUERY).toContain('elementId(t) = $id')
+    expect(SYMBOL_CALLERS_QUERY).toContain('coalesce(f.path, caller.path)')
   })
 })

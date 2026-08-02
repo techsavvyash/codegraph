@@ -110,3 +110,79 @@ export interface VisibleGraph {
   nodes: RenderNode[]
   edges: RenderEdge[]
 }
+
+// ---------------------------------------------------------------------------
+// lens system (task-specific Overview views)
+
+/**
+ * The five Overview lenses. One is active at a time; 'structure' is the default
+ * (today's decluttered view). See $lib/components/overview/lenses.ts for the
+ * per-lens math and the store for the reactive wiring.
+ */
+export type LensId = 'structure' | 'flows' | 'usage' | 'hotspots' | 'dead'
+
+/** Structure lens edge filter: 'strong' keeps only the heaviest edges, 'all' shows every one. */
+export type EdgeMode = 'strong' | 'all'
+
+/** Usage lens BFS direction: 'up' walks callers, 'down' walks callees. */
+export type UsageDirection = 'up' | 'down'
+
+/** One 1-hop caller of a symbol (Usage lens drilldown), from /api/overview/callers. */
+export interface SymbolCaller {
+  name: string
+  /** node label — Function | Method | File (module-scope callers are File nodes) */
+  label: string
+  /** service-relative file path of the caller (its own path for module-scope File callers) */
+  filePath: string
+  service: string | null
+}
+
+export interface SymbolCallersResponse {
+  callers: SymbolCaller[]
+}
+
+/** One dead-code verdict entry (RFC-014) for the Dead lens, from /api/overview/dead. */
+export interface DeadEntry {
+  name: string
+  label: string
+  filePath: string
+  startLine: number
+  verdict: string
+  deadCluster: boolean
+  isExported: boolean
+}
+
+/** Aggregate counts across the whole service's reachability report. */
+export interface DeadCounts {
+  total: number
+  live: number
+  testOnly: number
+  dead: number
+  deadCluster: number
+  possiblyLive: number
+  unknown: number
+}
+
+export interface DeadReportResponse {
+  service: string
+  counts: DeadCounts
+  entries: DeadEntry[]
+}
+
+/**
+ * Per-render everything the canvas needs to paint the active lens. Computed in
+ * the store from (lens, graph, selection, flow steps, usage state, dead report)
+ * — every non-trivial computation lives in lenses.ts, this is just the shape.
+ *
+ *  - dimUnmatched: flows/usage/dead dim non-highlighted elements.
+ *  - nodeClasses / edgeClasses: id → a SINGLE lens class name (see style.ts).
+ *  - extraEdges: synthetic flow-segment edges (dashed accent, not hit-testable).
+ *  - visibleEdgeIds: structure strong-mode base-edge filter; null = show all.
+ */
+export interface OverviewDecorations {
+  dimUnmatched: boolean
+  nodeClasses: Map<string, string>
+  edgeClasses: Map<string, string>
+  extraEdges: Array<{ id: string; source: string; target: string; kind: 'flowseg' }>
+  visibleEdgeIds: Set<string> | null
+}

@@ -154,5 +154,81 @@ export const overviewStyle: StylesheetStyle[] = [
     style: {
       opacity: 0.18
     }
-  }
+  },
+
+  // ── lens decorations ──────────────────────────────────────────────────
+  // A lens applies at most one of these classes per element each sync; the
+  // canvas removes any stale lens class before applying the current one.
+
+  // Flows lens: nodes on the traced path get an accent ring + full opacity;
+  // on-path edges (real or synthetic flowseg) are drawn in the flow accent.
+  {
+    selector: 'node.hl-path',
+    style: {
+      opacity: 1,
+      'overlay-color': '#1C7ED6',
+      'overlay-opacity': 0.18,
+      'overlay-padding': 6
+    }
+  },
+  {
+    selector: 'edge.hl-path',
+    style: {
+      'line-color': '#3B5BDB',
+      'target-arrow-color': '#3B5BDB',
+      width: 2.5,
+      opacity: 1
+    }
+  },
+  // synthetic flow-segment edges: dashed accent, arrowed, NEVER hit-testable
+  // (reconciliation skips them exactly like ghost edges)
+  {
+    selector: 'edge[kind = "flowseg"]',
+    style: {
+      'line-color': '#3B5BDB',
+      'target-arrow-color': '#3B5BDB',
+      'target-arrow-shape': 'triangle',
+      'line-style': 'dashed',
+      width: 2.5,
+      events: 'no',
+      label: ''
+    }
+  },
+
+  // Usage lens: the BFS seed(s) get the selection-style accent ring; each depth
+  // ring fades the accent border further out.
+  {
+    selector: 'node.usage-d0',
+    style: {
+      opacity: 1,
+      'overlay-color': '#1C7ED6',
+      'overlay-opacity': 0.18,
+      'overlay-padding': 6
+    }
+  },
+  {
+    selector: 'node.usage-d1',
+    style: { opacity: 1, 'border-color': '#3B5BDB', 'overlay-color': '#3B5BDB', 'overlay-opacity': 0.22 }
+  },
+  {
+    selector: 'node.usage-d2',
+    style: { opacity: 1, 'border-color': '#3B5BDB', 'overlay-color': '#3B5BDB', 'overlay-opacity': 0.12 }
+  },
+  {
+    selector: 'node.usage-d3',
+    style: { opacity: 1, 'border-color': '#3B5BDB', 'overlay-color': '#3B5BDB', 'overlay-opacity': 0.06 }
+  },
+
+  // Hotspots lens: recolor the dot on a heat ramp by incoming call weight.
+  // Overrides the palette fill; the label chip is untouched.
+  { selector: 'node.heat-0', style: { 'background-color': '#FFF3BF' } },
+  { selector: 'node.heat-1', style: { 'background-color': '#FFD8A8' } },
+  { selector: 'node.heat-2', style: { 'background-color': '#FFA94D' } },
+  { selector: 'node.heat-3', style: { 'background-color': '#F76707' } },
+  { selector: 'node.heat-4', style: { 'background-color': '#D9480F' } },
+
+  // Dead code lens: red ramp by dead-count bucket.
+  { selector: 'node.dead-1', style: { 'background-color': '#FFA8A8' } },
+  { selector: 'node.dead-2', style: { 'background-color': '#F03E3E' } },
+  { selector: 'node.dead-3', style: { 'background-color': '#C92A2A' } }
 ]

@@ -17,9 +17,26 @@
   import type { Core, ElementDefinition, EventObject, LayoutOptions, NodeSingular } from 'cytoscape'
   import elk from 'cytoscape-elk'
   import { onMount, onDestroy } from 'svelte'
-  import type { RenderEdge, RenderNode } from '$lib/types/overview'
+  import type { OverviewDecorations, RenderEdge, RenderNode } from '$lib/types/overview'
   import { nodeColors } from '$lib/components/canvas/elements'
   import { overviewStyle } from './style'
+
+  /** Every lens node/edge class the reconciler may need to strip before applying the current one. */
+  const LENS_CLASSES = [
+    'hl-path',
+    'usage-d0',
+    'usage-d1',
+    'usage-d2',
+    'usage-d3',
+    'heat-0',
+    'heat-1',
+    'heat-2',
+    'heat-3',
+    'heat-4',
+    'dead-1',
+    'dead-2',
+    'dead-3'
+  ]
 
   // Same double-registration guard as canvas/elements.ts uses for fcose.
   const elkRegistered = (cytoscape as unknown as { __elkRegistered?: boolean }).__elkRegistered
@@ -32,12 +49,14 @@
     nodes,
     edges,
     selected,
+    decorations,
     onSelect,
     onToggle
   }: {
     nodes: RenderNode[]
     edges: RenderEdge[]
     selected: string | null
+    decorations: OverviewDecorations
     onSelect: (id: string | null) => void
     onToggle: (id: string) => void
   } = $props()
@@ -127,11 +146,31 @@
     return ghosts
   }
 
+  /** Synthetic flow-segment edge (dashed accent, not hit-testable — skipped by
+   * focus/dim reconciliation exactly like ghost edges). */
+  function toFlowSegEl(seg: { id: string; source: string; target: string }): ElementDefinition {
+    return {
+      group: 'edges',
+      data: { id: seg.id, source: seg.source, target: seg.target, weight: 0, wlabel: '', kind: 'flowseg' }
+    }
+  }
+
   /** Incrementally reconcile the cy instance to the current props. */
   function sync() {
     if (!cy) return
     const nextNodeIds = idSet(nodes)
-    const edgeDefs: ElementDefinition[] = [...edges.map(toEdgeEl), ...ghostWrapEdges()]
+    // Structure strong-mode: drop base edges not in the visible set. flowseg
+    // edges (from the flows lens) join the base edges; ghosts always present.
+    const filter = decorations.visibleEdgeIds
+    const baseEdges = filter ? edges.filter((e) => filter.has(e.id)) : edges
+    const flowSegs = decorations.extraEdges.filter(
+      (seg) => nextNodeIds.has(seg.source) && nextNodeIds.has(seg.target)
+    )
+    const edgeDefs: ElementDefinition[] = [
+      ...baseEdges.map(toEdgeEl),
+      ...flowSegs.map(toFlowSegEl),
+      ...ghostWrapEdges()
+    ]
     const nextEdgeIds = new Set(edgeDefs.map((d) => String(d.data.id)))
     const curNodeIds = new Set(cy.nodes().map((n) => n.id()))
     const curEdgeIds = new Set(cy.edges().map((e) => e.id()))
@@ -160,11 +199,11 @@
     ]
     if (toAdd.length > 0) cy.add(toAdd)
 
-    // Reconcile selection state every sync (selection can change alone).
-    // Focus/dim declutter: with a node selected, its neighborhood (self,
-    // compound ancestors/descendants, edge-connected nodes) stays lit; incident
-    // edges get .focus (which reveals their call-weight label); everything else
-    // recedes via .dimmed.
+    // Reconcile selection + lens decorations every sync (either can change
+    // alone). Under Structure the selection drives focus/dim exactly as before;
+    // under any other lens the LENS owns dimming (dimUnmatched) and the selection
+    // still highlights (is-selected) + shows the panel but does not dim.
+    const lensDimming = decorations.dimUnmatched
     const sel = selected ? cy.getElementById(selected) : cy.collection()
     const hasSel = sel.nonempty()
     const litNodeIds = new Set<string>()
@@ -177,23 +216,43 @@
         litNodeIds.add(d.id())
       })
       sel.connectedEdges().forEach((e) => {
-        if (e.data('kind') === 'ghost') return
+        if (e.data('kind') === 'ghost' || e.data('kind') === 'flowseg') return
         litNodeIds.add(e.source().id())
         litNodeIds.add(e.target().id())
       })
     }
+    // Selection-driven dim applies only under Structure (lensDimming false).
+    const selDimActive = hasSel && !lensDimming
     cy.nodes().forEach((n) => {
+      // lens class: strip any stale one, apply the decorated one (O(classes))
+      const want = decorations.nodeClasses.get(n.id())
+      for (const c of LENS_CLASSES) {
+        if (c !== want && n.hasClass(c)) n.removeClass(c)
+      }
+      if (want && !n.hasClass(want)) n.addClass(want)
+
       n.toggleClass('is-selected', n.id() === selected)
-      n.toggleClass('dimmed', hasSel && !litNodeIds.has(n.id()))
+      // dim: (structure selection dim) OR (lens dim and this node has no lens
+      // class and isn't the selection)
+      const lensDim = lensDimming && !want && n.id() !== selected
+      const selDim = selDimActive && !litNodeIds.has(n.id())
+      n.toggleClass('dimmed', lensDim || selDim)
     })
     cy.edges().forEach((e) => {
-      if (e.data('kind') === 'ghost') return // invisible layout-only edges
-      const incident = hasSel && (e.source().id() === selected || e.target().id() === selected)
+      const kind = e.data('kind')
+      if (kind === 'ghost' || kind === 'flowseg') return // layout-only / lens-only, never focus/dim reconciled
+      const wantEdge = decorations.edgeClasses.get(e.id())
+      if (wantEdge !== 'hl-path' && e.hasClass('hl-path')) e.removeClass('hl-path')
+      if (wantEdge === 'hl-path' && !e.hasClass('hl-path')) e.addClass('hl-path')
+
+      const incident = selDimActive && (e.source().id() === selected || e.target().id() === selected)
       e.toggleClass('focus', incident)
-      e.toggleClass(
-        'dimmed',
-        hasSel && !incident && !(litNodeIds.has(e.source().id()) && litNodeIds.has(e.target().id()))
-      )
+      // dim: structure selection dim as before; under a lens, dim any edge not
+      // on the highlighted path (no hl-path class).
+      const lensEdgeDim = lensDimming && wantEdge !== 'hl-path'
+      const selEdgeDim =
+        selDimActive && !incident && !(litNodeIds.has(e.source().id()) && litNodeIds.has(e.target().id()))
+      e.toggleClass('dimmed', lensEdgeDim || selEdgeDim)
     })
 
     if (structuralChange && cy.nodes().length > 0) {
@@ -258,10 +317,11 @@
   })
 
   $effect(() => {
-    // reactive on the visible graph + selection
+    // reactive on the visible graph + selection + lens decorations
     void nodes
     void edges
     void selected
+    void decorations
     sync()
   })
 

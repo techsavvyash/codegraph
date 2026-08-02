@@ -7,7 +7,7 @@
    * goes back out through hoisted callback props. Buttons here are the
    * e2e-reliable path for expand/collapse; the canvas double-tap is the fast path.
    */
-  import type { RenderNode, VisibleGraph } from '$lib/types/overview'
+  import type { LensId, RenderNode, SymbolCaller, VisibleGraph } from '$lib/types/overview'
   import { topConnections } from './model'
 
   interface Props {
@@ -17,11 +17,20 @@
     drillLoading: boolean
     /** per-file drilldown error message, if any */
     drillError: string | null
+    /** active lens — drives the per-lens panel sections below the base props */
+    lens?: LensId
+    /** Usage lens: 1-hop callers of the selected symbol (null until loaded) */
+    symbolCallers?: SymbolCaller[] | null
+    symbolCallersLoading?: boolean
+    /** Dead lens: dead-function names in the selected file/dir */
+    deadNames?: string[]
     onExpand: (node: RenderNode) => void
     onCollapse: (node: RenderNode) => void
     onSelectConnection: (nodeId: string) => void
     onOpenInWorkbench: (node: RenderNode) => void
     onRetryDrill: (node: RenderNode) => void
+    /** Usage lens: select the file node behind a caller row */
+    onSelectCaller?: (filePath: string) => void
   }
 
   let {
@@ -29,11 +38,16 @@
     graph,
     drillLoading,
     drillError,
+    lens = 'structure',
+    symbolCallers = null,
+    symbolCallersLoading = false,
+    deadNames = [],
     onExpand,
     onCollapse,
     onSelectConnection,
     onOpenInWorkbench,
-    onRetryDrill
+    onRetryDrill,
+    onSelectCaller
   }: Props = $props()
 
   const conns = $derived(node ? topConnections(graph, node.id) : { incoming: [], outgoing: [] })
@@ -141,6 +155,45 @@
             {/each}
           </ul>
         {/if}
+      </section>
+    {/if}
+
+    <!-- Usage lens: 1-hop callers of the selected symbol -->
+    {#if lens === 'usage' && node.kind === 'symbol'}
+      <section class="conns" data-testid="usage-callers">
+        <h3>called by</h3>
+        {#if symbolCallersLoading}
+          <p class="note">loading callers…</p>
+        {:else if !symbolCallers || symbolCallers.length === 0}
+          <p class="note">no direct callers found</p>
+        {:else}
+          <ul>
+            {#each symbolCallers as c, i (c.filePath + ':' + c.name + ':' + i)}
+              <li>
+                <button
+                  class="conn"
+                  onclick={() => onSelectCaller?.(c.filePath)}
+                  disabled={!c.filePath || !onSelectCaller}
+                >
+                  <span class="cname mono" title={c.name}>{c.name}</span>
+                  <span class="cweight" title={c.filePath}>{c.filePath}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- Dead lens: dead-function names in the selected file/dir -->
+    {#if lens === 'dead' && node.kind !== 'symbol' && deadNames.length > 0}
+      <section class="conns" data-testid="dead-symbols">
+        <h3>dead functions ({deadNames.length})</h3>
+        <ul>
+          {#each deadNames as name, i (name + ':' + i)}
+            <li class="deadname mono">{name}</li>
+          {/each}
+        </ul>
       </section>
     {/if}
 
@@ -289,5 +342,20 @@
     font-size: var(--text-xs);
     color: var(--ink-3);
     flex: none;
+    max-width: 55%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .conn:disabled {
+    cursor: default;
+  }
+  .deadname {
+    font-size: var(--text-xs);
+    color: var(--err);
+    padding: 2px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

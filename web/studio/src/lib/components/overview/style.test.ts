@@ -46,6 +46,64 @@ describe('edge label declutter grammar', () => {
 })
 
 /**
+ * Lens decoration grammar guards: the new lens classes must exist, and the
+ * synthetic flow-segment edge must be non-hit-testable with an empty label
+ * (like ghost edges) so reconciliation can skip it and it never intercepts taps.
+ */
+describe('lens decoration grammar', () => {
+  const styleFor = (selector: string) => overviewStyle.find((s) => s.selector === selector)?.style
+
+  it('defines flow, usage, heat, and dead classes', () => {
+    expect(styleFor('node.hl-path')).toBeDefined()
+    expect(styleFor('edge.hl-path')).toBeDefined()
+    for (const d of [0, 1, 2, 3]) expect(styleFor(`node.usage-d${d}`)).toBeDefined()
+    for (const h of [0, 1, 2, 3, 4]) expect(styleFor(`node.heat-${h}`)).toBeDefined()
+    for (const d of [1, 2, 3]) expect(styleFor(`node.dead-${d}`)).toBeDefined()
+  })
+
+  it('flowseg edges are non-hit-testable with an empty label', () => {
+    const seg = styleFor('edge[kind = "flowseg"]') as Record<string, unknown>
+    expect(seg.events).toBe('no')
+    expect(seg.label).toBe('')
+    expect(seg['line-style']).toBe('dashed')
+  })
+
+  it('base edge label is still empty (declutter grammar intact)', () => {
+    expect((styleFor('edge') as Record<string, unknown>).label).toBe('')
+  })
+
+  it('heat ramp climbs from pale yellow to deep orange', () => {
+    expect((styleFor('node.heat-0') as Record<string, unknown>)['background-color']).toBe('#FFF3BF')
+    expect((styleFor('node.heat-4') as Record<string, unknown>)['background-color']).toBe('#D9480F')
+  })
+
+  it('dead ramp climbs from pale to deep red', () => {
+    expect((styleFor('node.dead-1') as Record<string, unknown>)['background-color']).toBe('#FFA8A8')
+    expect((styleFor('node.dead-3') as Record<string, unknown>)['background-color']).toBe('#C92A2A')
+  })
+})
+
+/**
+ * A flowseg edge with styleEnabled must still be a valid, rendered element (the
+ * events:'no' + dashed styling must not abort the stylesheet like width:'label').
+ */
+describe('flowseg edge renders under styleEnabled', () => {
+  it('adds and renders a flowseg edge alongside a base edge', () => {
+    const cy = cytoscape({ headless: true, styleEnabled: true, style: overviewStyle as never })
+    cy.add([
+      { group: 'nodes', data: { id: 'na', kind: 'dir', label: 'a', symbolCount: 4, fg: '#7048E8', bg: '#F3F0FF' } },
+      { group: 'nodes', data: { id: 'nb', kind: 'dir', label: 'b', symbolCount: 4, fg: '#7048E8', bg: '#F3F0FF' } },
+      { group: 'edges', data: { id: 'flowseg:na->nb', source: 'na', target: 'nb', weight: 0, wlabel: '', kind: 'flowseg' } }
+    ])
+    cy.getElementById('na').addClass('hl-path')
+    cy.getElementById('flowseg:na->nb').addClass('hl-path')
+    expect(cy.nodes().filter((n) => n.visible()).length).toBe(2)
+    // flowseg edge exists; visibility is fine (opacity/style applied, not aborted)
+    expect(cy.getElementById('flowseg:na->nb').length).toBe(1)
+  })
+})
+
+/**
  * Regression mirror of canvas/visibility.test.ts: with styleEnabled every node
  * must be visible(). Guards against the width:'label' abort and compound-parent
  * misconfiguration leaving nodes unrendered.

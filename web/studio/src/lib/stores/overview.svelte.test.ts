@@ -196,3 +196,373 @@ describe('dirId helper wiring', () => {
     expect(s.graph.nodes[0].id).toBe(dirId('internal'))
   })
 })
+
+// ── lens system ──────────────────────────────────────────────────────────
+
+const ENTRIES_T1 = {
+  count: 1,
+  entries: [
+    {
+      node_id: 'e1',
+      node_key: 'k1',
+      name: 'HandleThing',
+      label: 'Function',
+      file_path: 'internal/graph/client.go',
+      tier: 1,
+      tier_label: 'API-exposed'
+    }
+  ]
+}
+const EMPTY_ENTRIES = { count: 0, entries: [] }
+
+const FLOW = {
+  flow_count: 1,
+  flows: [
+    {
+      flowNodeKey: 'k1',
+      flowName: 'HandleThing',
+      flowType: 'api',
+      steps: [
+        { nodeKey: 'k1', name: 'HandleThing', label: 'Function', order: 0, depth: 0, filePath: 'internal/graph/client.go' },
+        {
+          nodeKey: 'k2',
+          name: 'Index',
+          label: 'Function',
+          order: 1,
+          depth: 1,
+          parentKey: 'k1',
+          filePath: 'internal/search/index.go'
+        }
+      ]
+    }
+  ]
+}
+
+const DEAD = {
+  service: 'codegraph',
+  counts: { total: 3, live: 1, testOnly: 0, dead: 2, deadCluster: 0, possiblyLive: 0, unknown: 0 },
+  entries: [
+    { name: 'Unused', label: 'Function', filePath: 'internal/graph/client.go', startLine: 5, verdict: 'dead', deadCluster: false, isExported: false },
+    { name: 'AlsoUnused', label: 'Function', filePath: 'internal/graph/client.go', startLine: 9, verdict: 'dead', deadCluster: false, isExported: false }
+  ]
+}
+
+/** Routes a fetch by URL to the right canned envelope. */
+function lensFetch(overrides: Partial<Record<string, unknown>> = {}) {
+  return vi.fn(async (url: string) => {
+    if (url.startsWith('/api/overview/file')) return envJson(DRILL_F1)
+    if (url.startsWith('/api/overview/dead')) return envJson(overrides.dead ?? DEAD)
+    if (url.startsWith('/api/overview/callers')) return envJson(overrides.callers ?? { callers: [] })
+    if (url.startsWith('/api/entrypoints')) {
+      const tier = new URL(url, 'http://x').searchParams.get('tier')
+      return envJson(tier === '1' ? (overrides.entriesT1 ?? ENTRIES_T1) : EMPTY_ENTRIES)
+    }
+    if (url.startsWith('/api/flow')) return envJson(overrides.flow ?? FLOW)
+    return envJson(OVERVIEW)
+  })
+}
+
+describe('OverviewStore lens state', () => {
+  it('defaults to structure lens with strong edge mode', () => {
+    const s = new OverviewStore(vi.fn(async () => envJson(OVERVIEW)))
+    expect(s.lens).toBe('structure')
+    expect(s.edgeMode).toBe('strong')
+  })
+
+  it('setLens switches lens and does not clear expansion/selection', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    s.toggleDir('internal')
+    s.select(dirId('internal/graph'))
+    s.setLens('hotspots')
+    expect(s.lens).toBe('hotspots')
+    expect(s.expandedDirs.has('internal')).toBe(true)
+    expect(s.selected).toBe(dirId('internal/graph'))
+  })
+
+  it('toggleEdgeMode flips strong ⇄ all', () => {
+    const s = new OverviewStore(vi.fn(async () => envJson(OVERVIEW)))
+    s.toggleEdgeMode()
+    expect(s.edgeMode).toBe('all')
+    s.toggleEdgeMode()
+    expect(s.edgeMode).toBe('strong')
+  })
+
+  it('service reload resets lens transient state but not the lens id', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    await s.loadFlowEntries()
+    expect(s.flowEntries.length).toBeGreaterThan(0)
+    await s.load('codegraph', 'main', { force: true })
+    // caches cleared by resetExpansion; lens id preserved (a UI concern)
+    expect(s.flowEntries).toEqual([])
+    expect(s.flowEntriesStatus).toBe('idle')
+    expect(s.activeFlowId).toBeNull()
+  })
+})
+
+describe('OverviewStore structure decorations', () => {
+  it('strong mode limits visibleEdgeIds; all mode is null', async () => {
+    const s = new OverviewStore(vi.fn(async () => envJson(OVERVIEW)))
+    await s.load('codegraph')
+    s.toggleDir('internal') // surface the graph→search aggregate edge
+    expect(s.graph.edges.length).toBeGreaterThan(0)
+    expect(s.decorations.visibleEdgeIds).not.toBeNull()
+    s.setEdgeMode('all')
+    expect(s.decorations.visibleEdgeIds).toBeNull()
+  })
+})
+
+describe('OverviewStore flows lens', () => {
+  it('loadFlowEntries fetches per tier and dedupes', async () => {
+    const fetchFn = lensFetch()
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    await s.loadFlowEntries()
+    expect(s.flowEntriesStatus).toBe('loaded')
+    expect(s.flowEntries.map((e) => e.node_id)).toEqual(['e1'])
+    // one request per tier (4) plus the initial overview load
+    const tierCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/entrypoints'))
+    expect(tierCalls).toHaveLength(4)
+  })
+
+  it('traceFlow records steps and the flow decoration lights the path', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    s.toggleDir('internal') // so graph/ and search/ are distinct visible nodes
+    s.lens = 'flows'
+    await s.loadFlowEntries()
+    await s.traceFlow(s.flowEntries[0])
+    expect(s.activeFlowSteps).toHaveLength(2)
+    const dec = s.decorations
+    expect(dec.dimUnmatched).toBe(true)
+    // both step files roll to distinct dir nodes → both lit as hl-path
+    const lit = [...dec.nodeClasses.values()].filter((c) => c === 'hl-path')
+    expect(lit.length).toBe(2)
+    // the graph→search aggregate edge coincides with the flow segment: it lands
+    // as an hl-path edge class (or, if absent from the base set, an extra segment)
+    const onPathEdges = [...dec.edgeClasses.values()].filter((c) => c === 'hl-path')
+    expect(onPathEdges.length + dec.extraEdges.length).toBeGreaterThan(0)
+  })
+
+  it('traceFlow ignores a stale response when a newer trace supersedes it', async () => {
+    // Hold the slow trace's resolver in a mutable box (a plain `let` narrows to
+    // null since TS can't see the in-callback assignment).
+    const gate: { resolve: ((r: Response) => void) | null } = { resolve: null }
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/flow')) {
+        const body = JSON.parse(String(init?.body))
+        if (body.node_id === 'slow') {
+          return new Promise<Response>((res) => {
+            gate.resolve = res
+          })
+        }
+        return envJson(FLOW)
+      }
+      if (url.startsWith('/api/entrypoints')) return envJson(EMPTY_ENTRIES)
+      return envJson(OVERVIEW)
+    })
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    const slow = { node_id: 'slow', node_key: 'ks', name: 'Slow', label: 'Function', tier: 1 as const, tier_label: 't1' }
+    const fast = { node_id: 'e1', node_key: 'k1', name: 'Fast', label: 'Function', tier: 1 as const, tier_label: 't1' }
+    const p1 = s.traceFlow(slow) // stalls
+    await s.traceFlow(fast) // supersedes; activeFlowId now e1
+    // now let the slow one land — it must NOT overwrite the fast result
+    gate.resolve?.(
+      envJson({
+        flow_count: 1,
+        flows: [
+          {
+            flowNodeKey: 'ks',
+            flowName: 'Slow',
+            flowType: 'api',
+            steps: [{ nodeKey: 'ks', name: 'Slow', label: 'Function', order: 0, depth: 0, filePath: 'internal/graph/client.go' }]
+          }
+        ]
+      })
+    )
+    await p1
+    expect(s.activeFlowId).toBe('e1')
+    expect(s.activeFlowName).toBe('Fast')
+  })
+
+  it('clearFlow drops the active trace', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    s.lens = 'flows'
+    await s.loadFlowEntries()
+    await s.traceFlow(s.flowEntries[0])
+    s.clearFlow()
+    expect(s.activeFlowId).toBeNull()
+    expect(s.activeFlowSteps).toEqual([])
+  })
+})
+
+describe('OverviewStore usage lens', () => {
+  it('seeds BFS from a selected file and depth-fades callers', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    // expand fully so files are their own visible nodes
+    s.toggleDir('internal')
+    s.toggleDir('internal/graph')
+    s.toggleDir('internal/search')
+    s.setLens('usage')
+    s.setUsageDirection('up') // who calls index.go → client.go (client calls search)
+    s.select('f2') // internal/search/index.go
+    const dec = s.decorations
+    expect(dec.dimUnmatched).toBe(true)
+    expect(dec.nodeClasses.get('f2')).toBe('usage-d0')
+    expect(dec.nodeClasses.get('f1')).toBe('usage-d1') // client.go calls index.go
+  })
+
+  it('loadSymbolCallers caches by symbol id', async () => {
+    const callers = { callers: [{ name: 'Boot', label: 'File', filePath: 'main.go', service: 'codegraph' }] }
+    const fetchFn = lensFetch({ callers })
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    await s.loadSymbolCallers('s1')
+    expect(s.symbolCallers.get('s1')).toEqual(callers.callers)
+    await s.loadSymbolCallers('s1') // cached — no second call
+    const callerCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/overview/callers'))
+    expect(callerCalls).toHaveLength(1)
+  })
+})
+
+describe('OverviewStore dead lens', () => {
+  it('loadDeadReport caches and drives the dead decoration + panel names', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    s.lens = 'dead'
+    await s.loadDeadReport()
+    expect(s.deadStatus).toBe('loaded')
+    expect(s.deadReport?.counts.dead).toBe(2)
+    // internal collapsed → both dead entries roll to dir:internal, bucket 2 (2-4)
+    const dec = s.decorations
+    expect(dec.dimUnmatched).toBe(true)
+    expect(dec.nodeClasses.get(dirId('internal'))).toBe('dead-2')
+    expect(s.deadNamesFor(dirId('internal')).sort()).toEqual(['AlsoUnused', 'Unused'])
+  })
+
+  it('setLens(dead) triggers the one-time fetch', async () => {
+    const fetchFn = lensFetch()
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    s.setLens('dead')
+    // allow the fire-and-forget fetch to settle
+    await vi.waitFor(() => expect(s.deadStatus).toBe('loaded'))
+    const deadCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/overview/dead'))
+    expect(deadCalls).toHaveLength(1)
+  })
+})
+
+describe('OverviewStore hotspots lens', () => {
+  it('heat-buckets nodes by incoming weight, no dimming', async () => {
+    const s = new OverviewStore(vi.fn(async () => envJson(OVERVIEW)))
+    await s.load('codegraph')
+    s.toggleDir('internal') // graph→search edge weight 3
+    s.setLens('hotspots')
+    const dec = s.decorations
+    expect(dec.dimUnmatched).toBe(false)
+    // search is the sole in-weight node → hottest bucket
+    expect(dec.nodeClasses.get(dirId('internal/search'))).toBe('heat-4')
+    expect(dec.nodeClasses.has(dirId('internal/graph'))).toBe(false)
+  })
+})
+
+describe('OverviewStore lens URL helpers', () => {
+  it('lensParam omits structure, emits others', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    expect(s.lensParam()).toBe('')
+    s.setLens('usage')
+    expect(s.lensParam()).toBe('usage')
+  })
+
+  it('restoreLens sets the lens and re-traces a deep-linked flow entry', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    await s.restoreLens('flows', 'e1')
+    expect(s.lens).toBe('flows')
+    expect(s.activeFlowId).toBe('e1')
+    expect(s.activeFlowSteps).toHaveLength(2)
+  })
+
+  it('restoreLens drops a flow entry that no longer exists', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    await s.restoreLens('flows', 'gone')
+    expect(s.lens).toBe('flows')
+    expect(s.activeFlowId).toBeNull()
+  })
+
+  it('restoreLens falls back to structure for an unknown lens id', async () => {
+    const s = new OverviewStore(lensFetch())
+    await s.load('codegraph')
+    await s.restoreLens('bogus', null)
+    expect(s.lens).toBe('structure')
+  })
+})
+
+describe('OverviewStore lens cache refetch on service switch', () => {
+  it('reloads flow entries for the new service when the flows lens stays active', async () => {
+    const fetchFn = lensFetch()
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    s.setLens('flows')
+    await vi.waitFor(() => expect(s.flowEntriesStatus).toBe('loaded'))
+    const before = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/entrypoints')).length
+    expect(before).toBe(4)
+
+    await s.load('other')
+    // resetExpansion dropped the cache; load() must have re-kicked the fetch
+    await vi.waitFor(() => expect(s.flowEntriesStatus).toBe('loaded'))
+    const after = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/entrypoints')).length
+    expect(after).toBe(8)
+  })
+
+  it('reloads the dead report for the new service when the dead lens stays active', async () => {
+    const fetchFn = lensFetch()
+    const s = new OverviewStore(fetchFn)
+    await s.load('codegraph')
+    s.setLens('dead')
+    await vi.waitFor(() => expect(s.deadStatus).toBe('loaded'))
+
+    await s.load('other')
+    await vi.waitFor(() => expect(s.deadStatus).toBe('loaded'))
+    const deadCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith('/api/overview/dead')).length
+    expect(deadCalls).toBe(2)
+  })
+})
+
+describe('OverviewStore flow symbol precision', () => {
+  it('lights the exact drilled symbols a flow touches inside an expanded file', async () => {
+    const flow = {
+      flow_count: 1,
+      flows: [
+        {
+          flowNodeKey: 'k1',
+          flowName: 'Connect',
+          flowType: 'api',
+          steps: [
+            { nodeKey: 'k1', name: 'Connect', label: 'Method', order: 0, depth: 0, filePath: 'internal/graph/client.go' },
+            { nodeKey: 'k2', name: 'Index', label: 'Function', order: 1, depth: 1, parentKey: 'k1', filePath: 'internal/search/index.go' }
+          ]
+        }
+      ]
+    }
+    const s = new OverviewStore(lensFetch({ flow }))
+    await s.load('codegraph')
+    s.toggleDir('internal')
+    s.toggleDir('internal/graph')
+    await s.expandFile('f1') // drilldown: symbol s1 named Connect
+    s.lens = 'flows'
+    await s.loadFlowEntries()
+    await s.traceFlow(s.flowEntries[0])
+
+    const dec = s.decorations
+    // the expanded file compound is on the path AND its touched symbol is lit
+    expect(dec.nodeClasses.get('f1')).toBe('hl-path')
+    expect(dec.nodeClasses.get('s1')).toBe('hl-path')
+  })
+})

@@ -26,12 +26,15 @@
   import OverviewCanvas from '$lib/components/overview/OverviewCanvas.svelte'
   import OverviewPanel from '$lib/components/overview/OverviewPanel.svelte'
   import ServicePicker from '$lib/components/overview/ServicePicker.svelte'
+  import LensBar from '$lib/components/overview/LensBar.svelte'
+  import FlowRail from '$lib/components/overview/FlowRail.svelte'
   import { ExplorerStore } from '$lib/stores/explorer.svelte'
   import { OverviewStore } from '$lib/stores/overview.svelte'
   import { scope } from '$lib/stores/scope.svelte'
   import { decodeOverviewState } from '$lib/components/overview/model'
   import type { FoundNode, GraphNode } from '$lib/types/graph'
-  import type { RenderNode } from '$lib/types/overview'
+  import type { LensId, RenderNode } from '$lib/types/overview'
+  import type { EntryPoint } from '$lib/types/flows'
 
   type Mode = 'overview' | 'workbench'
 
@@ -46,8 +49,11 @@
   // gate the URL-sync effects until mount has resolved the initial mode/state,
   // so the debounced writer doesn't stomp the incoming deep link
   let bootstrapped = false
-  // one-shot: the ?open= expansion to restore once the first overview load lands
+  // one-shot: the ?open= expansion + lens/flow to restore once the first
+  // overview load lands
   let pendingOpen: string | null = null
+  let pendingLens: string | null = null
+  let pendingFlow: string | null = null
 
   // ── mount: resolve mode + restore whichever mode's deep link ─────────
   onMount(() => {
@@ -73,6 +79,8 @@
     } else {
       mode = 'overview'
       pendingOpen = p.get('open')
+      pendingLens = p.get('lens')
+      pendingFlow = p.get('flow')
       // load the current scope's service now if one is selected; otherwise the
       // picker shows and the scope-follow effect loads on pick
       if (scope.service) void loadOverview(scope.service)
@@ -82,10 +90,20 @@
 
   async function loadOverview(service: string) {
     await overview.load(service, scope.scopeId)
-    if (pendingOpen && overview.status === 'loaded') {
+    if (overview.status !== 'loaded') return
+    if (pendingOpen) {
       const state = decodeOverviewState(pendingOpen)
       pendingOpen = null
       await overview.restore(state)
+    }
+    // Restore lens + re-trace a deep-linked flow (after entries load). Consumed
+    // once; a subsequent scope-follow reload starts fresh at Structure.
+    if (pendingLens || pendingFlow) {
+      const lensId = pendingLens
+      const flowId = pendingFlow
+      pendingLens = null
+      pendingFlow = null
+      await overview.restoreLens(lensId, flowId)
     }
   }
 
@@ -100,9 +118,13 @@
       target = qs ? `/graph?${qs}` : '/graph?view=workbench'
     } else {
       const open = overview.encodeOpen()
+      const lensParam = overview.lensParam()
+      const flowId = overview.activeFlowId
       const p = new URLSearchParams()
       p.set('view', 'overview')
       if (open) p.set('open', open)
+      if (lensParam) p.set('lens', lensParam)
+      if (lensParam === 'flows' && flowId) p.set('flow', flowId)
       target = `/graph?${p.toString()}`
     }
     clearTimeout(urlTimer)
@@ -240,10 +262,62 @@
     setMode('workbench')
   }
 
+  // ── hoisted callback identities (lens system) ─────────────────────────
+  const ovSetLens = (id: LensId) => overview.setLens(id)
+  const ovSelectFlow = (entry: EntryPoint) => void overview.traceFlow(entry)
+  const ovToggleEdgeMode = () => overview.toggleEdgeMode()
+  const ovToggleUsageDir = () => overview.toggleUsageDirection()
+  // A usage caller row selects that file's visible node (resolve path → id).
+  const ovSelectCaller = (filePath: string) => {
+    const leaf = overview.tree.fileByPath.get(filePath)
+    if (leaf) overview.select(leaf.nodeId)
+  }
+
   // The selected file's transient drilldown state, fed to the panel.
   const selectedFileId = $derived(overview.selectedNode?.kind === 'file' ? overview.selectedNode.id : null)
   const panelDrillLoading = $derived(selectedFileId ? overview.drillLoading.has(selectedFileId) : false)
   const panelDrillError = $derived(selectedFileId ? (overview.drillErrors.get(selectedFileId) ?? null) : null)
+
+  // ── lens-derived panel/legend data ────────────────────────────────────
+  // Usage lens: fetch the selected symbol's callers lazily (BFS seed source).
+  const selectedSymbolId = $derived(
+    overview.selectedNode?.kind === 'symbol' ? overview.selectedNode.id : null
+  )
+  $effect(() => {
+    const id = selectedSymbolId
+    const lens = overview.lens
+    untrack(() => {
+      if (lens === 'usage' && id) void overview.loadSymbolCallers(id)
+    })
+  })
+  const panelCallers = $derived(selectedSymbolId ? (overview.symbolCallers.get(selectedSymbolId) ?? null) : null)
+  const panelCallersLoading = $derived(
+    selectedSymbolId ? overview.symbolCallersLoading.has(selectedSymbolId) : false
+  )
+  const panelDeadNames = $derived(
+    overview.lens === 'dead' && overview.selectedNode && overview.selectedNode.kind !== 'symbol'
+      ? overview.deadNamesFor(overview.selectedNode.id)
+      : []
+  )
+
+  // Flow rail projection facts (recompute from the active decorations).
+  const flowOnscreen = $derived(
+    overview.lens === 'flows'
+      ? [...overview.decorations.nodeClasses.values()].filter((c) => c === 'hl-path').length
+      : 0
+  )
+  const flowMissing = $derived.by(() => {
+    if (overview.lens !== 'flows' || overview.activeFlowSteps.length === 0) return 0
+    // steps with a filePath that resolves vs. total — cheap recompute for the chip
+    let missing = 0
+    for (const s of overview.activeFlowSteps) {
+      if (!s.filePath || !overview.tree.fileByPath.has(s.filePath)) missing += 1
+    }
+    return missing
+  })
+
+  // Hotspots/Dead legend visibility + dead counts.
+  const deadCounts = $derived(overview.deadReport?.counts ?? null)
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -277,6 +351,12 @@
         Workbench
       </button>
     </div>
+
+    {#if mode === 'overview' && scope.service}
+      <div class="lensbar-mount">
+        <LensBar lens={overview.lens} onSelect={ovSetLens} />
+      </div>
+    {/if}
 
     {#if mode === 'workbench'}
       <GraphCanvas
@@ -327,13 +407,80 @@
       {#if !scope.service}
         <ServicePicker />
       {:else}
-        <OverviewCanvas
-          nodes={overview.graph.nodes}
-          edges={overview.graph.edges}
-          selected={overview.selected}
-          onSelect={ovSelect}
-          onToggle={ovToggle}
-        />
+        <div class="ostage">
+          {#if overview.lens === 'flows'}
+            <FlowRail
+              entries={overview.flowEntries}
+              status={overview.flowEntriesStatus}
+              error={overview.flowEntriesError}
+              activeId={overview.activeFlowId}
+              activeName={overview.activeFlowName}
+              tracing={overview.flowTracing}
+              steps={overview.activeFlowSteps.length}
+              onscreen={flowOnscreen}
+              missing={flowMissing}
+              onSelect={ovSelectFlow}
+            />
+          {/if}
+          <div class="ocanvas-wrap">
+            <OverviewCanvas
+              nodes={overview.graph.nodes}
+              edges={overview.graph.edges}
+              selected={overview.selected}
+              decorations={overview.decorations}
+              onSelect={ovSelect}
+              onToggle={ovToggle}
+            />
+
+            <!-- Structure edge-mode toggle -->
+            {#if overview.lens === 'structure'}
+              {@const total = overview.graph.edges.length}
+              {@const kept = overview.decorations.visibleEdgeIds?.size ?? total}
+              <button class="chip botleft" data-testid="edge-mode-toggle" onclick={ovToggleEdgeMode}>
+                {#if overview.edgeMode === 'strong'}
+                  edges: strong ({kept}/{total})
+                {:else}
+                  edges: all ({total})
+                {/if}
+              </button>
+            {/if}
+
+            <!-- Usage direction toggle -->
+            {#if overview.lens === 'usage'}
+              <button class="chip botleft" data-testid="usage-dir-toggle" onclick={ovToggleUsageDir}>
+                {overview.usageDirection === 'up' ? 'who uses this (callers)' : 'what this uses (callees)'}
+              </button>
+            {/if}
+
+            <!-- Hotspots legend -->
+            {#if overview.lens === 'hotspots'}
+              <div class="legend topcenter" data-testid="hotspot-legend">
+                <span class="lg-label">incoming calls</span>
+                <span class="ramp">
+                  <i style="background:#FFF3BF"></i><i style="background:#FFD8A8"></i><i
+                    style="background:#FFA94D"
+                  ></i><i style="background:#F76707"></i><i style="background:#D9480F"></i>
+                </span>
+                <span class="lg-label">hot</span>
+              </div>
+            {/if}
+
+            <!-- Dead code legend -->
+            {#if overview.lens === 'dead'}
+              <div class="legend topcenter" data-testid="dead-legend">
+                {#if overview.deadStatus === 'loading'}
+                  computing reachability…
+                {:else if deadCounts}
+                  dead {deadCounts.dead} · possibly {deadCounts.possiblyLive} · test-only {deadCounts.testOnly}
+                {:else if overview.deadStatus === 'error'}
+                  dead-code report failed
+                {:else}
+                  dead 0 · possibly 0 · test-only 0
+                {/if}
+              </div>
+            {/if}
+          </div>
+        </div>
 
         <div class="ostats" data-testid="overview-stats">
           {overview.stats.dirs} dirs &middot; {overview.stats.files} files &middot; {overview.stats.symbols} symbols
@@ -384,11 +531,16 @@
         graph={overview.graph}
         drillLoading={panelDrillLoading}
         drillError={panelDrillError}
+        lens={overview.lens}
+        symbolCallers={panelCallers}
+        symbolCallersLoading={panelCallersLoading}
+        deadNames={panelDeadNames}
         onExpand={ovPanelExpand}
         onCollapse={ovPanelCollapse}
         onSelectConnection={ovSelectConnection}
         onOpenInWorkbench={ovOpenInWorkbench}
         onRetryDrill={ovRetryDrill}
+        onSelectCaller={ovSelectCaller}
       />
     </aside>
   {/if}
@@ -446,6 +598,82 @@
   .modebtn.active {
     background: var(--accent);
     color: #fff;
+  }
+
+  .lensbar-mount {
+    position: absolute;
+    top: var(--s-3);
+    left: 190px;
+    z-index: 6;
+  }
+
+  /* overview stage: optional flow rail column + the canvas */
+  .ostage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  .ocanvas-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* small bottom-left chip (edge-mode / usage direction) */
+  .chip {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 4px 10px;
+    font-size: 10.5px;
+    color: var(--ink-2);
+    box-shadow: var(--shadow-1);
+    z-index: 3;
+  }
+  .chip:hover {
+    background: var(--bg-hover);
+  }
+  .chip.botleft {
+    /* sit above the stats chip which is at bottom:12px left:12px */
+    bottom: 40px;
+  }
+
+  /* top-center legend chip (hotspots ramp / dead counts) */
+  .legend {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    padding: 3px 12px;
+    font-size: 10.5px;
+    color: var(--ink-2);
+    box-shadow: var(--shadow-1);
+    z-index: 3;
+  }
+  .legend .lg-label {
+    color: var(--ink-3);
+    font-size: 10px;
+  }
+  .legend .ramp {
+    display: inline-flex;
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  .legend .ramp i {
+    width: 14px;
+    height: 10px;
+    display: block;
   }
 
   .ostats {
