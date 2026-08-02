@@ -1,21 +1,29 @@
 /**
- * Cytoscape stylesheet + sizing helpers for the Overview canvas. Kept separate
+ * Cytoscape stylesheet + sizing helpers for the Overview canvas, sharing the
+ * design's gnode grammar with the workbench (canvas/elements.ts): solid
+ * categorical dots with a white ring and a mono label chip below. Kept separate
  * from the Svelte component so the sizing math is unit-testable and so the
  * style array is inspectable (the width:'label' landmine is a data-value bug we
  * guard against by never using it — node width is always a numeric function).
+ *
+ * Declutter rules: edges carry NO weight label at rest — weights appear only on
+ * `.focus` edges (the ones incident to the selected node), and everything
+ * outside the selection neighborhood gets `.dimmed` (OverviewCanvas.sync owns
+ * both classes).
  */
 import type { EdgeSingular, NodeSingular, StylesheetStyle } from 'cytoscape'
+import { gnodeLabelStyle } from '$lib/components/canvas/elements'
 
-/** Node diameter from its symbol count: sqrt scale, clamped to [24, 96]px. */
+/** Dot diameter from the node's symbol count: sqrt scale, clamped to [20, 44]px. */
 export function nodeSize(symbolCount: number): number {
   const n = Number.isFinite(symbolCount) && symbolCount > 0 ? symbolCount : 0
-  return clamp(24 + Math.sqrt(n) * 12, 24, 96)
+  return clamp(20 + Math.sqrt(n) * 2.4, 20, 44)
 }
 
-/** Edge width from its call weight: log2 scale, clamped to [1, 8]px. */
+/** Edge width from its call weight: log2 scale, clamped to [1, 5]px. */
 export function edgeWidth(weight: number): number {
   const w = Number.isFinite(weight) && weight > 0 ? weight : 0
-  return clamp(1 + Math.log2(w + 1) * 1.6, 1, 8)
+  return clamp(1 + Math.log2(w + 1) * 0.9, 1, 5)
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -23,94 +31,77 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 export const overviewStyle: StylesheetStyle[] = [
-  // base node — every node carries fg/bg data from the model's palette pick
+  // base node — a solid dot in the palette hue (fg data from the model's pick),
+  // white ring, mono label chip below. NEVER width:'label' (see landmine note).
   {
     selector: 'node',
     style: {
-      // NEVER width:'label' — see the landmine note; size by symbolCount.
+      shape: 'ellipse',
       width: (ele: NodeSingular) => nodeSize(Number(ele.data('symbolCount'))),
       height: (ele: NodeSingular) => nodeSize(Number(ele.data('symbolCount'))),
-      'background-color': (ele: NodeSingular) => String(ele.data('bg')),
-      'border-width': 1.5,
-      'border-color': (ele: NodeSingular) => String(ele.data('fg')),
+      'background-color': (ele: NodeSingular) => String(ele.data('fg')),
+      'border-width': 2.5,
+      'border-color': '#FFFFFF',
       label: (ele: NodeSingular) => String(ele.data('label') ?? ''),
-      color: '#16181D',
-      'font-family': 'IBM Plex Sans, sans-serif',
-      'font-size': 10,
-      'text-valign': 'center',
-      'text-halign': 'center',
-      'text-wrap': 'ellipsis',
-      'text-max-width': '120px'
+      ...gnodeLabelStyle
     }
   },
-  // directories — round-rect, larger font, label above the shape so rolled-up
-  // dirs read as containers rather than leaves
+  // directories — rolled-up packages read slightly heavier than leaves
   {
     selector: 'node[kind = "dir"]',
     style: {
-      shape: 'round-rectangle',
-      'font-size': 12,
       'font-weight': 600
     }
   },
-  // files — rectangle
-  {
-    selector: 'node[kind = "file"]',
-    style: {
-      shape: 'rectangle'
-    }
-  },
   // an expanded file becomes a compound parent: its symbol children sit inside,
-  // so draw it as a translucent container with the label at the top
+  // so it cannot stay a dot — draw a translucent container with the label chip
+  // pinned to the top edge
   {
     selector: 'node[kind = "file"]:parent',
     style: {
       shape: 'round-rectangle',
-      'background-opacity': 0.14,
+      'background-color': (ele: NodeSingular) => String(ele.data('bg')),
+      'background-opacity': 0.35,
+      'border-width': 1.5,
+      'border-color': (ele: NodeSingular) => String(ele.data('fg')),
+      'border-style': 'dashed',
       'text-valign': 'top',
-      'text-halign': 'center',
-      padding: '12px'
+      'text-margin-y': -4,
+      padding: '14px'
     }
   },
-  // symbols — small ellipse inside their file compound
+  // symbols — small fixed dots inside their file compound
   {
     selector: 'node[kind = "symbol"]',
     style: {
-      shape: 'ellipse',
-      width: 26,
-      height: 26,
-      'font-size': 9
+      width: 18,
+      height: 18,
+      'font-size': 9,
+      'text-margin-y': 4
     }
   },
   {
     selector: 'node.is-selected',
     style: {
-      'border-width': 3,
-      'border-color': '#3B5BDB',
+      color: '#364FC7',
+      'font-weight': 600,
       'overlay-color': '#3B5BDB',
-      'overlay-opacity': 0.12,
-      'overlay-padding': 6
+      'overlay-opacity': 0.14,
+      'overlay-padding': 5
     }
   },
-  // base edge — width by weight, directed
+  // base edge — width by weight, directed, NO label at rest (weight chips on
+  // every edge were the single biggest source of clutter)
   {
     selector: 'edge',
     style: {
       width: (ele: EdgeSingular) => edgeWidth(Number(ele.data('weight'))),
-      'line-color': '#ADB5BD',
-      'target-arrow-color': '#ADB5BD',
+      'line-color': '#C4CAD1',
+      'target-arrow-color': '#C4CAD1',
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.9,
+      'arrow-scale': 0.8,
       'curve-style': 'bezier',
-      label: 'data(wlabel)',
-      color: '#495057',
-      'font-family': 'IBM Plex Mono, monospace',
-      'font-size': 9,
-      'text-rotation': 'none',
-      'text-background-color': '#F1F3F5',
-      'text-background-opacity': 1,
-      'text-background-padding': '2px',
-      'text-background-shape': 'roundrectangle'
+      label: ''
     }
   },
   // symbol-level edges (revealed by drilldown) — accent hue so precise calls
@@ -118,9 +109,39 @@ export const overviewStyle: StylesheetStyle[] = [
   {
     selector: 'edge[kind = "symbol"]',
     style: {
+      'line-color': '#74C0FC',
+      'target-arrow-color': '#74C0FC'
+    }
+  },
+  // edges incident to the selected node: darken and reveal the call weight
+  {
+    selector: 'edge.focus',
+    style: {
+      'line-color': '#868E96',
+      'target-arrow-color': '#868E96',
+      label: 'data(wlabel)',
+      color: '#495057',
+      'font-family': 'IBM Plex Mono, monospace',
+      'font-size': 9,
+      'text-rotation': 'none',
+      'text-background-color': '#FFFFFF',
+      'text-background-opacity': 0.92,
+      'text-background-shape': 'roundrectangle',
+      'text-background-padding': '2px'
+    }
+  },
+  {
+    selector: 'edge[kind = "symbol"].focus',
+    style: {
       'line-color': '#1C7ED6',
-      'target-arrow-color': '#1C7ED6',
-      'line-style': 'solid'
+      'target-arrow-color': '#1C7ED6'
+    }
+  },
+  // everything outside the selection neighborhood recedes
+  {
+    selector: '.dimmed',
+    style: {
+      opacity: 0.18
     }
   }
 ]

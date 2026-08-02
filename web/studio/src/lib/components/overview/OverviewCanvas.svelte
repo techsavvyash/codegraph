@@ -67,8 +67,8 @@
         source: e.source,
         target: e.target,
         weight: e.weight,
-        // label only when the edge is heavy enough that a number aids reading
-        wlabel: e.weight >= 3 ? String(e.weight) : '',
+        // rendered only while the edge has .focus (incident to the selection)
+        wlabel: String(e.weight),
         kind: e.kind
       }
     }
@@ -143,9 +143,38 @@
     ]
     if (toAdd.length > 0) cy.add(toAdd)
 
-    // reconcile selection class every sync (selection can change alone)
+    // Reconcile selection state every sync (selection can change alone).
+    // Focus/dim declutter: with a node selected, its neighborhood (self,
+    // compound ancestors/descendants, edge-connected nodes) stays lit; incident
+    // edges get .focus (which reveals their call-weight label); everything else
+    // recedes via .dimmed.
+    const sel = selected ? cy.getElementById(selected) : cy.collection()
+    const hasSel = sel.nonempty()
+    const litNodeIds = new Set<string>()
+    if (hasSel) {
+      litNodeIds.add(sel.id())
+      sel.ancestors().forEach((a) => {
+        litNodeIds.add(a.id())
+      })
+      sel.descendants().forEach((d) => {
+        litNodeIds.add(d.id())
+      })
+      sel.connectedEdges().forEach((e) => {
+        litNodeIds.add(e.source().id())
+        litNodeIds.add(e.target().id())
+      })
+    }
     cy.nodes().forEach((n) => {
       n.toggleClass('is-selected', n.id() === selected)
+      n.toggleClass('dimmed', hasSel && !litNodeIds.has(n.id()))
+    })
+    cy.edges().forEach((e) => {
+      const incident = hasSel && (e.source().id() === selected || e.target().id() === selected)
+      e.toggleClass('focus', incident)
+      e.toggleClass(
+        'dimmed',
+        hasSel && !incident && !(litNodeIds.has(e.source().id()) && litNodeIds.has(e.target().id()))
+      )
     })
 
     if (structuralChange && cy.nodes().length > 0) {

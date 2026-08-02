@@ -147,52 +147,63 @@ export function computeDiff(
   }
 }
 
-/** The cytoscape stylesheet implementing the design's node pill + edge provenance grammar. */
+/**
+ * The design's graph-node grammar (design/studio/screens/graph.html .gnode):
+ * a solid categorical dot with a white ring and a mono label chip BELOW the
+ * node — the same dot+label language the flows screen chips use. Shared by the
+ * workbench and overview stylesheets so /graph reads as one visual system.
+ */
+export const gnodeLabelStyle = {
+  'font-family': 'IBM Plex Mono, monospace',
+  'font-size': 10,
+  color: '#495057',
+  'text-valign': 'bottom',
+  'text-halign': 'center',
+  'text-margin-y': 6,
+  'text-wrap': 'ellipsis',
+  'text-max-width': '150px',
+  'text-background-color': '#FFFFFF',
+  'text-background-opacity': 0.92,
+  'text-background-shape': 'roundrectangle',
+  'text-background-padding': '2px'
+} as const
+
+/** The cytoscape stylesheet implementing the design's gnode dot + edge provenance grammar. */
 export const canvasStyle: StylesheetStyle[] = [
   {
     selector: 'node',
     style: {
-      shape: 'round-rectangle',
       // NOT width:'label' — that deprecated value doesn't just warn in
       // cytoscape 3.34, it aborts style application entirely and every node
-      // stays visible()=false (never rendered). Approximate the label width
-      // instead (11px IBM Plex Sans ≈ 6.5px/char + padding).
-      width: (ele: NodeSingular) => {
-        const name = String(ele.data('name') ?? '')
-        const pinPrefix = ele.hasClass('is-pinned') ? 14 : 0
-        return Math.max(40, Math.round(name.length * 6.5) + 18 + pinPrefix)
-      },
-      height: 24,
-      padding: '8px',
-      'background-color': (ele: NodeSingular) => nodeColors(String(ele.data('label'))).bg,
-      'border-width': 1.5,
-      'border-color': (ele: NodeSingular) => nodeColors(String(ele.data('label'))).fg,
+      // stays visible()=false (never rendered).
+      shape: 'ellipse',
+      width: 26,
+      height: 26,
+      'background-color': (ele: NodeSingular) => nodeColors(String(ele.data('label'))).fg,
+      'border-width': 2.5,
+      'border-color': '#FFFFFF',
       label: (ele: NodeSingular) => {
         const pinned = ele.hasClass('is-pinned')
         const name = String(ele.data('name') ?? '')
         return pinned ? `⌖ ${name}` : name
       },
-      'font-family': 'IBM Plex Sans, sans-serif',
-      'font-size': 11,
-      color: '#16181D',
-      'text-valign': 'center',
-      'text-halign': 'center'
+      ...gnodeLabelStyle
     }
   },
   {
     selector: 'node.is-selected',
     style: {
-      'border-width': 2,
-      'border-color': '#3B5BDB',
+      color: '#364FC7',
+      'font-weight': 500,
       'overlay-color': '#3B5BDB',
-      'overlay-opacity': 0.12,
-      'overlay-padding': 6
+      'overlay-opacity': 0.14,
+      'overlay-padding': 5
     }
   },
   {
     selector: 'node.is-pinned',
     style: {
-      'background-color': '#EDF2FF'
+      color: '#364FC7'
     }
   },
   {
