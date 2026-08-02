@@ -129,6 +129,24 @@ export class McpClient {
     return result.tools
   }
 
+  /**
+   * tools/list including each tool's JSON Schema, for the chat tool-loop
+   * (which needs the schema to hand to the model and to drive scope injection).
+   * listTools() intentionally strips inputSchema; this is the full record.
+   */
+  async listToolsWithSchema(): Promise<
+    Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>
+  > {
+    const result = (await this.request('tools/list', {})) as {
+      tools: Array<{ name: string; description: string; inputSchema?: Record<string, unknown> }>
+    }
+    return result.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema ?? { type: 'object', properties: {} }
+    }))
+  }
+
   /** Liveness probe: true if the child is up (or can be started) and answers tools/list. */
   async healthy(): Promise<boolean> {
     try {

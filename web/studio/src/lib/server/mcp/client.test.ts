@@ -201,6 +201,44 @@ describe('McpClient', () => {
     expect((err as Error).message).toContain('failed to connect to neo4j')
   })
 
+  it('listToolsWithSchema returns each tool including its inputSchema', async () => {
+    const { client } = makeClient((msg, proc) => {
+      if (handshake(msg, proc)) return
+      if (msg.method === 'tools/list') {
+        proc.respond(msg.id!, {
+          tools: [
+            {
+              name: 'codegraph_find',
+              description: 'find symbols',
+              inputSchema: {
+                type: 'object',
+                properties: { query: { type: 'string' }, service_name: { type: 'string' } }
+              }
+            }
+          ]
+        })
+      }
+    })
+    const tools = await client.listToolsWithSchema()
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ name: 'codegraph_find', description: 'find symbols' })
+    expect(tools[0].inputSchema).toEqual({
+      type: 'object',
+      properties: { query: { type: 'string' }, service_name: { type: 'string' } }
+    })
+  })
+
+  it('listToolsWithSchema substitutes an empty object schema when a tool omits inputSchema', async () => {
+    const { client } = makeClient((msg, proc) => {
+      if (handshake(msg, proc)) return
+      if (msg.method === 'tools/list') {
+        proc.respond(msg.id!, { tools: [{ name: 't', description: 'd' }] })
+      }
+    })
+    const tools = await client.listToolsWithSchema()
+    expect(tools[0].inputSchema).toEqual({ type: 'object', properties: {} })
+  })
+
   it('trips a cooldown after a crash loop and fails fast without spawning', async () => {
     let clock = 1_000_000
     // Children die immediately after spawn, before answering anything
