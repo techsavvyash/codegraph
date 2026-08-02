@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test'
 
 test.describe('graph explorer', () => {
   test('search → canvas → expand → inspect journey against the live graph', async ({ page }) => {
-    await page.goto('/graph')
+    // /graph now defaults to the service Overview; the working-set explorer is
+    // the workbench mode, reached explicitly (or via a ?nodes= deep link).
+    await page.goto('/graph?view=workbench')
 
     // Empty working set auto-opens the omnibox
     const input = page.locator('input').first()

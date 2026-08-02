@@ -1,66 +1,155 @@
 <script lang="ts">
   /**
-   * Graph explorer (RFC-012 R1–R3): omnibox → canvas → inspector, wired
-   * through ExplorerStore. This page owns the store, keyboard shortcuts,
-   * and the deep-link round-trip; every panel below it is presentational.
+   * Graph screen with two modes:
+   *  - overview (DEFAULT): the whole-service visualizer — pick a service, see
+   *    its directory/file/symbol graph, drill down/up (OverviewStore + canvas).
+   *  - workbench: the RFC-012 omnibox → canvas → inspector working-set explorer
+   *    (ExplorerStore), unchanged. Reached via ?view=workbench or a ?nodes= deep
+   *    link (flows' "Load onto canvas" handoff, which must keep working).
+   *
+   * Both stores live for the page's lifetime, so switching modes never destroys
+   * the other's in-memory state. Overview follows the global scope store; the
+   * workbench keeps its own working set. This page owns keyboard shortcuts, the
+   * two deep-link round-trips, and the scope-follow effect.
+   *
+   * Svelte-5 effect-loop hazards (see the original workbench comments + the
+   * flows page): callback props are hoisted consts; read-modify-writes inside
+   * store actions are untracked in the store; the scope-follow effect reads
+   * scope.service tracked and everything else untracked.
    */
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { replaceState } from '$app/navigation'
   import { page } from '$app/state'
   import GraphCanvas from '$lib/components/canvas/GraphCanvas.svelte'
   import Omnibox from '$lib/components/omnibox/Omnibox.svelte'
   import Inspector from '$lib/components/inspector/Inspector.svelte'
+  import OverviewCanvas from '$lib/components/overview/OverviewCanvas.svelte'
+  import OverviewPanel from '$lib/components/overview/OverviewPanel.svelte'
+  import ServicePicker from '$lib/components/overview/ServicePicker.svelte'
   import { ExplorerStore } from '$lib/stores/explorer.svelte'
+  import { OverviewStore } from '$lib/stores/overview.svelte'
   import { scope } from '$lib/stores/scope.svelte'
-  import type { FoundNode } from '$lib/types/graph'
+  import { decodeOverviewState } from '$lib/components/overview/model'
+  import type { FoundNode, GraphNode } from '$lib/types/graph'
+  import type { RenderNode } from '$lib/types/overview'
+
+  type Mode = 'overview' | 'workbench'
 
   const store = new ExplorerStore()
+  const overview = new OverviewStore()
+
+  let mode = $state<Mode>('overview')
   let omniboxOpen = $state(false)
   let pathBusy = $state(false)
   let pathNotice = $state<string | null>(null)
 
-  // ── deep-link restore + persist ──────────────────────────
+  // gate the URL-sync effects until mount has resolved the initial mode/state,
+  // so the debounced writer doesn't stomp the incoming deep link
+  let bootstrapped = false
+  // one-shot: the ?open= expansion to restore once the first overview load lands
+  let pendingOpen: string | null = null
+
+  // ── mount: resolve mode + restore whichever mode's deep link ─────────
   onMount(() => {
     const p = page.url.searchParams
     const ids = (p.get('nodes') ?? '').split(',').filter(Boolean)
-    const sel = p.get('sel')
-    const pins = (p.get('pin') ?? '').split(',').filter(Boolean)
-    // one-shot: consumed on restore, then dropped by the URL-sync effect
-    const stitch = (p.get('stitch') ?? '').split(',').filter(Boolean)
-    if (ids.length) {
-      store.hydrate(ids, stitch).then(() => {
-        if (sel && store.nodes.has(sel)) store.select(sel)
-        for (const pin of pins) if (store.nodes.has(pin)) store.togglePin(pin)
-      })
+    const view = p.get('view')
+
+    // Mode resolution: explicit workbench view OR a ?nodes= deep link → workbench;
+    // otherwise overview (the default whole-service experience).
+    if (view === 'workbench' || ids.length > 0) {
+      mode = 'workbench'
+      const sel = p.get('sel')
+      const pins = (p.get('pin') ?? '').split(',').filter(Boolean)
+      const stitch = (p.get('stitch') ?? '').split(',').filter(Boolean)
+      if (ids.length) {
+        void store.hydrate(ids, stitch).then(() => {
+          if (sel && store.nodes.has(sel)) store.select(sel)
+          for (const pin of pins) if (store.nodes.has(pin)) store.togglePin(pin)
+        })
+      } else {
+        omniboxOpen = true
+      }
     } else {
-      omniboxOpen = true
+      mode = 'overview'
+      pendingOpen = p.get('open')
+      // load the current scope's service now if one is selected; otherwise the
+      // picker shows and the scope-follow effect loads on pick
+      if (scope.service) void loadOverview(scope.service)
     }
+    bootstrapped = true
   })
 
+  async function loadOverview(service: string) {
+    await overview.load(service, scope.scopeId)
+    if (pendingOpen && overview.status === 'loaded') {
+      const state = decodeOverviewState(pendingOpen)
+      pendingOpen = null
+      await overview.restore(state)
+    }
+  }
+
+  // ── URL sync (debounced replaceState, one writer per mode) ────────────
   let urlTimer: ReturnType<typeof setTimeout> | undefined
   $effect(() => {
-    const qs = store.toParams().toString()
+    if (!bootstrapped) return
+    // recompute the target for the active mode
+    let target: string
+    if (mode === 'workbench') {
+      const qs = store.toParams().toString()
+      target = qs ? `/graph?${qs}` : '/graph?view=workbench'
+    } else {
+      const open = overview.encodeOpen()
+      const p = new URLSearchParams()
+      p.set('view', 'overview')
+      if (open) p.set('open', open)
+      target = `/graph?${p.toString()}`
+    }
     clearTimeout(urlTimer)
     urlTimer = setTimeout(() => {
-      const target = qs ? `/graph?${qs}` : '/graph'
-      if (page.url.pathname + page.url.search !== target) {
-        replaceState(target, {})
-      }
+      if (page.url.pathname + page.url.search !== target) replaceState(target, {})
     }, 300)
   })
 
-  // ── omnibox wiring ───────────────────────────────────────
+  // ── overview: follow the global scope store ───────────────────────────
+  // A concrete scope selection (topbar or the picker) loads/reloads the
+  // overview and resets its expansion. Null scope ("All services") leaves the
+  // picker up. Read scope.service tracked; do the load untracked (flows pattern).
+  $effect(() => {
+    const svc = scope.service
+    untrack(() => {
+      if (!bootstrapped || mode !== 'overview') return
+      if (!svc) return
+      if (svc === overview.service && overview.status === 'loaded') return
+      void loadOverview(svc)
+    })
+  })
+
+  // ── mode toggle ───────────────────────────────────────────────────────
+  function setMode(next: Mode) {
+    if (next === mode) return
+    mode = next
+    // entering overview with a scope but no data yet → load it
+    if (next === 'overview' && scope.service && overview.service !== scope.service) {
+      void loadOverview(scope.service)
+    }
+  }
+  const showOverview = () => setMode('overview')
+  const showWorkbench = () => setMode('workbench')
+
+  // ── omnibox wiring (works in both modes; 'open'/'add' switch to workbench) ──
   function addFound(n: FoundNode) {
     store.addFound(n)
+    if (mode !== 'workbench') setMode('workbench')
   }
   function openFound(n: FoundNode) {
     store.addFound(n)
     store.select(n.node_id)
+    if (mode !== 'workbench') setMode('workbench')
     omniboxOpen = false
   }
 
-  // ── expand defaults ──────────────────────────────────────
-  // Double-click / `e`: the everyday traversal — one hop of calls, both ways.
+  // ── workbench expand/path/keyboard (unchanged behavior) ───────────────
   function quickExpand(nodeId: string) {
     store.expand(nodeId, ['CALLS'], 'both', 1)
   }
@@ -69,15 +158,12 @@
     if (store.pinned.length !== 2 || pathBusy) return
     pathBusy = true
     pathNotice = null
-    const count = await store.path(store.pinned[0], store.pinned[1], ['CALLS'], {
-      direction: 'both'
-    })
+    const count = await store.path(store.pinned[0], store.pinned[1], ['CALLS'], { direction: 'both' })
     pathBusy = false
     if (count === 0) pathNotice = 'no CALLS path between the pinned nodes'
     else if (count !== null) pathNotice = null
   }
 
-  // ── keyboard ─────────────────────────────────────────────
   function onKeydown(ev: KeyboardEvent) {
     const inField =
       ev.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(ev.target.tagName)
@@ -87,31 +173,31 @@
       return
     }
     if (inField || omniboxOpen) return
-    switch (ev.key) {
-      case '/':
-        ev.preventDefault()
-        omniboxOpen = true
-        break
-      case 'e':
-        if (store.selected) quickExpand(store.selected)
-        break
-      case 'p':
-        if (store.selected) store.togglePin(store.selected)
-        break
-      case 'Escape':
-        store.select(null)
-        break
+    if (ev.key === '/') {
+      ev.preventDefault()
+      omniboxOpen = true
+      return
+    }
+    if (mode === 'workbench') {
+      switch (ev.key) {
+        case 'e':
+          if (store.selected) quickExpand(store.selected)
+          break
+        case 'p':
+          if (store.selected) store.togglePin(store.selected)
+          break
+        case 'Escape':
+          store.select(null)
+          break
+      }
+    } else if (ev.key === 'Escape') {
+      overview.select(null)
     }
   }
 
-  const pinnedNames = $derived(
-    store.pinned.map((id) => store.nodes.get(id)?.name ?? id.slice(-8))
-  )
+  const pinnedNames = $derived(store.pinned.map((id) => store.nodes.get(id)?.name ?? id.slice(-8)))
 
-  // Stable callback identities: inline arrows in the template are re-created
-  // on every render, and any child $effect that calls one tracks the prop —
-  // combined with callbacks that write store state (pending), that's an
-  // infinite effect loop (effect_update_depth_exceeded).
+  // ── hoisted callback identities (workbench) ───────────────────────────
   const selectNode = (id: string | null) => store.select(id)
   const togglePin = (id: string) => store.togglePin(id)
   const removeNode = (id: string) => store.removeNode(id)
@@ -121,6 +207,43 @@
   const focusNode = (id: string) => store.select(id)
   const closeInspector = () => store.select(null)
   const dismissError = () => store.dismissError()
+
+  // ── hoisted callback identities (overview) ────────────────────────────
+  const ovSelect = (id: string | null) => overview.select(id)
+  const ovToggle = (id: string) => {
+    // double-tap on the canvas: dirs toggle expansion, files expand/collapse
+    if (id.startsWith('dir:')) {
+      overview.toggleDir(id.slice('dir:'.length))
+    } else if (overview.expandedFiles.has(id)) {
+      overview.collapseFile(id)
+    } else {
+      void overview.expandFile(id)
+    }
+  }
+  const ovPanelExpand = (node: RenderNode) => {
+    if (node.kind === 'dir') overview.toggleDir(node.id.slice('dir:'.length))
+    else if (node.kind === 'file') void overview.expandFile(node.id)
+  }
+  const ovPanelCollapse = (node: RenderNode) => {
+    if (node.kind === 'file') overview.collapseFile(node.id)
+  }
+  const ovRetryDrill = (node: RenderNode) => {
+    if (node.kind === 'file') void overview.expandFile(node.id)
+  }
+  const ovSelectConnection = (id: string) => overview.select(id)
+  const ovDismissError = () => overview.dismissError()
+  const ovOpenInWorkbench = (_node: RenderNode) => {
+    const seed: GraphNode | null = overview.workbenchSeed()
+    if (!seed) return
+    store.addNode(seed)
+    store.select(seed.node_id)
+    setMode('workbench')
+  }
+
+  // The selected file's transient drilldown state, fed to the panel.
+  const selectedFileId = $derived(overview.selectedNode?.kind === 'file' ? overview.selectedNode.id : null)
+  const panelDrillLoading = $derived(selectedFileId ? overview.drillLoading.has(selectedFileId) : false)
+  const panelDrillError = $derived(selectedFileId ? (overview.drillErrors.get(selectedFileId) ?? null) : null)
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -129,54 +252,120 @@
   <title>CodeGraph Studio — Graph</title>
 </svelte:head>
 
-<div class="explorer">
+<div class="explorer" class:has-panel={mode === 'workbench' ? !!store.selected : !!overview.selected}>
   <div class="stage">
-    <GraphCanvas
-      nodes={store.nodeList}
-      edges={store.edgeList}
-      selected={store.selected}
-      pinned={store.pinned}
-      onSelect={selectNode}
-      onTogglePin={togglePin}
-      onExpandRequest={quickExpand}
-      onRemoveNode={removeNode}
-    />
+    <!-- mode toggle, floated top-left -->
+    <div class="modes" role="tablist" aria-label="Graph mode">
+      <button
+        class="modebtn"
+        class:active={mode === 'overview'}
+        role="tab"
+        aria-selected={mode === 'overview'}
+        data-testid="mode-overview"
+        onclick={showOverview}
+      >
+        Overview
+      </button>
+      <button
+        class="modebtn"
+        class:active={mode === 'workbench'}
+        role="tab"
+        aria-selected={mode === 'workbench'}
+        data-testid="mode-workbench"
+        onclick={showWorkbench}
+      >
+        Workbench
+      </button>
+    </div>
 
-    {#if store.warnings.length > 0}
-      <div class="notices">
-        {#each store.warnings as w}
-          <div class="notice mono">guardrail: {w}</div>
-        {/each}
-      </div>
+    {#if mode === 'workbench'}
+      <GraphCanvas
+        nodes={store.nodeList}
+        edges={store.edgeList}
+        selected={store.selected}
+        pinned={store.pinned}
+        onSelect={selectNode}
+        onTogglePin={togglePin}
+        onExpandRequest={quickExpand}
+        onRemoveNode={removeNode}
+      />
+
+      {#if store.warnings.length > 0}
+        <div class="notices">
+          {#each store.warnings as w}
+            <div class="notice mono">guardrail: {w}</div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if store.error}
+        <div class="errbar">
+          <span>{store.error}</span>
+          <button onclick={dismissError}>dismiss</button>
+        </div>
+      {/if}
+
+      {#if store.pinned.length === 2}
+        <div class="pathbar">
+          <span class="mono">{pinnedNames[0]} &#8596; {pinnedNames[1]}</span>
+          <button class="go" onclick={runPath} disabled={pathBusy}>
+            {pathBusy ? 'finding…' : 'Find CALLS path'}
+          </button>
+          {#if pathNotice}<span class="none">{pathNotice}</span>{/if}
+        </div>
+      {/if}
+
+      {#if store.pending > 0}
+        <div class="busy mono">loading…</div>
+      {/if}
+
+      <button class="openomni" onclick={() => (omniboxOpen = true)}>
+        &#8981; Search symbols, files, docs&#8230; <span class="kbd">&#8984;K</span>
+      </button>
+    {:else}
+      <!-- overview mode -->
+      {#if !scope.service}
+        <ServicePicker />
+      {:else}
+        <OverviewCanvas
+          nodes={overview.graph.nodes}
+          edges={overview.graph.edges}
+          selected={overview.selected}
+          onSelect={ovSelect}
+          onToggle={ovToggle}
+        />
+
+        <div class="ostats" data-testid="overview-stats">
+          {overview.stats.dirs} dirs &middot; {overview.stats.files} files &middot; {overview.stats.symbols} symbols
+        </div>
+
+        {#if overview.status === 'loading'}
+          <div class="busy mono">loading service…</div>
+        {/if}
+
+        {#if overview.isEmpty}
+          <div class="oempty">This service has no files in the graph.</div>
+        {/if}
+
+        {#if overview.warnings.length > 0}
+          <div class="notices">
+            {#each overview.warnings as w}
+              <div class="notice mono">guardrail: {w}</div>
+            {/each}
+          </div>
+        {/if}
+
+        {#if overview.error}
+          <div class="errbar">
+            <span>{overview.error}</span>
+            <button onclick={ovDismissError}>dismiss</button>
+          </div>
+        {/if}
+      {/if}
     {/if}
-
-    {#if store.error}
-      <div class="errbar">
-        <span>{store.error}</span>
-        <button onclick={dismissError}>dismiss</button>
-      </div>
-    {/if}
-
-    {#if store.pinned.length === 2}
-      <div class="pathbar">
-        <span class="mono">{pinnedNames[0]} &#8596; {pinnedNames[1]}</span>
-        <button class="go" onclick={runPath} disabled={pathBusy}>
-          {pathBusy ? 'finding…' : 'Find CALLS path'}
-        </button>
-        {#if pathNotice}<span class="none">{pathNotice}</span>{/if}
-      </div>
-    {/if}
-
-    {#if store.pending > 0}
-      <div class="busy mono">loading…</div>
-    {/if}
-
-    <button class="openomni" onclick={() => (omniboxOpen = true)}>
-      &#8981; Search symbols, files, docs&#8230; <span class="kbd">&#8984;K</span>
-    </button>
   </div>
 
-  {#if store.selected}
+  {#if mode === 'workbench' && store.selected}
     <aside class="insp">
       <Inspector
         node={store.nodes.get(store.selected) ?? null}
@@ -188,6 +377,20 @@
         onClose={closeInspector}
       />
     </aside>
+  {:else if mode === 'overview' && overview.selectedNode}
+    <aside class="insp">
+      <OverviewPanel
+        node={overview.selectedNode}
+        graph={overview.graph}
+        drillLoading={panelDrillLoading}
+        drillError={panelDrillError}
+        onExpand={ovPanelExpand}
+        onCollapse={ovPanelCollapse}
+        onSelectConnection={ovSelectConnection}
+        onOpenInWorkbench={ovOpenInWorkbench}
+        onRetryDrill={ovRetryDrill}
+      />
+    </aside>
   {/if}
 </div>
 
@@ -197,8 +400,11 @@
   .explorer {
     height: 100%;
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr;
     overflow: hidden;
+  }
+  .explorer.has-panel {
+    grid-template-columns: 1fr auto;
   }
   .stage {
     position: relative;
@@ -210,6 +416,59 @@
     border-left: 1px solid var(--border);
     background: var(--bg-panel);
     overflow-y: auto;
+  }
+
+  .modes {
+    position: absolute;
+    top: var(--s-3);
+    left: var(--s-3);
+    display: flex;
+    gap: 2px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 3px;
+    box-shadow: var(--shadow-1);
+    /* above the service-picker overlay (z-index 5): the mode toggle must stay
+       reachable when no service is selected, or workbench is unreachable */
+    z-index: 6;
+  }
+  .modebtn {
+    padding: 4px 12px;
+    border-radius: var(--r-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--ink-3);
+  }
+  .modebtn:hover {
+    background: var(--bg-hover);
+  }
+  .modebtn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .ostats {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 4px 10px;
+    font-size: 10.5px;
+    color: var(--ink-3);
+    box-shadow: var(--shadow-1);
+    z-index: 2;
+  }
+  .oempty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--ink-3);
+    font-size: var(--text-base);
+    pointer-events: none;
   }
 
   .openomni {
@@ -318,12 +577,14 @@
   .busy {
     position: absolute;
     top: var(--s-3);
-    left: var(--s-3);
+    left: 50%;
+    transform: translateX(-50%);
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: var(--r-full);
     padding: 2px 10px;
     font-size: 10px;
     color: var(--ink-3);
+    z-index: 3;
   }
 </style>
