@@ -12,6 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newFlowsTestClient connects to the shared dev Neo4j, skipping the test when
+// the database is unavailable. These handler tests are DB-backed and run
+// locally and in the integration environment, not in the unit-test CI job —
+// same skip convention as handlers_find_test.go and handlers_source_test.go.
+func newFlowsTestClient(t *testing.T) *neo4j.Client {
+	t.Helper()
+	client, err := neo4j.NewClient(neo4j.Config{
+		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
+		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
+		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+	})
+	if err != nil {
+		t.Skipf("Neo4j not available: %v", err)
+	}
+	if records, err := client.ExecuteQuery(context.Background(), "RETURN 1", nil); err != nil || len(records) == 0 {
+		t.Skipf("Neo4j not responding: %v", err)
+	}
+	return client
+}
+
 // setupFlowsTestDB creates a test flow graph for testing flows and entry_points tools.
 // Graph structure:
 //
@@ -21,13 +42,7 @@ import (
 //	Handler → FetchData (CALLS)
 //	FetchData → QueryDB (CALLS)
 func setupFlowsTestDB(t *testing.T) (*CodeGraphMCPServer, map[string]string, func()) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err, "failed to create Neo4j client")
+	client := newFlowsTestClient(t)
 
 	ctx := context.Background()
 
@@ -43,7 +58,7 @@ func setupFlowsTestDB(t *testing.T) (*CodeGraphMCPServer, map[string]string, fun
 		"scope":   "main",
 		"type":    "service",
 	}
-	_, err = client.MergeNode(ctx, []string{"Service"},
+	_, err := client.MergeNode(ctx, []string{"Service"},
 		map[string]interface{}{"nodeKey": serviceKey, "scopeId": "itest-flows-mcp"},
 		serviceProps)
 	require.NoError(t, err, "failed to create Service node")
@@ -256,13 +271,7 @@ func TestFlowsFromNodeByName(t *testing.T) {
 // TestFlowsFromNameAmbiguity returns candidates response when multiple nodes
 // match the same name.
 func TestFlowsFromNameAmbiguity(t *testing.T) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err)
+	client := newFlowsTestClient(t)
 	defer client.Close(context.Background())
 
 	ctx := context.Background()
@@ -326,7 +335,7 @@ func TestFlowsFromNameAmbiguity(t *testing.T) {
 	require.Len(t, response.Content, 1)
 
 	var result map[string]interface{}
-	err = json.Unmarshal([]byte(response.Content[0].Text), &result)
+	err := json.Unmarshal([]byte(response.Content[0].Text), &result)
 	require.NoError(t, err)
 
 	// Ambiguity response has "error" field set to "ambiguous"
@@ -569,13 +578,7 @@ func TestFlowsFromNode_PersistFalseSkipsWrite(t *testing.T) {
 // plain-text sentence used for format=text, which would break a JSON parser
 // on the Studio side.
 func TestFlows_EmptyResultReturnsValidJSON(t *testing.T) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err)
+	client := newFlowsTestClient(t)
 	defer client.Close(context.Background())
 
 	ctx := context.Background()
@@ -620,7 +623,7 @@ func TestFlows_EmptyResultReturnsValidJSON(t *testing.T) {
 	require.Len(t, response.Content, 1)
 
 	var result map[string]interface{}
-	err = json.Unmarshal([]byte(response.Content[0].Text), &result)
+	err := json.Unmarshal([]byte(response.Content[0].Text), &result)
 	require.NoError(t, err, "format=json with zero flows must be valid JSON, got: %s", response.Content[0].Text)
 
 	assert.Equal(t, float64(0), result["flow_count"])
@@ -634,13 +637,7 @@ func TestFlows_EmptyResultReturnsValidJSON(t *testing.T) {
 // doesn't contain the indexed files — the scenario hit by the Studio MCP
 // bridge, which spawns codegraph-mcp with cwd=bin/.
 func TestEntryPoints_ServiceNameBypassesWorkspaceFilter(t *testing.T) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err)
+	client := newFlowsTestClient(t)
 	defer client.Close(context.Background())
 
 	ctx := context.Background()
@@ -664,7 +661,7 @@ func TestEntryPoints_ServiceNameBypassesWorkspaceFilter(t *testing.T) {
 
 	routeKey := "route:GET:/api/bypass"
 	handlerKey := "func:bypass.go#Bypass"
-	_, err = client.MergeNode(ctx, []string{"APIRoute"},
+	_, err := client.MergeNode(ctx, []string{"APIRoute"},
 		map[string]interface{}{"nodeKey": routeKey, "scopeId": scopeID},
 		map[string]interface{}{"nodeKey": routeKey, "name": "GET /api/bypass", "method": "GET", "path": "/api/bypass", "scopeId": scopeID, "scope": "main"})
 	require.NoError(t, err)
