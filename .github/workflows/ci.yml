@@ -71,9 +71,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install SCIP indexers
+        # Pinned, not @latest: scip-go's latest tag (v0.2.7) moved its module
+        # path to github.com/scip-code/scip-go, so the old path floats into a
+        # version-constraints conflict; and floating either indexer risks
+        # silent golden-fixture drift. These are the exact versions the golden
+        # harness is validated against.
         run: |
-          go install github.com/sourcegraph/scip-go/cmd/scip-go@latest
-          npm install -g @sourcegraph/scip-typescript
+          go install github.com/sourcegraph/scip-go/cmd/scip-go@v0.1.26
+          npm install -g @sourcegraph/scip-typescript@0.3.11
       - name: Integration, harness, and DB-backed handler tests
         env:
           NEO4J_URI: bolt://localhost:7687
