@@ -37,17 +37,6 @@ func ParseSCIPSymbol(symbol string) (*SCIPSymbol, error) {
 	}, nil
 }
 
-// NewGoSCIPSymbol creates a SCIP symbol for Go code
-func NewGoSCIPSymbol(packageName, version, descriptor string) *SCIPSymbol {
-	return &SCIPSymbol{
-		Scheme:     "scip-go",
-		Manager:    "go",
-		Name:       packageName,
-		Version:    version,
-		Descriptor: descriptor,
-	}
-}
-
 // GoDescriptor represents different Go symbol descriptors
 type GoDescriptor struct {
 	Package   string
@@ -143,20 +132,6 @@ type SymbolInfo struct {
 	KindSource string `json:"kindSource,omitempty"`
 }
 
-// IsExported returns true if the symbol is exported (public)
-func (si *SymbolInfo) IsExported() bool {
-	return si.Scope == PublicScope
-}
-
-// GenerateSymbolID generates a unique ID for the symbol (for use as Neo4j node ID)
-func (si *SymbolInfo) GenerateSymbolID() string {
-	if si.Symbol != nil {
-		return si.Symbol.String()
-	}
-	// Fallback: use file path and position
-	return fmt.Sprintf("%s:%d:%d", si.FilePath, si.StartLine, si.StartColumn)
-}
-
 // SymbolReference represents a reference to a symbol in code
 type SymbolReference struct {
 	Symbol       *SCIPSymbol `json:"symbol"`
@@ -189,15 +164,4 @@ func (sd *SymbolDefinition) GetDefinitionReference() *SymbolReference {
 		}
 	}
 	return nil
-}
-
-// GetUsageReferences returns all usage references (where IsDefinition is false)
-func (sd *SymbolDefinition) GetUsageReferences() []*SymbolReference {
-	var usages []*SymbolReference
-	for _, ref := range sd.Refs {
-		if !ref.IsDefinition {
-			usages = append(usages, ref)
-		}
-	}
-	return usages
 }

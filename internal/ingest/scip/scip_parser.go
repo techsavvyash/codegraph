@@ -1,7 +1,6 @@
 package static
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -633,28 +632,6 @@ func (sp *SCIPParser) DebugPrintSCIPFile() error {
 	}
 
 	return nil
-}
-
-// ValidateSCIPFile checks if a file is a valid SCIP file
-func ValidateSCIPFile(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("cannot open file: %w", err)
-	}
-	defer file.Close()
-
-	// Check if it's a binary protobuf file by trying to read first few bytes
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		line := scanner.Text()
-		// SCIP files are binary, so text files are definitely not SCIP
-		if len(line) > 0 && line[0] < 32 {
-			// Looks like binary data, could be SCIP
-			return nil
-		}
-	}
-
-	return fmt.Errorf("file does not appear to be a valid SCIP file")
 }
 
 // ExtractImports analyzes source files to extract import statements

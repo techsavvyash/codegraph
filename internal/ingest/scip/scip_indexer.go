@@ -1759,11 +1759,6 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	return nil
 }
 
-// SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
-func (si *SCIPIndexer) SetSCIPBinary(binary string) {
-	si.langConfig.SCIPBinary = binary
-}
-
 // ValidateEnvironment checks if the required tools are available.
 // It first tries to resolve the binary from cache or PATH, then attempts
 // auto-install if not found. Set noAutoInstall to skip the install attempt.
@@ -1840,11 +1835,6 @@ func (si *SCIPIndexer) createPullRequestNode(ctx context.Context, prID, title st
 		return "", fmt.Errorf("failed to create PullRequest node: %w", err)
 	}
 	return id, nil
-}
-
-// GetLanguage returns the language this indexer is configured for
-func (si *SCIPIndexer) GetLanguage() Language {
-	return si.language
 }
 
 // isTestFunction determines if a function is a test function based on its name

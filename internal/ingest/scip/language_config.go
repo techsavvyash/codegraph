@@ -542,30 +542,6 @@ func DetectLanguage(projectPath string) (Language, error) {
 	return detectedLang, nil
 }
 
-// InferLanguageFromExtension infers language from file extension
-func InferLanguageFromExtension(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-
-	for _, config := range LanguageRegistry {
-		for _, langExt := range config.FileExtensions {
-			if ext == langExt {
-				return config.DisplayName
-			}
-		}
-	}
-
-	return "unknown"
-}
-
-// GetSupportedLanguages returns a list of all supported languages
-func GetSupportedLanguages() []Language {
-	langs := make([]Language, 0, len(LanguageRegistry))
-	for lang := range LanguageRegistry {
-		langs = append(langs, lang)
-	}
-	return langs
-}
-
 // FormatLanguageList returns a formatted string of supported languages
 func FormatLanguageList() string {
 	var parts []string

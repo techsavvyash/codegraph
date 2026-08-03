@@ -31,11 +31,6 @@ func NewCrossServiceDetector(client *neo4j.Client) *CrossServiceDetector {
 	}
 }
 
-// SetScope configures the scope context used for boundary detection queries.
-func (d *CrossServiceDetector) SetScope(scope models.ScopeContext) {
-	d.scopeCtx = scope
-}
-
 // DetectBoundaries runs three Cypher queries to find cross-service call
 // boundaries: direct calls, API-mediated calls, and message queue consumers.
 func (d *CrossServiceDetector) DetectBoundaries(ctx context.Context) ([]CrossServiceBoundary, error) {

@@ -207,17 +207,6 @@ func (m *MockGraphStore) Close(ctx context.Context) error {
 
 // --- Inspection helpers (not part of the interface, useful in tests) ---
 
-// AllNodes returns a copy of all stored nodes.
-func (m *MockGraphStore) AllNodes() []*Node {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]*Node, 0, len(m.nodes))
-	for _, n := range m.nodes {
-		out = append(out, n)
-	}
-	return out
-}
-
 // AllRelationships returns a copy of all stored relationships.
 func (m *MockGraphStore) AllRelationships() []*Relationship {
 	m.mu.RLock()
