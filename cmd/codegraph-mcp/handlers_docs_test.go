@@ -160,3 +160,41 @@ func TestExpandRendersEdgeProvenance(t *testing.T) {
 	require.Contains(t, resp.Content[0].Text, "MCP Docs Guide > Usage",
 		"DocumentChunk display name must fall back to headingPath")
 }
+
+// TestPathRendersEdgeProvenance mirrors TestExpandRendersEdgeProvenance for
+// codegraph_path: MENTIONS edges on a path must surface strategy/confidence,
+// structural edges (HAS_CHUNK) must not (RFC-012 R2/I4 parity between the two
+// traversal primitives).
+func TestPathRendersEdgeProvenance(t *testing.T) {
+	server, ids, cleanup := setupDocsTestDB(t)
+	defer cleanup()
+
+	// doc -[HAS_CHUNK]-> c1 -[MENTIONS]-> fn: a two-hop path mixing a
+	// structural edge and a provenanced one.
+	resp := server.handlePathTool(context.Background(), map[string]interface{}{
+		"from_id":   ids["doc"],
+		"to_id":     ids["fn"],
+		"rel_types": []interface{}{"HAS_CHUNK", "MENTIONS"},
+		"direction": "out",
+		"format":    "json",
+	})
+	require.False(t, resp.IsError, "path failed: %+v", resp)
+
+	var out struct {
+		Paths []struct {
+			Edges []pathEdge `json:"edges"`
+		} `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(resp.Content[0].Text), &out))
+	require.Len(t, out.Paths, 1)
+	edges := out.Paths[0].Edges
+	require.Len(t, edges, 2)
+
+	require.Equal(t, "HAS_CHUNK", edges[0].Type)
+	require.Empty(t, edges[0].Strategy, "structural HAS_CHUNK edge must not carry provenance")
+	require.Zero(t, edges[0].Confidence)
+
+	require.Equal(t, "MENTIONS", edges[1].Type)
+	require.Equal(t, "docmine/codespan", edges[1].Strategy)
+	require.InDelta(t, 0.9, edges[1].Confidence, 1e-9)
+}

@@ -1,7 +1,6 @@
 package static
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -359,9 +358,12 @@ func inferSymbolKindWith(symbol string, interfaceLike map[string]bool) models.Sy
 
 	case strings.HasSuffix(descriptor, "."):
 		// Term descriptor: a "." child is either a struct field or an
-		// interface method, depending on whether anything implements it.
+		// interface method — decided by whether anything implements the
+		// member itself, or failing that whether its PARENT type is a known
+		// interface (covers methods of interfaces nothing implements, whose
+		// members have no is_implementation_of relationships either).
 		if strings.Contains(descriptor, "#") {
-			if interfaceLike[symbol] {
+			if interfaceLike[symbol] || interfaceLike[parentTypeSymbol(symbol)] {
 				return models.MethodSymbol
 			}
 			return models.FieldSymbol
@@ -370,6 +372,16 @@ func inferSymbolKindWith(symbol string, interfaceLike map[string]bool) models.Sy
 	}
 
 	return models.VariableSymbol
+}
+
+// parentTypeSymbol returns the enclosing type's symbol for a member symbol:
+// `…/Storer#Save.` → `…/Storer#`. Empty when the symbol has no '#'.
+func parentTypeSymbol(symbol string) string {
+	idx := strings.LastIndex(symbol, "#")
+	if idx < 0 {
+		return ""
+	}
+	return symbol[:idx+1]
 }
 
 // scipDescriptor returns the descriptor portion of a SCIP symbol string.
@@ -405,7 +417,38 @@ func (sp *SCIPParser) collectInterfaceLikeSymbols() map[string]bool {
 	for _, doc := range sp.index.Documents {
 		add(doc.Symbols)
 	}
+
+	// Second signal: scip-go's hover documentation embeds the declaration
+	// form ("```go\ntype Numeric interface\n```") generated from the AST.
+	// Interfaces nothing implements — generic constraint interfaces above
+	// all (structural constraint satisfaction is compiler-resolved, never a
+	// nominal is_implementation_of) — have no impl relationships and would
+	// otherwise fall through to the Class classification.
+	addDocDeclared := func(infos []*scip.SymbolInformation) {
+		for _, info := range infos {
+			if symbolDocsDeclareGoInterface(info.Documentation) {
+				out[info.Symbol] = true
+			}
+		}
+	}
+	addDocDeclared(sp.index.ExternalSymbols)
+	for _, doc := range sp.index.Documents {
+		addDocDeclared(doc.Symbols)
+	}
 	return out
+}
+
+// symbolDocsDeclareGoInterface reports whether any hover-documentation entry
+// contains a Go interface type declaration. scip-go emits these fenced
+// snippets verbatim from the type's AST, so the match is against generated
+// text with a fixed shape, not free-form prose.
+func symbolDocsDeclareGoInterface(docs []string) bool {
+	for _, d := range docs {
+		if strings.HasPrefix(d, "```go\ntype ") && strings.Contains(d, " interface") {
+			return true
+		}
+	}
+	return false
 }
 
 // extractDisplayName returns the human-readable name of a SCIP symbol.
@@ -589,28 +632,6 @@ func (sp *SCIPParser) DebugPrintSCIPFile() error {
 	}
 
 	return nil
-}
-
-// ValidateSCIPFile checks if a file is a valid SCIP file
-func ValidateSCIPFile(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("cannot open file: %w", err)
-	}
-	defer file.Close()
-
-	// Check if it's a binary protobuf file by trying to read first few bytes
-	scanner := bufio.NewScanner(file)
-	if scanner.Scan() {
-		line := scanner.Text()
-		// SCIP files are binary, so text files are definitely not SCIP
-		if len(line) > 0 && line[0] < 32 {
-			// Looks like binary data, could be SCIP
-			return nil
-		}
-	}
-
-	return fmt.Errorf("file does not appear to be a valid SCIP file")
 }
 
 // ExtractImports analyzes source files to extract import statements

@@ -70,6 +70,12 @@ type genericFuncInfo struct {
 	StartByte int
 	EndByte   int
 	Mapped    bool
+	// Decorators are this function's own decorator annotations (TypeScript/
+	// TSX only), encoded "Name" or "Name:arg" — see encodeDecorators.
+	Decorators []string
+	// ClassDecorators are the enclosing class's decorator annotations, same
+	// encoding, resolved from the same position used for InnermostAt.
+	ClassDecorators []string
 }
 
 // fileStructure parses filePath (resolved against projectPath) and returns
@@ -122,6 +128,51 @@ func applyStructureRanges(funcs []genericFuncInfo, fs *structure.FileStructure) 
 	}
 }
 
+// applyDecorators resolves each function's own decorator annotations and its
+// enclosing class's decorator annotations from the file's tree-sitter
+// structure (TypeScript/TSX only — fs.Functions[i].Decorators and
+// fs.ClassDecoratorsAt are both nil/empty for every other grammar). Position
+// lookups use the SAME SCIP identifier position as applyStructureRanges'
+// InnermostAt call, so this must run against the same fs and after (or
+// alongside) it — order relative to applyStructureRanges does not matter
+// since the two write disjoint fields, but both need a non-nil fs to do
+// anything.
+//
+// Pure function, no I/O — testable without Neo4j.
+func applyDecorators(funcs []genericFuncInfo, fs *structure.FileStructure) {
+	if fs == nil {
+		return
+	}
+	for i := range funcs {
+		idx, ok := fs.InnermostAt(funcs[i].StartLine, funcs[i].StartCol)
+		if ok {
+			funcs[i].Decorators = encodeDecorators(fs.Functions[idx].Decorators)
+		}
+		funcs[i].ClassDecorators = encodeDecorators(fs.ClassDecoratorsAt(funcs[i].StartLine, funcs[i].StartCol))
+	}
+}
+
+// encodeDecorators renders structure.DecoratorInfo values as "Name" (empty
+// arg) or "Name:arg" strings for storage as a Neo4j string-list property:
+// ':' separates name from arg, split on the FIRST ':' only. This means an arg
+// containing ':' is not escaped and round-trips intact (parseDecoratorStrings
+// splits on the first ':' too) — documented known limitation, see
+// parseDecoratorStrings in api_surface.go.
+func encodeDecorators(decorators []structure.DecoratorInfo) []string {
+	if len(decorators) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(decorators))
+	for _, d := range decorators {
+		if d.Arg == "" {
+			out = append(out, d.Name)
+		} else {
+			out = append(out, d.Name+":"+d.Arg)
+		}
+	}
+	return out
+}
+
 // BuildCallGraph infers CALLS relationships for all source files in the service.
 func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	if cg.serviceName == "" {
@@ -137,10 +188,10 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	totalCalls := 0
-	for _, filePath := range files {
-		n, err := cg.processFile(ctx, filePath)
+	for _, f := range files {
+		n, err := cg.processFile(ctx, f.Path, f.ID)
 		if err != nil {
-			fmt.Printf("Warning: call graph for %s: %v\n", filePath, err)
+			fmt.Printf("Warning: call graph for %s: %v\n", f.Path, err)
 			continue
 		}
 		totalCalls += n
@@ -156,12 +207,13 @@ func (cg *GenericCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	return nil
 }
 
-// listFiles returns file paths owned by the service.
-func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, error) {
+// listFiles returns the files owned by the service, with element IDs so
+// module-scope call sites can be attributed to the File node.
+func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]fileRef, error) {
 	query := `
 		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
 		WHERE f.scopeId = $scopeId
-		RETURN f.path AS path
+		RETURN f.path AS path, elementId(f) AS id
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
 		"scopeId":     cg.scopeCtx.ScopeID,
@@ -171,24 +223,29 @@ func (cg *GenericCallGraphBuilder) listFiles(ctx context.Context) ([]string, err
 		return nil, err
 	}
 
-	paths := make([]string, 0, len(results))
+	files := make([]fileRef, 0, len(results))
 	for _, rec := range results {
-		p := getStringFromMap(rec.AsMap(), "path")
-		if p != "" {
-			paths = append(paths, p)
+		m := rec.AsMap()
+		p := getStringFromMap(m, "path")
+		id := getStringFromMap(m, "id")
+		if p != "" && id != "" {
+			files = append(files, fileRef{Path: p, ID: id})
 		}
 	}
-	return paths, nil
+	return files, nil
 }
 
 // processFile computes function body ranges from the file's tree-sitter
-// structure (RFC-010), then maps references to enclosing callers and creates
-// CALLS edges.
-func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath string) (int, error) {
+// structure (RFC-010), then classifies references against the file's call
+// sites and creates CALLS edges — from the enclosing Function/Method for
+// in-body calls, from the File node (fileID) for module-scope calls.
+func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath, fileID string) (int, error) {
 	// Step 1: Get all Function/Method nodes in this file with their SCIP
-	// identifier positions.
+	// identifier positions. A file with zero function nodes can still hold
+	// module-scope call sites (a top-level bootstrap script), so processing
+	// continues on empty.
 	funcs, err := cg.getFunctionsInFile(ctx, filePath)
-	if err != nil || len(funcs) == 0 {
+	if err != nil {
 		return 0, err
 	}
 
@@ -200,10 +257,17 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 	fs := cg.fileStructure(filePath)
 	applyStructureRanges(funcs, fs)
 
+	// Step 2b: Resolve each function's own decorators and its enclosing
+	// class's decorators (TypeScript/TSX only; no-op elsewhere) from the SAME
+	// parsed structure — no second parse of the file.
+	applyDecorators(funcs, fs)
+
 	// Step 3: Write the resolved ranges to Neo4j so downstream tools have
 	// body ranges.
-	if err := cg.updateBodyRanges(ctx, funcs); err != nil {
-		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+	if len(funcs) > 0 {
+		if err := cg.updateBodyRanges(ctx, funcs); err != nil {
+			fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+		}
 	}
 
 	// Step 4: Query references in this file that point to project-internal symbols.
@@ -212,8 +276,10 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 		return 0, err
 	}
 
-	// Step 5: Map references to enclosing callers and create CALLS edges.
-	edges := resolveGenericCallEdges(refs, funcs)
+	// Step 5: Classify references against call sites (nil when no grammar is
+	// wired — then the legacy in-body-only behavior applies) and create
+	// CALLS + USES_VALUE edges.
+	edges, valueEdges := resolveGenericCallEdges(refs, funcs, callSiteIndexFromStructure(fs), fileID)
 
 	created := 0
 	for _, e := range edges {
@@ -231,6 +297,21 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 		created++
 	}
 
+	// Address-taken references — see resolveGenericCallEdges. Not counted in
+	// `created` (that count is the CALLS log/telemetry figure).
+	for _, e := range valueEdges {
+		if _, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID,
+			string(models.UsesValueRel), nil,
+			map[string]any{
+				"line":     e.Line,
+				"filePath": filePath,
+				"scope":    cg.scopeCtx.Scope,
+				"scopeId":  cg.scopeCtx.ScopeID,
+			}); err != nil {
+			fmt.Printf("Warning: failed to create USES_VALUE edge: %v\n", err)
+		}
+	}
+
 	return created, nil
 }
 
@@ -241,25 +322,49 @@ func (cg *GenericCallGraphBuilder) processFile(ctx context.Context, filePath str
 // sites in this file.
 type genericCallEdge = minLineEdge
 
-// resolveGenericCallEdges maps raw reference rows to their enclosing caller
-// and collapses multiple call sites between the same (caller, target) pair
-// into a single edge, deterministically keeping the smallest call-site line.
-// Shares its dedup logic with the Go/SCIP builder's resolveCallEdges via
-// collapseToMinLinePerPair — see that function's doc for why order-dependent
-// "first wins" resolution is wrong here (this was the same nondeterministic
-// CALLS.line bug found and fixed in call_graph_scip.go).
+// resolveGenericCallEdges classifies raw reference rows against the file's
+// call sites, maps genuine calls to their enclosing caller (or the File node
+// for module-scope sites), and collapses multiple call sites between the
+// same (caller, target) pair into a single edge, deterministically keeping
+// the smallest call-site line. Shares dedup with the Go builder via
+// collapseToMinLinePerPair, and mirrors its classification exactly (see
+// resolveCallEdges in call_graph_scip.go):
+//
+//   - sites == nil (no grammar wired / unreadable file): legacy behavior —
+//     every in-body reference becomes a CALLS edge, module-scope refs drop,
+//     no USES_VALUE. Filtering or attributing on zero evidence would be
+//     guessing.
+//   - not a call site → (caller|File)-[:USES_VALUE]-> (second return):
+//     address-taken, kept for liveness, never a CALLS edge
+//   - call site inside a body → (Function|Method)-[:CALLS]->
+//   - call site outside every body → (File)-[:CALLS]-> (fileID), covering
+//     top-level statements AND class property initializers (`x = compute()`
+//     runs at construction; File attribution over-approximates to load time,
+//     which is the conservative direction for liveness).
 //
 // Pure function, no I/O — testable without Neo4j.
-func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo) []genericCallEdge {
+func resolveGenericCallEdges(refs []refInfo, funcs []genericFuncInfo, sites *callSiteIndex, fileID string) ([]genericCallEdge, []minLineEdge) {
 	triples := make([]minLineEdge, 0, len(refs))
+	var valueTriples []minLineEdge
 	for _, ref := range refs {
 		caller := findEnclosingGenericFunc(funcs, ref.line)
-		if caller == nil {
+		if sites != nil && !sites.isCallSite(ref.line, ref.col, ref.name) {
+			switch {
+			case caller != nil:
+				valueTriples = append(valueTriples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+			case fileID != "":
+				valueTriples = append(valueTriples, minLineEdge{CallerID: fileID, TargetID: ref.targetID, Line: ref.line})
+			}
 			continue
 		}
-		triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+		switch {
+		case caller != nil:
+			triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: ref.targetID, Line: ref.line})
+		case sites != nil && fileID != "":
+			triples = append(triples, minLineEdge{CallerID: fileID, TargetID: ref.targetID, Line: ref.line})
+		}
 	}
-	return collapseToMinLinePerPair(triples)
+	return collapseToMinLinePerPair(triples), collapseToMinLinePerPair(valueTriples)
 }
 
 // getFunctionsInFile returns all Function/Method nodes in a file with their IDs
@@ -303,9 +408,14 @@ func (cg *GenericCallGraphBuilder) getFunctionsInFile(ctx context.Context, fileP
 	return funcs, nil
 }
 
-// refInfo holds a reference's line and the target function's element ID.
+// refInfo holds a reference's position, the referenced function's name as it
+// appears at the site (the DIRECT target's name, stable across IMPLEMENTS
+// fan-out), and the target function's element ID. col is -1 when the
+// Reference node predates column stamping.
 type refInfo struct {
 	line     int
+	col      int
+	name     string
 	targetID string
 }
 
@@ -342,6 +452,8 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 		       ELSE [directTarget]
 		  END AS target
 		RETURN ref.startLine AS refLine,
+		       coalesce(ref.startColumn, -1) AS refCol,
+		       directTarget.name AS refName,
 		       elementId(target) AS targetId
 	`
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -360,7 +472,12 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 		line := int(getInt64FromMap(rm, "refLine"))
 		targetID := getStringFromMap(rm, "targetId")
 		if line > 0 && targetID != "" {
-			refs = append(refs, refInfo{line: line, targetID: targetID})
+			refs = append(refs, refInfo{
+				line:     line,
+				col:      int(getInt64FromMap(rm, "refCol")),
+				name:     getStringFromMap(rm, "refName"),
+				targetID: targetID,
+			})
 		}
 	}
 	return refs, nil
@@ -372,6 +489,11 @@ func (cg *GenericCallGraphBuilder) getReferencesInFile(ctx context.Context, file
 // clobber whatever byte offsets were already stored for the node.
 // rangeSource records provenance per RFC-005 I4: "treesitter" for exact
 // spans from the structure pass, "scip-declaration" for fallback stubs.
+//
+// Also stamps fn.decorators / fn.classDecorators (RFC-005 decorator-route
+// detection) — string-list properties, only SET when non-empty so a
+// function with no decorators never gets an empty-list property written
+// over whatever (nothing) was already there.
 func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs []genericFuncInfo) error {
 	updates := make([]map[string]any, len(funcs))
 	for i, f := range funcs {
@@ -380,12 +502,14 @@ func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs [
 			rangeSource = "treesitter"
 		}
 		updates[i] = map[string]any{
-			"id":          f.ID,
-			"startLine":   f.StartLine,
-			"endLine":     f.EndLine,
-			"startByte":   f.StartByte,
-			"endByte":     f.EndByte,
-			"rangeSource": rangeSource,
+			"id":              f.ID,
+			"startLine":       f.StartLine,
+			"endLine":         f.EndLine,
+			"startByte":       f.StartByte,
+			"endByte":         f.EndByte,
+			"rangeSource":     rangeSource,
+			"decorators":      f.Decorators,
+			"classDecorators": f.ClassDecorators,
 		}
 	}
 	cypher := `
@@ -396,6 +520,12 @@ func (cg *GenericCallGraphBuilder) updateBodyRanges(ctx context.Context, funcs [
 		    fn.rangeSource = u.rangeSource
 		FOREACH (ignoreMe IN CASE WHEN u.startByte >= 0 THEN [1] ELSE [] END |
 			SET fn.startByte = u.startByte, fn.endByte = u.endByte
+		)
+		FOREACH (ignoreMe IN CASE WHEN size(u.decorators) > 0 THEN [1] ELSE [] END |
+			SET fn.decorators = u.decorators
+		)
+		FOREACH (ignoreMe IN CASE WHEN size(u.classDecorators) > 0 THEN [1] ELSE [] END |
+			SET fn.classDecorators = u.classDecorators
 		)
 	`
 	_, err := cg.client.ExecuteQuery(ctx, cypher, map[string]any{"updates": updates})
@@ -431,6 +561,11 @@ func (cg *GenericCallGraphBuilder) readFile(filePath string) ([]byte, bool) {
 // the SET target is constrained to a single service (via the bound
 // $serviceName parameter, walked through Service-CONTAINS->File-CONTAINS->fn)
 // without a live Neo4j connection.
+//
+// inDegree excludes self-loops (caller = fn); outDegree deliberately does
+// NOT — see scipDegreeQuery's doc comment (call_graph_scip.go) for the full
+// rationale on both halves of this asymmetry. Both builders share the fix
+// since both feed the same stored properties.
 func genericDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	// Scope to service functions only to avoid cross-service contamination.
 	cypher := `
@@ -440,6 +575,7 @@ func genericDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (strin
 		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		  AND caller <> fn
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 		WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')

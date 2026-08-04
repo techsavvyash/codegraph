@@ -41,6 +41,7 @@ func promoteDeclaratorBoundFunctions(symbolDefs []*models.SymbolDefinition, proj
 		}
 		if kind, ok := declaratorBoundFunctionKind(info.Kind, info.DisplayName, info.StartLine, info.StartColumn, fs); ok {
 			info.Kind = kind
+			info.KindSource = models.KindSourcePromotion
 		}
 	}
 }

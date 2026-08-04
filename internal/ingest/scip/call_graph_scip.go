@@ -106,10 +106,10 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 	}
 
 	totalCalls := 0
-	for _, filePath := range files {
-		n, err := cg.processFile(ctx, filePath)
+	for _, f := range files {
+		n, err := cg.processFile(ctx, f.Path, f.ID)
 		if err != nil {
-			fmt.Printf("Warning: call graph for %s: %v\n", filePath, err)
+			fmt.Printf("Warning: call graph for %s: %v\n", f.Path, err)
 			continue
 		}
 		totalCalls += n
@@ -129,6 +129,25 @@ func (cg *SCIPCallGraphBuilder) BuildCallGraph(ctx context.Context) error {
 // ComputeDegreeProperties. Extracted as a pure function so tests can assert
 // the SET target is constrained to a single service (via the bound
 // $serviceName parameter) without a live Neo4j connection.
+//
+// inDegree excludes self-loops (caller = fn): now that
+// collapseToMinLinePerPair keeps self-recursive CALLS edges (RFC-013),
+// counting a function as its own caller would make every recursive
+// function's inDegree >= 1 purely from calling itself, defeating every
+// downstream "inDegree = 0 means no external caller" consumer (dead-code /
+// entry-point / topological-root detection in
+// internal/query/inference/graph_seeds.go and elsewhere) — a recursive
+// function with no OTHER caller must still read as unreachable from
+// outside.
+//
+// outDegree deliberately does NOT exclude self-loops: its purpose is "does
+// this function have any real fan-out/behavior" (the topological-root
+// filter's outDegree>0 check exists to exclude no-op stubs), and a
+// self-call is real behavior — a purely self-recursive function with no
+// external caller (e.g. a standalone factorial helper) should still read
+// as "does something" and qualify as a topological root, not get filtered
+// out as if it were a stub. Excluding self-loops from outDegree too would
+// make such a function invisible to tier-3 seed detection entirely.
 func scipDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, map[string]any) {
 	cypher := `
 		MATCH (fn)
@@ -138,6 +157,7 @@ func scipDegreeQuery(serviceName string, scopeCtx models.ScopeContext) (string, 
 		OPTIONAL MATCH (fn)<-[:CALLS]-(caller)
 		WHERE (caller:Function OR caller:Method)
 		  AND (caller.scopeId = $scopeId OR caller.scopeId = 'main')
+		  AND caller <> fn
 		OPTIONAL MATCH (fn)-[:CALLS]->(callee)
 		WHERE (callee:Function OR callee:Method)
 		  AND (callee.scopeId = $scopeId OR callee.scopeId = 'main')
@@ -170,7 +190,24 @@ func (cg *SCIPCallGraphBuilder) ComputeDegreeProperties(ctx context.Context) err
 // byte-based source-code retrieval fail — the former resolved to the wrong
 // function, the latter returned only the ~15-character identifier span
 // instead of the function body.
+//
+// Requires exactly one range update per node ID. selectCallerCandidate
+// already guarantees this by construction (each funcRange resolves to at
+// most one candidate, one-to-one), but this is checked explicitly rather
+// than trusted implicitly: a second write to the same ID silently
+// corrupting the first is exactly the failure mode this whole fix exists to
+// eliminate, so a violation here is a programming error in the caller, not
+// a data condition to paper over — it errors instead of writing.
 func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, callers []callerInfo) error {
+	seen := make(map[string]bool, len(callers))
+	for _, c := range callers {
+		if seen[c.ID] {
+			return fmt.Errorf("updateFunctionBodyRanges: node %s would receive 2+ range updates in one batch — "+
+				"this indicates selectCallerCandidate's one-candidate-per-range invariant was violated upstream", c.ID)
+		}
+		seen[c.ID] = true
+	}
+
 	// rangeSource records provenance per RFC-005 I4 — these ranges come from
 	// the Go AST (exact), vs "treesitter"/"scip-declaration" in the generic
 	// builder.
@@ -201,15 +238,22 @@ func (cg *SCIPCallGraphBuilder) updateFunctionBodyRanges(ctx context.Context, ca
 	return err
 }
 
-// listGoFiles returns the .go file paths owned by the builder's Service node.
+// fileRef pairs a File node's service-relative path with its Neo4j element
+// ID — the ID is the CALLS caller for module-scope call sites.
+type fileRef struct {
+	Path string
+	ID   string
+}
+
+// listGoFiles returns the .go files owned by the builder's Service node.
 // BuildCallGraph guarantees serviceName is set — an unbounded listing would
 // pull same-named files from every indexed service.
-func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]string, error) {
+func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]fileRef, error) {
 	query := `
 		MATCH (s:Service {name: $serviceName})-[:CONTAINS]->(f:File)
 		WHERE f.path ENDS WITH '.go'
 		  AND f.scopeId = $scopeId
-		RETURN f.path AS path
+		RETURN f.path AS path, elementId(f) AS id
 	`
 	params := map[string]any{
 		"scopeId":     cg.scopeCtx.ScopeID,
@@ -221,14 +265,16 @@ func (cg *SCIPCallGraphBuilder) listGoFiles(ctx context.Context) ([]string, erro
 		return nil, err
 	}
 
-	paths := make([]string, 0, len(results))
+	files := make([]fileRef, 0, len(results))
 	for _, rec := range results {
-		p := getStringFromMap(rec.AsMap(), "path")
-		if p != "" {
-			paths = append(paths, p)
+		m := rec.AsMap()
+		p := getStringFromMap(m, "path")
+		id := getStringFromMap(m, "id")
+		if p != "" && id != "" {
+			files = append(files, fileRef{Path: p, ID: id})
 		}
 	}
-	return paths, nil
+	return files, nil
 }
 
 // callerInfo pairs an AST-derived body range with the graph node element ID.
@@ -244,7 +290,9 @@ type callerInfo struct {
 
 // processFile parses a single Go file with the AST to get function body ranges,
 // maps them to graph node IDs, queries references, and creates CALLS edges.
-func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string) (int, error) {
+// fileID is the File node's element ID, the caller for module-scope call
+// sites (package-level `var x = compute()` initializers).
+func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath, fileID string) (int, error) {
 	fullPath := filePath
 	if !filepath.IsAbs(filePath) {
 		fullPath = filepath.Join(cg.projectPath, filePath)
@@ -255,8 +303,13 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	if err != nil {
 		return 0, err
 	}
-	if len(funcRanges) == 0 {
-		return 0, nil
+
+	// Callee-identifier positions: the gate between genuine calls and
+	// function-VALUE references. Parsed from the same source the func ranges
+	// came from; a file that parses for ranges parses here too.
+	callSites, err := parseGoCallSites(fullPath)
+	if err != nil {
+		return 0, err
 	}
 
 	// Parse branch ranges for conditional metadata on CALLS edges.
@@ -278,29 +331,43 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		}
 	}
 
-	// Load graph node IDs for functions in this file, keyed by base name.
-	// We filter to only functions whose SCIP signature matches this file's
-	// Go package path, so cross-package references stored as Function nodes
-	// are excluded.
+	// Load graph node candidates for functions in this file, keyed by base
+	// name. We filter to only functions whose SCIP signature matches this
+	// file's Go package path, so cross-package references stored as
+	// Function nodes are excluded. Multiple candidates per name are
+	// expected (e.g. several types in the file each with a same-named
+	// method) and disambiguated below by definition-position containment,
+	// never by "last one wins".
 	graphNodes, err := cg.graphNodesByName(ctx, filePath)
 	if err != nil {
 		return 0, err
 	}
 
-	// Build callerInfo list: pair each AST func range with its graph ID.
+	// Build callerInfo list: pair each AST func range with its graph node,
+	// selected deterministically by definition-position containment
+	// (selectCallerCandidate). A funcRange with zero or 2+ matching
+	// candidates is skipped rather than guessed — see
+	// skippedAmbiguousRanges below — so a same-name collision never
+	// corrupts a node's stored body range or misattributes its calls.
 	var callers []callerInfo
+	skippedAmbiguousRanges := 0
 	for _, fr := range funcRanges {
 		// Use base name (strip receiver prefix like "SCIPIndexer.")
 		baseName := fr.Name
 		if idx := strings.LastIndex(baseName, "."); idx >= 0 {
 			baseName = baseName[idx+1:]
 		}
-		nodeID, ok := graphNodes[baseName]
+		candidates, ok := graphNodes[baseName]
 		if !ok {
 			continue
 		}
+		selected, ok := selectCallerCandidate(candidates, fr)
+		if !ok {
+			skippedAmbiguousRanges++
+			continue
+		}
 		callers = append(callers, callerInfo{
-			ID:           nodeID,
+			ID:           selected.ID,
 			StartLine:    fr.StartLine,
 			EndLine:      fr.EndLine,
 			StartByte:    fr.StartByte,
@@ -309,16 +376,22 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 			ReceiverType: fr.ReceiverType,
 		})
 	}
-
-	if len(callers) == 0 {
-		return 0, nil
+	if skippedAmbiguousRanges > 0 {
+		fmt.Printf("Debug: %s: skipped %d func range(s) with zero or 2+ matching graph node candidates (same-name disambiguation)\n",
+			filePath, skippedAmbiguousRanges)
 	}
 
-	// Update graph nodes with AST-derived body ranges so that line-based
-	// lookups (e.g., findContainingFunction in API analysis) work correctly.
-	// SCIP only stores the declaration line; the AST gives us the real body range.
-	if err := cg.updateFunctionBodyRanges(ctx, callers); err != nil {
-		fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+	// A file with zero resolved callers can still hold module-scope call
+	// sites (`var _ = register()` in a constants-only file), so processing
+	// continues even when callers is empty — resolveCallEdges attributes
+	// those to the File node.
+	if len(callers) > 0 {
+		// Update graph nodes with AST-derived body ranges so that line-based
+		// lookups (e.g., findContainingFunction in API analysis) work correctly.
+		// SCIP only stores the declaration line; the AST gives us the real body range.
+		if err := cg.updateFunctionBodyRanges(ctx, callers); err != nil {
+			fmt.Printf("Warning: failed to update body ranges for %s: %v\n", filePath, err)
+		}
 	}
 
 	// Query: find all references in this file that point to symbols which
@@ -350,6 +423,8 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		       ELSE [directTarget]
 		  END AS target
 		RETURN ref.startLine AS refLine,
+		       coalesce(ref.startColumn, -1) AS refCol,
+		       directTarget.name AS refName,
 		       elementId(target) AS targetId
 	`
 
@@ -367,12 +442,17 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 	for _, rec := range results {
 		rm := rec.AsMap()
 		rows = append(rows, callRefRow{
-			Line:     int(getInt64FromMap(rm, "refLine")),
+			Line: int(getInt64FromMap(rm, "refLine")),
+			Col:  int(getInt64FromMap(rm, "refCol")),
+			// The reference occurrence covers the callee identifier, whose
+			// text is the DIRECT target's name even after IMPLEMENTS fan-out
+			// rewrites the edge target to a concrete implementation.
+			Name:     getStringFromMap(rm, "refName"),
 			TargetID: getStringFromMap(rm, "targetId"),
 		})
 	}
 
-	edges := resolveCallEdges(rows, callers, branches)
+	edges, valueEdges := resolveCallEdges(rows, callers, branches, callSites, fileID)
 
 	created := 0
 	for _, e := range edges {
@@ -393,13 +473,35 @@ func (cg *SCIPCallGraphBuilder) processFile(ctx context.Context, filePath string
 		created++
 	}
 
+	// Address-taken references (`cfg.Fn = handler`) — distinct edge type so
+	// liveness can keep such functions conservatively alive without CALLS
+	// fabricating invocations. Not counted in `created`: the returned count
+	// feeds the "CALLS relationships" log line and telemetry expectations.
+	for _, e := range valueEdges {
+		if _, err := cg.client.MergeRelationship(ctx, e.CallerID, e.TargetID, string(models.UsesValueRel),
+			nil,
+			map[string]any{
+				"line":     e.Line,
+				"filePath": filePath,
+				"scope":    cg.scopeCtx.Scope,
+				"scopeId":  cg.scopeCtx.ScopeID,
+			}); err != nil {
+			fmt.Printf("Warning: failed to create USES_VALUE edge: %v\n", err)
+		}
+	}
+
 	return created, nil
 }
 
-// callRefRow is a raw (call-site line, resolved target node ID) pair
-// returned by the call-reference query, before caller resolution and dedup.
+// callRefRow is one raw reference-to-function row returned by the
+// call-reference query, before call-site classification, caller resolution
+// and dedup. Col is the occurrence's 0-based start column (-1 when the
+// Reference node predates column stamping); Name is the referenced
+// function's identifier as it appears at the reference site.
 type callRefRow struct {
 	Line     int
+	Col      int
+	Name     string
 	TargetID string
 }
 
@@ -413,22 +515,53 @@ type callEdge struct {
 	IsConditional bool
 }
 
-// resolveCallEdges maps raw reference rows to their enclosing caller and
-// collapses multiple call sites between the same (caller, target) pair into a
-// single edge, deterministically keeping the smallest call-site line (see
-// collapseToMinLinePerPair, shared with the generic/non-Go builder). Branch
-// metadata (branchDepth, isConditional) is then computed from the winning
-// line, so it always describes the call site that was actually kept.
+// resolveCallEdges classifies each reference row against the file's call
+// sites, maps genuine calls to their enclosing caller (or to the File node
+// for module-scope sites), and collapses multiple call sites between the
+// same (caller, target) pair into a single edge, deterministically keeping
+// the smallest call-site line (see collapseToMinLinePerPair, shared with the
+// generic/non-Go builder). Branch metadata (branchDepth, isConditional) is
+// then computed from the winning line, so it always describes the call site
+// that was actually kept.
+//
+// Classification (RFC-013 follow-up, tasks #18/#19):
+//   - not a call site (function-VALUE reference, `handler = fn`) →
+//     (caller|File)-[:USES_VALUE]-> — returned separately, NOT a CALLS
+//     edge. Kept in-graph so liveness can treat address-taken functions as
+//     conservatively live (dynamic dispatch through a stored callback).
+//   - call site inside a function body → (Function|Method)-[:CALLS]->
+//   - call site outside every body (package-level var initializer) →
+//     (File)-[:CALLS]->, import-time invocation
+//
+// A nil sites index disables classification entirely (legacy: every in-body
+// ref is a CALLS edge, module-scope refs drop, no USES_VALUE) — the Go path
+// always has one, but the shared shape keeps the generic builder's
+// no-grammar fallback honest.
 //
 // Pure function, no I/O — testable without Neo4j.
-func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branchRange) []callEdge {
+func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branchRange, sites *callSiteIndex, fileID string) ([]callEdge, []minLineEdge) {
 	triples := make([]minLineEdge, 0, len(rows))
+	var valueTriples []minLineEdge
 	for _, row := range rows {
 		caller := findEnclosingCaller(callers, row.Line)
-		if caller == nil {
+		if sites != nil && !sites.isCallSite(row.Line, row.Col, row.Name) {
+			// Function-value reference: record who takes the address.
+			switch {
+			case caller != nil:
+				valueTriples = append(valueTriples, minLineEdge{CallerID: caller.ID, TargetID: row.TargetID, Line: row.Line})
+			case fileID != "":
+				valueTriples = append(valueTriples, minLineEdge{CallerID: fileID, TargetID: row.TargetID, Line: row.Line})
+			}
 			continue
 		}
-		triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: row.TargetID, Line: row.Line})
+		switch {
+		case caller != nil:
+			triples = append(triples, minLineEdge{CallerID: caller.ID, TargetID: row.TargetID, Line: row.Line})
+		case sites != nil && fileID != "":
+			// Module-scope call: confirmed invocation with no enclosing
+			// function body — the file itself is the caller.
+			triples = append(triples, minLineEdge{CallerID: fileID, TargetID: row.TargetID, Line: row.Line})
+		}
 	}
 
 	collapsed := collapseToMinLinePerPair(triples)
@@ -444,7 +577,7 @@ func resolveCallEdges(rows []callRefRow, callers []callerInfo, branches []branch
 			IsConditional: isCond,
 		})
 	}
-	return out
+	return out, collapseToMinLinePerPair(valueTriples)
 }
 
 // upgradeClosureVarsToFunction adds the :Function label to Variable nodes
@@ -477,11 +610,32 @@ func (cg *SCIPCallGraphBuilder) upgradeClosureVarsToFunction(ctx context.Context
 	return err
 }
 
-// graphNodesByName returns a map of base function name -> element ID for
-// functions in the given file whose SCIP signature matches the file's
-// Go package directory. This filters out cross-package reference nodes
-// that SCIP stores as Function nodes in the same filePath.
-func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath string) (map[string]string, error) {
+// graphNodeCandidate is one Function/Method node matching a base name in
+// graphNodesByName's result: its element ID plus the pristine SCIP
+// definition-occurrence line (the func/method name token's own line — NOT
+// the AST body range, which processFile overwrites later in the same run
+// via updateFunctionBodyRanges). DefLine is what disambiguates same-named
+// candidates: it is stamped once at initial SCIP ingestion
+// (scip_indexer.go's MergeNodesBatch(Definition), which always runs before
+// BuildCallGraph in the pipeline) and is therefore fresh and exact even on
+// a re-index of a graph a PRIOR run had already corrupted via the bug this
+// type exists to fix.
+type graphNodeCandidate struct {
+	ID      string
+	DefLine int
+}
+
+// graphNodesByName returns, for each base function/method name in the given
+// file, every matching Function/Method node (there can be more than one: Go
+// files routinely declare multiple methods sharing a bare name across
+// different receiver types, e.g. several stage structs each with a Run
+// method). Callers must disambiguate by definition position — see
+// selectCallerCandidate — rather than picking an arbitrary one.
+//
+// This filters out cross-package reference nodes that SCIP stores as
+// Function nodes in the same filePath, matching on the file's Go package
+// directory.
+func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath string) (map[string][]graphNodeCandidate, error) {
 	// Derive the Go package directory from the file path (e.g.,
 	// "pkg/indexer/static/scip_indexer.go" -> "pkg/indexer/static").
 	pkgDir := filepath.Dir(filePath)
@@ -505,7 +659,7 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 		  AND f.signature CONTAINS $pkgDir
 		  AND (f.signature ENDS WITH '().'
 		       OR (f.signature ENDS WITH '.' AND NOT f.signature CONTAINS '#'))
-		RETURN elementId(f) AS id, f.name AS name
+		RETURN elementId(f) AS id, f.name AS name, f.startLine AS defLine
 	`
 
 	results, err := cg.client.ExecuteQuery(ctx, query, map[string]any{
@@ -518,17 +672,58 @@ func (cg *SCIPCallGraphBuilder) graphNodesByName(ctx context.Context, filePath s
 		return nil, err
 	}
 
-	m := make(map[string]string, len(results))
+	m := make(map[string][]graphNodeCandidate, len(results))
 	for _, rec := range results {
 		rm := rec.AsMap()
 		id := getStringFromMap(rm, "id")
 		name := getStringFromMap(rm, "name")
-		if id != "" && name != "" {
-			baseName := strings.TrimSuffix(name, "().")
-			m[baseName] = id
+		if id == "" || name == "" {
+			continue
 		}
+		baseName := strings.TrimSuffix(name, "().")
+		m[baseName] = append(m[baseName], graphNodeCandidate{
+			ID:      id,
+			DefLine: int(getInt64FromMap(rm, "defLine")),
+		})
 	}
 	return m, nil
+}
+
+// selectCallerCandidate disambiguates same-named graph node candidates for
+// one AST funcRange by exact definition-position containment: the winning
+// candidate is the one whose SCIP definition-occurrence line
+// (graphNodeCandidate.DefLine — the function name token's own line) falls
+// within [fr.DeclLine, fr.EndLine]. fr.DeclLine (not fr.StartLine, the body
+// open-brace line) is used as the lower bound because the definition
+// occurrence is the name token itself, which sits on the declaration line,
+// at or before the opening brace.
+//
+// Ambiguity is never silently resolved: zero matches (a node this AST range
+// doesn't correspond to at all — e.g. a stale/renamed declaration) or two-or
+// -more matches (defensive; should not happen given DefLine's precision, but
+// would indicate a deeper indexing inconsistency) both return ok=false, and
+// the caller must skip the range update for that funcRange rather than
+// guess. This is the fix for the same-name range-clobbering bug: previously
+// graphNodesByName collapsed every same-named candidate to a single
+// map entry (last Cypher row wins, nondeterministically), so multiple
+// distinct AST ranges all resolved to the same node and
+// updateFunctionBodyRanges stamped whichever range happened to be applied
+// last onto ALL of them — corrupting every same-named node but one, and, via
+// findEnclosingCaller, misattributing every call site in the corrupted
+// node's stolen range to the wrong function entirely.
+func selectCallerCandidate(candidates []graphNodeCandidate, fr funcRange) (graphNodeCandidate, bool) {
+	var match graphNodeCandidate
+	matches := 0
+	for _, c := range candidates {
+		if c.DefLine >= fr.DeclLine && c.DefLine <= fr.EndLine {
+			match = c
+			matches++
+		}
+	}
+	if matches != 1 {
+		return graphNodeCandidate{}, false
+	}
+	return match, true
 }
 
 // findEnclosingCaller finds the innermost callerInfo whose body range

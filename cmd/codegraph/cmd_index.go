@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	graphneo4j "github.com/context-maximiser/code-graph/internal/graph"
 	"github.com/context-maximiser/code-graph/internal/ingest/docs"
 	"github.com/context-maximiser/code-graph/internal/ingest/docs/mine"
 	"github.com/context-maximiser/code-graph/internal/ingest/pipeline"
@@ -12,6 +14,9 @@ import (
 	"github.com/context-maximiser/code-graph/internal/ingest/semlink"
 	"github.com/context-maximiser/code-graph/internal/llm"
 	models "github.com/context-maximiser/code-graph/internal/model"
+	"github.com/context-maximiser/code-graph/internal/query/reachability"
+	"github.com/context-maximiser/code-graph/internal/verify"
+	"github.com/context-maximiser/code-graph/internal/verify/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -74,6 +79,7 @@ The language will be auto-detected from the project structure, or you can specif
 		// Set scope if provided
 		scopeFlag, _ := cmd.Flags().GetString("scope")
 		scopeIDFlag, _ := cmd.Flags().GetString("scope-id")
+		scopeID := models.ScopeMain
 		if scopeFlag == "pr" {
 			prID := scopeIDFlag
 			if prID == "" {
@@ -83,11 +89,15 @@ The language will be auto-detected from the project structure, or you can specif
 			if strings.HasPrefix(prID, "pr-") {
 				prID = prID[3:]
 			}
-			scipIndexer.SetScope(models.NewPRScope(prID))
+			prScope := models.NewPRScope(prID)
+			scipIndexer.SetScope(prScope)
+			scopeID = prScope.ScopeID
 			fmt.Printf("Indexing into PR scope: pr-%s\n", prID)
 		} else if scopeIDFlag != "" && scopeIDFlag != "main" {
 			return fmt.Errorf("--scope-id should only be used with --scope=pr")
 		}
+
+		startedAt := time.Now().UTC()
 
 		if languageFlag != "" {
 			// Single-language path: validate env, then index.
@@ -127,8 +137,83 @@ The language will be auto-detected from the project structure, or you can specif
 			}
 			fmt.Println("✓ Polyglot indexing completed successfully")
 		}
+
+		runPostIndexChecks(ctx, client, serviceName, scopeID, startedAt)
 		return nil
 	},
+}
+
+// runPostIndexChecks stamps RFC-013 Layer-3 telemetry (IndexRun + drift
+// warnings against the previous run) and runs the service-scoped Layer-1
+// integrity suite after a successful index. Both are strictly best-effort:
+// findings are printed, never turned into a non-zero exit — a correctness
+// warning must not make a successful index look failed.
+func runPostIndexChecks(ctx context.Context, client *graphneo4j.Client, serviceName, scopeID string, startedAt time.Time) {
+	finishedAt := time.Now().UTC()
+	record, err := telemetry.RecordIndexRun(ctx, client, serviceName, scopeID,
+		startedAt.Format(time.RFC3339), finishedAt.Format(time.RFC3339))
+	if err != nil {
+		fmt.Printf("WARNING: index-run telemetry not recorded: %v\n", err)
+	} else {
+		fmt.Printf("\nIndex run recorded: files=%d functions=%d methods=%d calls=%d implements=%d routes=%d calls/fn=%.2f\n",
+			record.Files, record.Functions, record.Methods,
+			record.CallsEdges, record.ImplementsEdges, record.APIRoutes, record.CallsPerFunction)
+		if diff, derr := telemetry.DiffLastRuns(ctx, client, serviceName); derr != nil {
+			fmt.Printf("WARNING: drift check failed: %v\n", derr)
+		} else if len(diff.Drifts) > 0 {
+			fmt.Printf("DRIFT vs previous run (%s):\n", func() string {
+				if diff.Previous != nil {
+					return diff.Previous.FinishedAt
+				}
+				return "?"
+			}())
+			for _, d := range diff.Drifts {
+				fmt.Printf("  ⚠ %-25s %.0f → %.0f  %s\n", d.Counter, d.Previous, d.Current, d.Detail)
+			}
+		}
+	}
+
+	// RFC-014 reachability verdicts, stamped so they're fresh after every
+	// index (same best-effort contract as the checks around it).
+	if reach, rerr := reachability.Compute(ctx, client, reachability.Options{
+		ServiceName: serviceName,
+		ScopeID:     scopeID,
+	}); rerr != nil {
+		fmt.Printf("WARNING: reachability classification failed: %v\n", rerr)
+	} else if serr := reachability.Stamp(ctx, client, reach); serr != nil {
+		fmt.Printf("WARNING: reachability verdicts not stamped: %v\n", serr)
+	} else {
+		fmt.Printf("Reachability: live=%d test_only=%d dead=%d (%d in clusters) unknown=%d [roots: %d app, %d test]\n",
+			reach.Live, reach.TestOnly, reach.Dead, reach.DeadCluster, reach.Unknown, reach.Roots, reach.TestRoots)
+	}
+
+	report, err := verify.RunIntegrity(ctx, client, verify.IntegrityOptions{
+		ServiceName: serviceName,
+		ScopeID:     scopeID,
+	})
+	if err != nil {
+		fmt.Printf("WARNING: post-index integrity check failed to run: %v\n", err)
+		return
+	}
+	pass, warn, fail := report.Counts()
+	if fail == 0 && warn == 0 {
+		fmt.Printf("Integrity: %d checks passed\n", pass)
+		return
+	}
+	fmt.Printf("Integrity findings for %s (non-blocking):\n", serviceName)
+	for _, c := range report.Checks {
+		if c.Status == verify.StatusPass {
+			continue
+		}
+		icon := "⚠"
+		if c.Status == verify.StatusFail {
+			icon = "✗"
+		}
+		fmt.Printf("  %s %s (%d) %s\n", icon, c.Name, c.Count, c.Detail)
+		for _, s := range c.Samples {
+			fmt.Printf("      • %s\n", s)
+		}
+	}
 }
 
 // indexDocsCmd ingests in-repo markdown and links it to code (RFC-011).

@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
+	"github.com/context-maximiser/code-graph/internal/ingest/resolve"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -216,6 +217,88 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 		// Skip, not failure: SCIP relationships are optional; index can proceed without them
 		si.report.IncrementSkipped("IMPLEMENTS relationships", 1)
 	} else {
+		// RFC-001 Layer 3: scip-go emits sparse is_implementation
+		// relationships for Go's structural interfaces (see rfc/001).
+		// Supplement whatever SCIP gave us with an authoritative go/types
+		// structural-satisfaction pass. Best-effort by design: any failure
+		// (no go.mod, non-Go project, packages.Load error) is a warning,
+		// never an indexing failure — the SCIP-native relationships above
+		// already indexed fine without this.
+		knownSymbols := make([]string, 0, len(symIdx.symbolIDs))
+		for sym := range symIdx.symbolIDs {
+			knownSymbols = append(knownSymbols, sym)
+		}
+
+		if si.language == LanguageGo {
+			resolverRels, resolveStats, resolveErr := resolve.ResolveImplementations(si.projectPath, knownSymbols)
+			if resolveErr != nil {
+				fmt.Printf("WARNING: Go structural type resolver skipped: %v\n", resolveErr)
+				si.report.AddWarning(fmt.Sprintf("go structural type resolver skipped: %v", resolveErr))
+			} else {
+				// Skip pairs scip-go already emitted: MERGE would dedupe the
+				// edge anyway, but the later SET would overwrite its "scip"
+				// provenance with "go-types-resolver" — the edge should keep
+				// crediting the indexer that found it first.
+				scipPairs := make(map[[2]string]bool, len(scipRels))
+				for _, r := range scipRels {
+					if r.IsImplementation {
+						scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] = true
+					}
+				}
+				added := 0
+				for _, r := range resolverRels {
+					if scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] {
+						continue
+					}
+					scipRels = append(scipRels, SCIPRelationship{
+						FromSymbol:       r.FromSymbol,
+						ToSymbol:         r.ToSymbol,
+						IsImplementation: r.IsImplementation,
+						IsReference:      r.IsReference,
+						IsTypeDefinition: r.IsTypeDefinition,
+						DetectionSource:  "go-types-resolver",
+					})
+					added++
+				}
+				fmt.Printf(
+					"Go structural type resolver: %d structural implementations found (%d type-level, %d method-level), %d dropped (symbol not in index), %d new beyond scip-go\n",
+					resolveStats.TypeLevelEmitted+resolveStats.MethodLevelEmitted,
+					resolveStats.TypeLevelEmitted,
+					resolveStats.MethodLevelEmitted,
+					resolveStats.DroppedMissingSymbol,
+					added,
+				)
+			}
+
+			// RFC-001 follow-up: dispatch through graph-invisible interfaces
+			// (function-local named, anonymous literal, anonymous generic
+			// constraint) is expressible by neither scip-go (which gives such
+			// interfaces `local N` symbols the indexer creates no Reference
+			// node for) nor the IMPLEMENTS machinery (which only enumerates
+			// package-scope named types). Synthesize DIRECT dispatch edges at
+			// those call sites so the callees don't read as dead code. These
+			// merge as CALLS/USES_VALUE (not IMPLEMENTS) below, before the call
+			// graph builder computes degrees. Best-effort, same as above.
+			if err := si.indexLocalInterfaceCalls(ctx, knownSymbols, symIdx); err != nil {
+				// Only merge failures surface here (resolver-run failures are
+				// warned about inside) — data-affecting, so fatal like the
+				// IMPLEMENTS merge above.
+				return err
+			}
+		} else if si.language == LanguageTypeScript || si.language == LanguageJavaScript {
+			// RFC-001 Layer 3 (TS/JS side): scip-typescript only emits
+			// is_implementation for explicit `implements`/heritage clauses
+			// (FileIndexer.ts's forEachAncestor walk) — a class that
+			// structurally satisfies a local interface WITHOUT an
+			// `implements` clause gets no relationship at all. Supplement
+			// with tools/ts-resolver/resolve.mjs, which uses the TypeScript
+			// compiler's own checker.isTypeAssignableTo. Best-effort by
+			// design, mirroring the Go branch above: a missing/unusable
+			// Node.js or `typescript` environment is a warning, never an
+			// indexing failure.
+			scipRels = si.runTSStructuralResolver(scipRels, knownSymbols)
+		}
+
 		implCount := 0
 		for _, r := range scipRels {
 			if r.IsImplementation {
@@ -339,6 +422,20 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 			si.report.AddWarning(fmt.Sprintf("symbol-based API analysis failed: %v", err))
 			si.report.IncrementFailed("API analysis", 1)
 		}
+
+		// Decorator-routed handlers (NestJS @Get/@Post/etc.): the tree-sitter
+		// structure pass stamped fn.decorators/classDecorators during call
+		// graph construction, and decorators are the ONLY signal for these —
+		// the framework invokes handlers via reflection, so no CALLS-based
+		// strategy can see them. Only the decorator strategy runs here; the
+		// full structural detector's other strategies are Go-oriented.
+		apiDetector := NewAPISurfaceDetector(si.client, "")
+		apiDetector.SetScope(si.scopeCtx)
+		apiDetector.SetServiceName(si.serviceName)
+		if _, err := apiDetector.detectDecoratorRoutes(ctx); err != nil {
+			si.report.AddWarning(fmt.Sprintf("decorator route detection failed: %v", err))
+			si.report.IncrementFailed("API analysis", 1)
+		}
 	}
 	if si.timer != nil {
 		si.timer.Stop(0, "")
@@ -368,6 +465,180 @@ func (si *SCIPIndexer) IndexProject(ctx context.Context, projectPath string) err
 	}
 
 	fmt.Println("SCIP indexing completed successfully")
+	return nil
+}
+
+// tsResolverTimeout bounds how long the external Node.js structural
+// resolver is allowed to run. Best-effort by design: a slow/hung resolver
+// must never hold up the rest of indexing indefinitely.
+const tsResolverTimeout = 120 * time.Second
+
+// locateTSResolverScript finds tools/ts-resolver/resolve.mjs, checked in
+// this order:
+//  1. CODEGRAPH_TS_RESOLVER env var, if set (explicit override).
+//  2. <dir of the running executable>/../tools/ts-resolver/resolve.mjs
+//     (the layout produced when the repo's tools/ directory is shipped
+//     alongside the built binary).
+//
+// Returns "" (never an error) when neither resolves, so callers can treat
+// "resolver not found" as a warn-and-skip condition identical to any other
+// best-effort environment gap.
+func locateTSResolverScript() string {
+	if envPath := os.Getenv("CODEGRAPH_TS_RESOLVER"); envPath != "" {
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+		return ""
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	candidate := filepath.Join(filepath.Dir(exePath), "..", "tools", "ts-resolver", "resolve.mjs")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
+// runTSStructuralResolver runs the TypeScript/JavaScript structural type
+// resolver (tools/ts-resolver/resolve.mjs) against si.projectPath and
+// returns scipRels with any newly-discovered structural implementation
+// relationships appended (DetectionSource: "ts-types-resolver"), deduped
+// against whatever scip-typescript already emitted natively — mirroring the
+// Go branch in IndexProject exactly (see the `si.language == LanguageGo`
+// block above).
+//
+// knownSymbols is every SCIP symbol string scip-typescript emitted for this
+// project (the same set the Go branch builds from symIdx.symbolIDs) — it is
+// what JoinTSRelationships joins the resolver's file/type/method-name
+// output onto.
+//
+// Every failure mode here — no `node` in PATH, script not found, resolver
+// exit codes 2/3, timeout, malformed output — is best-effort: it is
+// recorded as a warning and scipRels is returned unchanged. This function
+// never returns an error and never fails the index run.
+func (si *SCIPIndexer) runTSStructuralResolver(scipRels []SCIPRelationship, knownSymbols []string) []SCIPRelationship {
+	if _, err := exec.LookPath("node"); err != nil {
+		msg := "ts structural type resolver skipped: 'node' not found in PATH"
+		fmt.Printf("WARNING: %s\n", msg)
+		si.report.AddWarning(msg)
+		return scipRels
+	}
+
+	scriptPath := locateTSResolverScript()
+	if scriptPath == "" {
+		msg := "ts structural type resolver skipped: resolve.mjs not found (set CODEGRAPH_TS_RESOLVER or ship tools/ts-resolver alongside the binary)"
+		fmt.Printf("WARNING: %s\n", msg)
+		si.report.AddWarning(msg)
+		return scipRels
+	}
+
+	parsed, err := resolve.RunTSResolver(context.Background(), scriptPath, si.projectPath, tsResolverTimeout)
+	if err != nil {
+		fmt.Printf("WARNING: TS structural type resolver skipped: %v\n", err)
+		si.report.AddWarning(fmt.Sprintf("ts structural type resolver skipped: %v", err))
+		return scipRels
+	}
+
+	resolverRels, joinStats := resolve.JoinTSRelationships(parsed, knownSymbols)
+
+	scipPairs := make(map[[2]string]bool, len(scipRels))
+	for _, r := range scipRels {
+		if r.IsImplementation {
+			scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] = true
+		}
+	}
+	added := 0
+	for _, r := range resolverRels {
+		if scipPairs[[2]string{r.FromSymbol, r.ToSymbol}] {
+			continue
+		}
+		scipRels = append(scipRels, SCIPRelationship{
+			FromSymbol:       r.FromSymbol,
+			ToSymbol:         r.ToSymbol,
+			IsImplementation: r.IsImplementation,
+			IsReference:      r.IsReference,
+			IsTypeDefinition: r.IsTypeDefinition,
+			DetectionSource:  "ts-types-resolver",
+		})
+		added++
+	}
+
+	fmt.Printf(
+		"TS structural type resolver: %d structural implementations found (%d type-level, %d method-level), %d dropped (symbol not in index), %d new beyond scip-typescript\n",
+		joinStats.TypeLevelEmitted+joinStats.MethodLevelEmitted,
+		joinStats.TypeLevelEmitted,
+		joinStats.MethodLevelEmitted,
+		joinStats.DroppedMissingSymbol,
+		added,
+	)
+
+	return scipRels
+}
+
+// indexLocalInterfaceCalls runs the Go local/anonymous-interface dispatch
+// resolver (internal/ingest/resolve.ResolveLocalInterfaceCallsJoined) and
+// merges the synthesized dispatch edges into the graph as CALLS/USES_VALUE
+// relationships tagged detectionSource "local-interface".
+//
+// It runs inside Step 6b, BEFORE the call-graph builder's
+// ComputeDegreeProperties (Step 10), so the synthesized CALLS edges are
+// counted in in/out degrees — degree is a CALLS-only computation, so
+// USES_VALUE edges (method values) correctly do not affect it, matching the
+// call-graph builder's own treatment.
+//
+// Idempotency: MergeRelsBatch MERGEs one edge per (from, to) per rel type and
+// SET-overwrites props, so re-indexing unchanged source produces the same
+// edges, not duplicates. On re-index, deletePreviousSubgraph DETACH DELETEs
+// this service's Function/Method definition nodes; since both endpoints of a
+// local-interface edge are such nodes, the synthesized edges die with their
+// endpoints — no orphan leak.
+//
+// Best-effort by design: a resolver failure (no go.mod, packages.Load error)
+// is warned about here and swallowed; a merge failure IS returned (and the
+// caller propagates it as fatal), mirroring the IMPLEMENTS merge, because a
+// graph silently missing structural edges is wrong in a way that must not
+// pass silently.
+func (si *SCIPIndexer) indexLocalInterfaceCalls(ctx context.Context, knownSymbols []string, symIdx *symbolIndex) error {
+	rels, stats, joinStats, err := resolve.ResolveLocalInterfaceCallsJoined(si.projectPath, knownSymbols)
+	if err != nil {
+		// Resolver-run failure (no go.mod, packages.Load error, non-Go root):
+		// best-effort by design, warn and index on — mirroring the
+		// ResolveImplementations block. Merge failures below stay fatal.
+		fmt.Printf("WARNING: local-interface dispatch resolver skipped: %v\n", err)
+		si.report.AddWarning(fmt.Sprintf("local-interface dispatch resolver skipped: %v", err))
+		return nil
+	}
+
+	fmt.Printf(
+		"Local-interface dispatch resolver: %d sites (%d handled, %d package-named skipped, %d module-scope skipped), %d relations found, %d edges joined, %d dropped (symbol not in index)\n",
+		stats.SitesSeen, stats.HandledSites, stats.PackageNamedSkipped, stats.ModuleScopeSkipped,
+		stats.RelationsFound, joinStats.Emitted, joinStats.DroppedMissingSymbol,
+	)
+
+	callsBatch := buildLocalCallBatch(rels, resolve.LocalCallInvoke, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
+	valueBatch := buildLocalCallBatch(rels, resolve.LocalCallValue, symIdx.symbolIDs, symIdx.defIDs, symIdx.symbolToDefKey, si.scopeCtx)
+
+	if len(callsBatch) > 0 {
+		if err := si.client.MergeRelsBatch(ctx, string(models.CallsRel), callsBatch, batchSize); err != nil {
+			si.report.IncrementFailed("Local-interface CALLS", 1)
+			return fmt.Errorf("merge local-interface CALLS: %w", err)
+		}
+		fmt.Printf("Merged %d local-interface CALLS relationships\n", len(callsBatch))
+		si.report.IncrementWritten("Local-interface CALLS", len(callsBatch))
+	}
+
+	if len(valueBatch) > 0 {
+		if err := si.client.MergeRelsBatch(ctx, string(models.UsesValueRel), valueBatch, batchSize); err != nil {
+			si.report.IncrementFailed("Local-interface USES_VALUE", 1)
+			return fmt.Errorf("merge local-interface USES_VALUE: %w", err)
+		}
+		fmt.Printf("Merged %d local-interface USES_VALUE relationships\n", len(valueBatch))
+		si.report.IncrementWritten("Local-interface USES_VALUE", len(valueBatch))
+	}
+
 	return nil
 }
 
@@ -666,6 +937,20 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 	// so a wrong value here breaks the entire DEPENDS_ON graph.
 	actualPackageName := si.detectPackageName(projectPath)
 
+	// rootPath is the absolute, symlink-cleaned indexed directory. It lets
+	// MCP source-resolution (codegraph_source, query source) find files on
+	// disk regardless of the server process's cwd — see RFC-012 R2.
+	rootPath := si.projectPath
+	if rootPath == "" {
+		rootPath = projectPath
+	}
+	if abs, err := filepath.Abs(rootPath); err == nil {
+		rootPath = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(rootPath); err == nil {
+		rootPath = resolved
+	}
+
 	nodeKey := models.ServiceNodeKey(si.serviceName)
 	serviceProps := map[string]any{
 		"name":          si.serviceName,
@@ -676,6 +961,7 @@ func (si *SCIPIndexer) createServiceNode(ctx context.Context, projectPath string
 		"repositoryUrl": si.repoURL,
 		"scope":         si.scopeCtx.Scope,
 		"scopeId":       si.scopeCtx.ScopeID,
+		"rootPath":      rootPath,
 	}
 
 	return si.client.MergeNode(ctx, []string{"Service"},
@@ -939,6 +1225,9 @@ func (si *SCIPIndexer) computeDefinitionProps(symbolInfo *models.SymbolInfo) (la
 		props["isExported"] = si.computeIsExported(symbolInfo.DisplayName)
 		props["docstring"] = symbolInfo.Documentation
 		props["isTestFunction"] = isTestFunction(symbolInfo.DisplayName, symbolInfo.FilePath)
+		if symbolInfo.KindSource != "" {
+			props["kindSource"] = symbolInfo.KindSource
+		}
 	case "Class":
 		props["fqn"] = symbolInfo.Symbol.String()
 		props["accessModifier"] = "public"
@@ -1470,11 +1759,6 @@ func (si *SCIPIndexer) indexPackageDependencies(ctx context.Context, imports []*
 	return nil
 }
 
-// SetSCIPBinary sets the path to the SCIP binary (for testing or custom installations)
-func (si *SCIPIndexer) SetSCIPBinary(binary string) {
-	si.langConfig.SCIPBinary = binary
-}
-
 // ValidateEnvironment checks if the required tools are available.
 // It first tries to resolve the binary from cache or PATH, then attempts
 // auto-install if not found. Set noAutoInstall to skip the install attempt.
@@ -1551,11 +1835,6 @@ func (si *SCIPIndexer) createPullRequestNode(ctx context.Context, prID, title st
 		return "", fmt.Errorf("failed to create PullRequest node: %w", err)
 	}
 	return id, nil
-}
-
-// GetLanguage returns the language this indexer is configured for
-func (si *SCIPIndexer) GetLanguage() Language {
-	return si.language
 }
 
 // isTestFunction determines if a function is a test function based on its name

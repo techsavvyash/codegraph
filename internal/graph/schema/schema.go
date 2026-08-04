@@ -776,6 +776,13 @@ func (sm *SchemaManager) CreateSchema(ctx context.Context) error {
 		}
 	}
 
+	// Heal the built-in LOOKUP indexes first: earlier DropSchema versions
+	// swept them away with everything else, leaving every labeled MATCH on an
+	// AllNodesScan. IF NOT EXISTS makes this a no-op on healthy databases.
+	if err := sm.ensureLookupIndexes(ctx); err != nil {
+		return fmt.Errorf("failed to ensure lookup indexes: %w", err)
+	}
+
 	// Create constraints
 	if err := sm.createConstraints(ctx); err != nil {
 		return fmt.Errorf("failed to create constraints: %w", err)
@@ -1081,6 +1088,22 @@ func (sm *SchemaManager) DropSchema(ctx context.Context) error {
 	return nil
 }
 
+// ensureLookupIndexes recreates Neo4j's built-in token lookup indexes (node
+// label + relationship type) if they are missing. Without them the planner
+// cannot do NodeByLabelScan and every labeled MATCH degrades to AllNodesScan.
+func (sm *SchemaManager) ensureLookupIndexes(ctx context.Context) error {
+	stmts := []string{
+		"CREATE LOOKUP INDEX node_label_lookup_index IF NOT EXISTS FOR (n) ON EACH labels(n)",
+		"CREATE LOOKUP INDEX rel_type_lookup_index IF NOT EXISTS FOR ()-[r]-() ON EACH type(r)",
+	}
+	for _, cypher := range stmts {
+		if _, err := sm.client.ExecuteQuery(ctx, cypher, nil); err != nil {
+			return fmt.Errorf("lookup index creation failed (%s): %w", cypher, err)
+		}
+	}
+	return nil
+}
+
 // dropAllConstraints drops all constraints in the database
 func (sm *SchemaManager) dropAllConstraints(ctx context.Context) error {
 	// Get all constraint names
@@ -1107,10 +1130,13 @@ func (sm *SchemaManager) dropAllConstraints(ctx context.Context) error {
 	return nil
 }
 
-// dropAllIndexes drops all indexes in the database
+// dropAllIndexes drops all indexes in the database — except the built-in
+// LOOKUP indexes (node label / relationship type). Dropping those makes the
+// planner fall back to AllNodesScan for every labeled MATCH database-wide;
+// they are Neo4j infrastructure, not part of our schema.
 func (sm *SchemaManager) dropAllIndexes(ctx context.Context) error {
 	// Get all index names
-	cypher := "SHOW INDEXES YIELD name"
+	cypher := "SHOW INDEXES YIELD name, type WHERE type <> 'LOOKUP' RETURN name"
 	result, err := sm.client.ExecuteQuery(ctx, cypher, nil)
 	if err != nil {
 		return fmt.Errorf("failed to list indexes: %w", err)

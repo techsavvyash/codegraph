@@ -2,11 +2,29 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | In Progress (Layer 1 + 2 implemented) |
+| **Status** | Implemented for Go + TypeScript (Layers 1–3; Go resolver `internal/ingest/resolve`, TS resolver `tools/ts-resolver` closed 2026-07-30). Phases 7–8 closed 2026-08-02 by RFC-014 (`internal/query/reachability`, `codegraph query deadcode`). Python untouched. |
 | **Created** | 2026-03-07 |
-| **Updated** | 2026-03-08 |
+| **Updated** | 2026-08-02 |
 | **Authors** | @techsavvyash |
-| **Relates to** | `libs/indexer-go/static/call_graph_generic.go`, `libs/indexer-go/static/scip_parser.go`, `libs/indexer-go/static/scip_indexer.go` |
+| **Relates to** | `internal/ingest/scip/call_graph_generic.go`, `internal/ingest/scip/scip_relationships.go`, `internal/ingest/scip/scip_indexer.go`, `internal/ingest/resolve/` |
+
+> **Status update (2026-07-30, post-rebuild).** Layers 1+2 survived the rebuild
+> (`internal/ingest/scip`). Layer 3 landed for Go as the in-repo resolver this
+> RFC lists under "Optional fallback" — `internal/ingest/resolve`, using
+> `go/packages` + `types.Implements`, joining output onto symbol strings parsed
+> from the actual index, provenance-stamped `detectionSource: go-types-resolver`
+> (fork strategy abandoned: no fork maintenance, same authority). Key empirical
+> correction: **current scip-go emits intra-project structural implementations
+> well** (129 implementation relationships for this repo vs the ~12 measured in
+> March), so the Go resolver is a drift/regression guarantee rather than the
+> primary source. Verified live on this repo: 55/57 implementing methods are
+> reachable through Layer-2 CALLS fan-out; the 2 unreached are mock test
+> doubles (correctly caller-less). The tier-2 entry-point queries were also
+> fixed to match method-level IMPLEMENTS edges (they demanded `->(:Interface)`,
+> a shape only class-level edges have). **TypeScript remains the real gap**
+> (scip-typescript walks heritage clauses only) — the TS structural resolver
+> (`tools/ts-resolver` + `internal/ingest/resolve/tsresolver.go`) is in
+> progress, following the same join-against-actual-index design.
 
 ## Problem
 

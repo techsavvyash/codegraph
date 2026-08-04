@@ -37,17 +37,6 @@ func ParseSCIPSymbol(symbol string) (*SCIPSymbol, error) {
 	}, nil
 }
 
-// NewGoSCIPSymbol creates a SCIP symbol for Go code
-func NewGoSCIPSymbol(packageName, version, descriptor string) *SCIPSymbol {
-	return &SCIPSymbol{
-		Scheme:     "scip-go",
-		Manager:    "go",
-		Name:       packageName,
-		Version:    version,
-		Descriptor: descriptor,
-	}
-}
-
 // GoDescriptor represents different Go symbol descriptors
 type GoDescriptor struct {
 	Package   string
@@ -105,6 +94,11 @@ const (
 	LocalSymbol     SymbolKind = "Local"
 )
 
+// KindSourcePromotion is the SymbolInfo.KindSource value for kinds decided
+// by the declarator-bound-function promotion pass rather than the SCIP
+// descriptor.
+const KindSourcePromotion = "promotion"
+
 // SymbolScope represents the scope/visibility of a symbol
 type SymbolScope string
 
@@ -131,20 +125,11 @@ type SymbolInfo struct {
 	EndLine       int         `json:"endLine"`
 	StartColumn   int         `json:"startColumn"`
 	EndColumn     int         `json:"endColumn"`
-}
-
-// IsExported returns true if the symbol is exported (public)
-func (si *SymbolInfo) IsExported() bool {
-	return si.Scope == PublicScope
-}
-
-// GenerateSymbolID generates a unique ID for the symbol (for use as Neo4j node ID)
-func (si *SymbolInfo) GenerateSymbolID() string {
-	if si.Symbol != nil {
-		return si.Symbol.String()
-	}
-	// Fallback: use file path and position
-	return fmt.Sprintf("%s:%d:%d", si.FilePath, si.StartLine, si.StartColumn)
+	// KindSource records how Kind was decided when it did not come straight
+	// from the SCIP descriptor — "promotion" marks declarator-bound functions
+	// upgraded by the tree-sitter pass (RFC-010 §4.3). Empty means
+	// descriptor-derived.
+	KindSource string `json:"kindSource,omitempty"`
 }
 
 // SymbolReference represents a reference to a symbol in code
@@ -179,15 +164,4 @@ func (sd *SymbolDefinition) GetDefinitionReference() *SymbolReference {
 		}
 	}
 	return nil
-}
-
-// GetUsageReferences returns all usage references (where IsDefinition is false)
-func (sd *SymbolDefinition) GetUsageReferences() []*SymbolReference {
-	var usages []*SymbolReference
-	for _, ref := range sd.Refs {
-		if !ref.IsDefinition {
-			usages = append(usages, ref)
-		}
-	}
-	return usages
 }

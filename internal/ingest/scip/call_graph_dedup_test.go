@@ -33,15 +33,38 @@ func TestCollapseToMinLinePerPairDeterministic(t *testing.T) {
 	}
 }
 
-// TestCollapseToMinLinePerPairDropsSelfCalls verifies self-referencing
-// triples (a function "calling itself" per the raw reference data — e.g.
-// recursion, or a resolution artifact) never produce a self-loop edge.
-func TestCollapseToMinLinePerPairDropsSelfCalls(t *testing.T) {
+// TestCollapseToMinLinePerPairKeepsSelfCalls verifies self-referencing
+// triples (recursion) survive as a real CALLS edge — RFC-013 found the
+// live graph had ZERO self-loop CALLS edges anywhere because this function
+// used to drop CallerID==TargetID unconditionally, making every recursive
+// function structurally indistinguishable from an uncalled one.
+func TestCollapseToMinLinePerPairKeepsSelfCalls(t *testing.T) {
 	got := collapseToMinLinePerPair([]minLineEdge{
-		{CallerID: "main", TargetID: "main", Line: 5},
+		{CallerID: "factorial", TargetID: "factorial", Line: 5},
 	})
-	if len(got) != 0 {
-		t.Fatalf("expected self-call to be dropped, got %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("expected the self-call to survive as 1 edge, got %d: %+v", len(got), got)
+	}
+	want := minLineEdge{CallerID: "factorial", TargetID: "factorial", Line: 5}
+	if got[0] != want {
+		t.Errorf("got %+v, want %+v", got[0], want)
+	}
+}
+
+// TestCollapseToMinLinePerPairSelfCallGetsNormalMinLineDedup verifies a
+// self-recursive pair still gets ordinary min-line dedup semantics — two
+// call sites of a function calling itself collapse to one edge at the
+// smaller line, exactly like any other (caller, target) pair.
+func TestCollapseToMinLinePerPairSelfCallGetsNormalMinLineDedup(t *testing.T) {
+	got := collapseToMinLinePerPair([]minLineEdge{
+		{CallerID: "factorial", TargetID: "factorial", Line: 12},
+		{CallerID: "factorial", TargetID: "factorial", Line: 6},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 collapsed self-call edge, got %d: %+v", len(got), got)
+	}
+	if got[0].Line != 6 {
+		t.Errorf("expected Line == 6 (smallest), got %d", got[0].Line)
 	}
 }
 

@@ -318,6 +318,184 @@ func TestForFile(t *testing.T) {
 	}
 }
 
+// decoSummary is the assertable shape of one DecoratorInfo.
+type decoSummary struct {
+	Name string
+	Arg  string
+}
+
+func summarizeDecorators(ds []DecoratorInfo) []decoSummary {
+	out := make([]decoSummary, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, decoSummary{d.Name, d.Arg})
+	}
+	return out
+}
+
+func assertDecorators(t *testing.T, got []DecoratorInfo, want []decoSummary) {
+	t.Helper()
+	gs := summarizeDecorators(got)
+	if len(gs) != len(want) {
+		t.Fatalf("decorator count = %d, want %d\ngot: %+v want: %+v", len(gs), len(want), gs, want)
+	}
+	for i := range want {
+		if gs[i] != want[i] {
+			t.Errorf("decorators[%d] = %+v, want %+v", i, gs[i], want[i])
+		}
+	}
+}
+
+// funcByName finds the first FunctionNode with the given name, failing the
+// test if absent.
+func funcByName(t *testing.T, fs *FileStructure, name string) FunctionNode {
+	t.Helper()
+	for _, f := range fs.Functions {
+		if f.Name == name {
+			return f
+		}
+	}
+	t.Fatalf("no function named %q in %+v", name, summarize(fs))
+	return FunctionNode{}
+}
+
+// TestDecoratorExtraction_MethodAndClass covers the NestJS shape RFC-005
+// targets: a decorated controller class with decorated and plain methods,
+// asserting exact name/arg extraction for both stacked-string-arg and
+// no-arg decorators, and that a plain method carries none.
+func TestDecoratorExtraction_MethodAndClass(t *testing.T) {
+	src := `@Controller('users')
+class UsersController {
+  @Get() findAll() {}
+  @Get(':id') findOne() {}
+  @Post('create') create() {}
+  plainMethod() {}
+}
+
+@Injectable()
+class UsersService {
+  save() {}
+}
+
+function freeFunction() {}
+
+class Scheduler {
+  @EventPattern('evt') handleEvt() {}
+  @Cron('* * * * *') runJob() {}
+}
+`
+	fs := extract(t, "typescript", src)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+
+	// Method-level decorators, exact name/arg pairs.
+	assertDecorators(t, funcByName(t, fs, "findAll").Decorators, []decoSummary{{"Get", ""}})
+	assertDecorators(t, funcByName(t, fs, "findOne").Decorators, []decoSummary{{"Get", ":id"}})
+	assertDecorators(t, funcByName(t, fs, "create").Decorators, []decoSummary{{"Post", "create"}})
+	assertDecorators(t, funcByName(t, fs, "plainMethod").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "save").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "freeFunction").Decorators, nil)
+	assertDecorators(t, funcByName(t, fs, "handleEvt").Decorators, []decoSummary{{"EventPattern", "evt"}})
+	assertDecorators(t, funcByName(t, fs, "runJob").Decorators, []decoSummary{{"Cron", "* * * * *"}})
+
+	// Class-level decorators.
+	if len(fs.Classes) != 3 {
+		t.Fatalf("want 3 classes, got %d: %+v", len(fs.Classes), fs.Classes)
+	}
+	classByName := func(name string) ClassNode {
+		t.Helper()
+		for _, c := range fs.Classes {
+			if c.Name == name {
+				return c
+			}
+		}
+		t.Fatalf("no class named %q in %+v", name, fs.Classes)
+		return ClassNode{}
+	}
+	assertDecorators(t, classByName("UsersController").Decorators, []decoSummary{{"Controller", "users"}})
+	assertDecorators(t, classByName("UsersService").Decorators, []decoSummary{{"Injectable", ""}})
+	assertDecorators(t, classByName("Scheduler").Decorators, nil)
+
+	// Method -> enclosing-class attribution: findOne's identifier position
+	// must resolve, via ClassDecoratorsAt, to UsersController's decorators —
+	// not UsersService's or Scheduler's.
+	findOne := funcByName(t, fs, "findOne")
+	classDecos := fs.ClassDecoratorsAt(findOne.StartLine, findOne.StartCol)
+	assertDecorators(t, classDecos, []decoSummary{{"Controller", "users"}})
+
+	// A method with no enclosing class (freeFunction) resolves no class
+	// decorators.
+	free := funcByName(t, fs, "freeFunction")
+	if got := fs.ClassDecoratorsAt(free.StartLine, free.StartCol); got != nil {
+		t.Errorf("freeFunction ClassDecoratorsAt = %+v, want nil", got)
+	}
+
+	// runJob (inside Scheduler, which has no class decorator) resolves to
+	// an empty decorator list, distinguishing "no enclosing class" from
+	// "enclosing class has no decorators".
+	runJob := funcByName(t, fs, "runJob")
+	if got := fs.ClassDecoratorsAt(runJob.StartLine, runJob.StartCol); got != nil {
+		t.Errorf("runJob (Scheduler has no class decorator) ClassDecoratorsAt = %+v, want nil", got)
+	}
+}
+
+// TestDecoratorExtraction_NoGrammarSupport verifies decorator extraction is
+// gated by language: JavaScript and other non-TS grammars never populate
+// Decorators/Classes even when asked (JS has no decorator syntax in the
+// stable grammar; other languages have no decorator concept at all).
+func TestDecoratorExtraction_NoGrammarSupport(t *testing.T) {
+	fs := extract(t, "javascript", `class C {
+  m() { return 1; }
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	if len(fs.Classes) != 0 {
+		t.Errorf("javascript: want 0 classes tracked, got %d: %+v", len(fs.Classes), fs.Classes)
+	}
+	m := funcByName(t, fs, "m")
+	if m.Decorators != nil {
+		t.Errorf("javascript method Decorators = %+v, want nil", m.Decorators)
+	}
+}
+
+// TestDecoratorExtraction_TSX verifies the TSX grammar (used for .tsx files)
+// extracts decorators identically to plain TypeScript.
+func TestDecoratorExtraction_TSX(t *testing.T) {
+	fs := extract(t, "tsx", `@Controller('widgets')
+class WidgetController {
+  @Get(':id') get() {}
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	assertDecorators(t, funcByName(t, fs, "get").Decorators, []decoSummary{{"Get", ":id"}})
+	if len(fs.Classes) != 1 || fs.Classes[0].Name != "WidgetController" {
+		t.Fatalf("want 1 class WidgetController, got %+v", fs.Classes)
+	}
+	assertDecorators(t, fs.Classes[0].Decorators, []decoSummary{{"Controller", "widgets"}})
+}
+
+// TestDecoratorExtraction_StackedAndNonLiteralArgs covers multiple stacked
+// decorators on one target and a non-string-literal first argument (a bare
+// identifier), which must yield an empty Arg rather than a guess.
+func TestDecoratorExtraction_StackedAndNonLiteralArgs(t *testing.T) {
+	fs := extract(t, "typescript", `const ROUTE = 'dynamic';
+class C {
+  @UseGuards() @Get(ROUTE) mixed() {}
+}
+`)
+	if fs.HasErrors {
+		t.Fatal("unexpected parse errors")
+	}
+	assertDecorators(t, funcByName(t, fs, "mixed").Decorators, []decoSummary{
+		{"UseGuards", ""},
+		{"Get", ""}, // non-literal arg (identifier) yields "", not a guess
+	})
+}
+
 // TestByteRangesMatchSource: byte offsets must slice the source to exactly
 // the function text — downstream `source` retrieval depends on it.
 func TestByteRangesMatchSource(t *testing.T) {
@@ -331,5 +509,147 @@ func TestByteRangesMatchSource(t *testing.T) {
 	}
 	if got := src[fs.Functions[1].StartByte:fs.Functions[1].EndByte]; got != "function b(): void {\n  a();\n}" {
 		t.Errorf("b text = %q", got)
+	}
+}
+
+// --- Call-site extraction (call vs function-value distinction) --------------
+
+// callSiteNames returns the set of callee names recorded for src.
+func callSiteNames(t *testing.T, lang, src string) map[string]bool {
+	t.Helper()
+	fs := extract(t, lang, src)
+	names := make(map[string]bool)
+	for _, cs := range fs.CallSites {
+		names[cs.Name] = true
+	}
+	return names
+}
+
+func TestCallSites_TypeScript(t *testing.T) {
+	src := `const saved = helper;
+const eager = compute();
+const obj = { fn: byValue };
+function run() {
+  const local = helper;
+  helper();
+  service.doWork();
+  const x = new Widget();
+  return arr.map((v) => square(v));
+}`
+	fs := extract(t, "typescript", src)
+
+	names := make(map[string]bool)
+	for _, cs := range fs.CallSites {
+		names[cs.Name] = true
+	}
+	for _, want := range []string{"compute", "helper", "doWork", "Widget", "square"} {
+		if !names[want] {
+			t.Errorf("call site %q not recorded; got %v", want, fs.CallSites)
+		}
+	}
+	for _, notWant := range []string{"saved", "byValue", "local", "arr"} {
+		if names[notWant] {
+			t.Errorf("value reference %q wrongly recorded as call site", notWant)
+		}
+	}
+
+	// compute() on line 2: callee identifier starts at col 14 (0-based).
+	if !fs.IsCallSiteAt(2, 14) {
+		t.Errorf("IsCallSiteAt(2, 14) = false for compute(); sites: %v", fs.CallSites)
+	}
+	// helper on line 1 is a value ref: no call site anywhere on that line.
+	if fs.IsCallSiteAt(1, 14) || fs.HasCallSiteOnLine(1, "helper") {
+		t.Error("value reference on line 1 must not be a call site")
+	}
+	// Fallback: helper() on line 6 by name.
+	if !fs.HasCallSiteOnLine(6, "helper") {
+		t.Error("HasCallSiteOnLine(6, helper) = false")
+	}
+	// doWork is the property of a member call: the recorded position must be
+	// the METHOD identifier, not the object.
+	if !fs.HasCallSiteOnLine(7, "doWork") || fs.HasCallSiteOnLine(7, "service") {
+		t.Errorf("member call must record the property identifier only; sites: %v", fs.CallSites)
+	}
+}
+
+func TestCallSites_ComputedCalleesAbsent(t *testing.T) {
+	src := `function run() {
+  factory()();
+  table[i]();
+  (cond ? a : b)();
+}`
+	fs := extract(t, "typescript", src)
+	// factory() itself is a call; the outer () and the other computed callees
+	// must record nothing.
+	if len(fs.CallSites) != 1 || fs.CallSites[0].Name != "factory" {
+		t.Errorf("computed callees must not be recorded; got %v", fs.CallSites)
+	}
+}
+
+func TestCallSites_Decorators(t *testing.T) {
+	tsSrc := `@Injectable
+@Controller('users')
+class UsersController {
+  @Get()
+  list() { return []; }
+}`
+	names := callSiteNames(t, "typescript", tsSrc)
+	for _, want := range []string{"Injectable", "Controller", "Get"} {
+		if !names[want] {
+			t.Errorf("decorator %q not recorded as call site; got %v", want, names)
+		}
+	}
+
+	pySrc := "@login_required\n@app.route('/x')\ndef view():\n    pass\n"
+	pyNames := callSiteNames(t, "python", pySrc)
+	if !pyNames["login_required"] || !pyNames["route"] {
+		t.Errorf("python decorators not recorded: %v", pyNames)
+	}
+
+	// Java annotations are NOT calls and must not be recorded.
+	javaSrc := "class A {\n  @Override\n  public void run() { helper(); }\n}"
+	javaNames := callSiteNames(t, "java", javaSrc)
+	if javaNames["Override"] {
+		t.Error("java annotation wrongly recorded as call site")
+	}
+	if !javaNames["helper"] {
+		t.Errorf("java method invocation missing: %v", javaNames)
+	}
+}
+
+func TestCallSites_AllLanguages(t *testing.T) {
+	cases := []struct {
+		lang, src string
+		want      []string
+		notWant   []string
+	}{
+		{"javascript", "const v = fn;\nrun();\nobj.method();\nconst w = new Thing();", []string{"run", "method", "Thing"}, []string{"fn", "v", "obj"}},
+		{"python", "saved = handler\nresult = compute()\nobj.method()\n", []string{"compute", "method"}, []string{"handler", "saved"}},
+		{"java", "class A { void m() { helper(); obj.call2(); A a = new A(); Runnable r = A::m; } }", []string{"helper", "call2", "A", "m"}, []string{"r"}},
+		{"scala", "object Main { val saved = handler _\n  def m(): Unit = { helper(); obj.method() } }", []string{"helper", "method"}, nil},
+		{"kotlin", "fun m() { helper()\n  obj.method()\n  val saved = ::handler }", []string{"helper", "method"}, []string{"handler", "saved"}},
+		{"php", "<?php\n$saved = 'fn';\nhelper();\n$obj->method();\nApp\\Util::stat1();\nnew Widget();\n", []string{"helper", "method", "stat1", "Widget"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			names := callSiteNames(t, tc.lang, tc.src)
+			for _, w := range tc.want {
+				if !names[w] {
+					t.Errorf("%s: call site %q missing; got %v", tc.lang, w, names)
+				}
+			}
+			for _, nw := range tc.notWant {
+				if names[nw] {
+					t.Errorf("%s: %q wrongly recorded as call site", tc.lang, nw)
+				}
+			}
+		})
+	}
+}
+
+func TestCallSites_NilStructureSafe(t *testing.T) {
+	var fs *FileStructure
+	if fs.IsCallSiteAt(1, 0) || fs.HasCallSiteOnLine(1, "x") {
+		t.Error("nil FileStructure must report no call sites")
 	}
 }

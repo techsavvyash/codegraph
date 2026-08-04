@@ -27,13 +27,19 @@ func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[str
 	if f, ok := args["format"].(string); ok && f != "" {
 		format = f
 	}
+	persist := true
+	if p, ok := args["persist"].(bool); ok {
+		persist = p
+	}
 
 	scopeCtx := parseScopeContextArg(args)
-	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+	explicitService := getOptionalStringArg(args, "service_name")
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, explicitService)
 
 	gen := query.NewFlowSpineGenerator(s.client)
 	gen.SetScope(scopeCtx)
 	gen.SetServiceFilter(serviceNames)
+	gen.SetPersist(persist)
 
 	// Check if from/from_name is provided for manual node-driven flow generation.
 	fromIDArg, _ := args["from"].(string)
@@ -71,18 +77,35 @@ func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[str
 		// verifiably exists.
 	} else {
 		// Normal mode: generate flows from all structural seeds, filtered to
-		// the current workspace so discovery stays relevant to the open repo.
+		// the current workspace so discovery stays relevant to the open repo —
+		// UNLESS the caller passed an explicit service_name, in which case
+		// that scoping already replaces workspace relevance (same design call
+		// as the from-mode comment above). Without this bypass, a server
+		// process whose cwd isn't the indexed repo root (e.g. the Studio MCP
+		// bridge, spawned with cwd=bin/) drops every result.
 		flows, err = gen.GenerateFlows(ctx, maxDepth)
 		if err != nil {
 			return errorResponse(fmt.Sprintf("flows: generation failed: %v", err))
 		}
-		flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
+		if explicitService == "" {
+			flows = s.filterFlowsToWorkspace(ctx, scopeCtx.ScopeID, flows)
+		}
 	}
 
 	if len(flows) > limit {
 		flows = flows[:limit]
 	}
+
+	s.enrichFlowSteps(ctx, scopeCtx.ScopeID, flows)
+
 	if len(flows) == 0 {
+		if format == "json" {
+			body, _ := json.MarshalIndent(map[string]interface{}{
+				"flow_count": 0,
+				"flows":      []query.FlowSpineResult{},
+			}, "", "  ")
+			return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
+		}
 		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: "No flows generated for this scope. Re-index with `index pipeline` if call graph data is missing."}}}
 	}
 
@@ -100,6 +123,74 @@ func (s *CodeGraphMCPServer) handleFlowsToolV2(ctx context.Context, args map[str
 			return errorResponse(fmt.Sprintf("flows: encode failed: %v", err))
 		}
 		return ToolCallResponse{Content: []ToolContent{{Type: "text", Text: string(body)}}}
+	}
+}
+
+// enrichFlowSteps batch-fills NodeID (elementId)/FilePath/StartLine on every
+// step across all flows with one query, mutating flows in place. Steps whose
+// nodeKey no longer resolves (a node could vanish between the trace and this
+// enrichment pass) are left with those three fields empty rather than
+// failing the whole request.
+func (s *CodeGraphMCPServer) enrichFlowSteps(ctx context.Context, scopeID string, flows []query.FlowSpineResult) {
+	keys := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, f := range flows {
+		for _, step := range f.Steps {
+			if step.NodeKey == "" || seen[step.NodeKey] {
+				continue
+			}
+			seen[step.NodeKey] = true
+			keys = append(keys, step.NodeKey)
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+
+	cypher := `
+		UNWIND $keys AS k
+		MATCH (n:Function|Method|Service|APIRoute {nodeKey: k})
+		WHERE (n.scopeId = $scopeId OR n.scopeId = 'main')
+		RETURN k AS nodeKey, elementId(n) AS id, coalesce(n.filePath, '') AS filePath,
+		       coalesce(n.startLine, 0) AS startLine`
+
+	records, err := s.client.ExecuteQuery(ctx, cypher, map[string]any{"keys": keys, "scopeId": scopeID})
+	if err != nil {
+		// Enrichment is best-effort — the flow steps are still valid without
+		// nodeId/filePath/startLine.
+		return
+	}
+
+	type enrichment struct {
+		id        string
+		filePath  string
+		startLine int
+	}
+	byKey := make(map[string]enrichment, len(records))
+	for _, r := range records {
+		m := r.AsMap()
+		nk := getStringFromRecord(m, "nodeKey")
+		if nk == "" {
+			continue
+		}
+		byKey[nk] = enrichment{
+			id:        getStringFromRecord(m, "id"),
+			filePath:  getStringFromRecord(m, "filePath"),
+			startLine: getIntFromRecord(m, "startLine"),
+		}
+	}
+
+	for fi := range flows {
+		for si := range flows[fi].Steps {
+			step := &flows[fi].Steps[si]
+			e, ok := byKey[step.NodeKey]
+			if !ok {
+				continue
+			}
+			step.NodeID = e.id
+			step.FilePath = e.filePath
+			step.StartLine = e.startLine
+		}
 	}
 }
 
@@ -156,7 +247,8 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		format = f
 	}
 	scopeCtx := parseScopeContextArg(args)
-	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, getOptionalStringArg(args, "service_name"))
+	explicitService := getOptionalStringArg(args, "service_name")
+	serviceNames := s.resolveWorkspaceServices(ctx, scopeCtx.ScopeID, explicitService)
 	tierFilter := 0
 	if t, ok := args["tier"].(float64); ok && t >= 1 && t <= 4 {
 		tierFilter = int(t)
@@ -178,6 +270,11 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		TierLabel   string `json:"tier_label"`
 		Source      string `json:"detection_source,omitempty"`
 		ServiceName string `json:"service,omitempty"`
+		NodeID      string `json:"node_id,omitempty"`
+		Label       string `json:"label,omitempty"`
+		StartLine   int    `json:"start_line,omitempty"`
+		OutDegree   int    `json:"out_degree"`
+		InDegree    int    `json:"in_degree"`
 	}
 
 	params := map[string]any{
@@ -193,7 +290,12 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		if e.NodeKey == "" || seen[e.NodeKey] {
 			return
 		}
-		if e.FilePath != "" && !s.fileInWorkspace(e.FilePath) {
+		// Workspace relevance is a discovery heuristic; an explicit
+		// service_name is the caller stating precisely what it wants, so it
+		// bypasses this check. Without the bypass, a server process whose
+		// cwd isn't the indexed repo root (e.g. the Studio MCP bridge,
+		// spawned with cwd=bin/) drops every entry.
+		if explicitService == "" && e.FilePath != "" && !s.fileInWorkspace(e.FilePath) {
 			return
 		}
 		seen[e.NodeKey] = true
@@ -221,6 +323,11 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 				TierLabel:   label,
 				Source:      fillSource(m),
 				ServiceName: getStringFromRecord(m, "serviceName"),
+				NodeID:      getStringFromRecord(m, "nodeId"),
+				Label:       getStringFromRecord(m, "label"),
+				StartLine:   getIntFromRecord(m, "startLine"),
+				OutDegree:   getIntFromRecord(m, "outDegree"),
+				InDegree:    getIntFromRecord(m, "inDegree"),
 			})
 		}
 	}
@@ -237,26 +344,36 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       coalesce(r.detectionSource, r.protocol) AS source
+		       coalesce(r.detectionSource, r.protocol) AS source,
+		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree, COUNT { ()-[:CALLS]->(fn) } AS inDegree
 		ORDER BY fn.name`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") })
 
-	// Tier 2: Interface implementations with no callers.
+	// Tier 2: Interface implementations with no callers. Method-level
+	// IMPLEMENTS edges from SCIP relationship ingestion point at the abstract
+	// *member* (a Method contained by a File), not at an Interface node —
+	// Class→Interface is the only shape that targets :Interface directly. So
+	// the predicate is "fn implements anything", not "fn implements an
+	// :Interface".
 	runTier(2, "Interface impl", fmt.Sprintf(`
-		MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+		MATCH (fn)-[:IMPLEMENTS]->(abstract)
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.isTestFunction, false) = false
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  %s
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
-		WHERE caller:Function OR caller:Method
-		WITH fn, iface, count(caller) AS callerCount
+		WHERE (caller:Function OR caller:Method) AND caller <> fn
+		WITH fn, head(collect(abstract.name)) AS abstractName, count(caller) AS callerCount
 		WHERE callerCount = 0
 		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       iface.name AS source
+		       coalesce(abstractName, '') AS source,
+		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree,
+		       COUNT { (c)-[:CALLS]->(fn) WHERE c <> fn } AS inDegree
 		ORDER BY fn.name`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return "implements " + getStringFromRecord(m, "source") })
 
@@ -269,6 +386,7 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		  AND (fn.filePath IS NULL OR NOT fn.filePath ENDS WITH '_test.go')
 		  %s
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
+		WHERE caller <> fn
 		WITH fn, count(caller) AS callerCount
 		WHERE callerCount = 0
 		MATCH (fn)-[:CALLS]->(callee)
@@ -277,7 +395,10 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       toString(calleeCount) AS source
+		       toString(calleeCount) AS source,
+		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree,
+		       COUNT { (c)-[:CALLS]->(fn) WHERE c <> fn } AS inDegree
 		ORDER BY calleeCount DESC, fn.name
 		LIMIT 50`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return getStringFromRecord(m, "source") + " callees" })
@@ -296,7 +417,9 @@ func (s *CodeGraphMCPServer) handleEntryPointsToolV2(ctx context.Context, args m
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name,
 		       coalesce(fn.filePath, '') AS filePath,
 		       fn.serviceName AS serviceName,
-		       toString(round(fn.betweennessCentrality, 2)) AS source
+		       toString(round(fn.betweennessCentrality, 2)) AS source,
+		       elementId(fn) AS nodeId, labels(fn)[0] AS label, fn.startLine AS startLine,
+		       COUNT { (fn)-[:CALLS]->() } AS outDegree, COUNT { ()-[:CALLS]->(fn) } AS inDegree
 		ORDER BY fn.betweennessCentrality DESC LIMIT 30`, serviceFilterClause("fn")),
 		func(m map[string]interface{}) string { return "bc:" + getStringFromRecord(m, "source") })
 

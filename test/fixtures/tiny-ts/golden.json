@@ -149,6 +149,7 @@
         "inDegree": 1,
         "isExported": true,
         "isTestFunction": false,
+        "kindSource": "promotion",
         "name": "logOne",
         "nodeKey": "func:tinyts:src/nested.ts#scip-typescript npm tiny-ts 1.0.0 src/`nested.ts`/logOne.",
         "outDegree": 2,
@@ -1416,6 +1417,40 @@
     {
       "type": "CALLS",
       "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 8,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 7,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "CALLS",
+      "startLabels": [
         "Function"
       ],
       "startKey": "func:tinyts:src/index.ts#scip-typescript npm tiny-ts 1.0.0 src/`index.ts`/greet().",
@@ -2564,6 +2599,7 @@
       ],
       "endKey": "iface:scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -2579,6 +2615,7 @@
       ],
       "endKey": "method:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/Logger#log().",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -3047,6 +3084,40 @@
         "column": 8,
         "isDefinition": false,
         "line": 23,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "USES_VALUE",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/index.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "filePath": "src/index.ts",
+        "line": 1,
+        "scope": "main",
+        "scopeId": "main"
+      }
+    },
+    {
+      "type": "USES_VALUE",
+      "startLabels": [
+        "File"
+      ],
+      "startKey": "file:tinyts:src/nested.ts",
+      "endLabels": [
+        "Function"
+      ],
+      "endKey": "func:tinyts:src/logger.ts#scip-typescript npm tiny-ts 1.0.0 src/`logger.ts`/createLogger().",
+      "props": {
+        "filePath": "src/nested.ts",
+        "line": 1,
         "scope": "main",
         "scopeId": "main"
       }

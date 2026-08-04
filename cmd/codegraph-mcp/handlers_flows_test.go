@@ -12,6 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newFlowsTestClient connects to the shared dev Neo4j, skipping the test when
+// the database is unavailable. These handler tests are DB-backed and run
+// locally and in the integration environment, not in the unit-test CI job —
+// same skip convention as handlers_find_test.go and handlers_source_test.go.
+func newFlowsTestClient(t *testing.T) *neo4j.Client {
+	t.Helper()
+	client, err := neo4j.NewClient(neo4j.Config{
+		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
+		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
+		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+	})
+	if err != nil {
+		t.Skipf("Neo4j not available: %v", err)
+	}
+	if records, err := client.ExecuteQuery(context.Background(), "RETURN 1", nil); err != nil || len(records) == 0 {
+		t.Skipf("Neo4j not responding: %v", err)
+	}
+	return client
+}
+
 // setupFlowsTestDB creates a test flow graph for testing flows and entry_points tools.
 // Graph structure:
 //
@@ -21,13 +42,7 @@ import (
 //	Handler → FetchData (CALLS)
 //	FetchData → QueryDB (CALLS)
 func setupFlowsTestDB(t *testing.T) (*CodeGraphMCPServer, map[string]string, func()) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err, "failed to create Neo4j client")
+	client := newFlowsTestClient(t)
 
 	ctx := context.Background()
 
@@ -43,7 +58,7 @@ func setupFlowsTestDB(t *testing.T) (*CodeGraphMCPServer, map[string]string, fun
 		"scope":   "main",
 		"type":    "service",
 	}
-	_, err = client.MergeNode(ctx, []string{"Service"},
+	_, err := client.MergeNode(ctx, []string{"Service"},
 		map[string]interface{}{"nodeKey": serviceKey, "scopeId": "itest-flows-mcp"},
 		serviceProps)
 	require.NoError(t, err, "failed to create Service node")
@@ -256,13 +271,7 @@ func TestFlowsFromNodeByName(t *testing.T) {
 // TestFlowsFromNameAmbiguity returns candidates response when multiple nodes
 // match the same name.
 func TestFlowsFromNameAmbiguity(t *testing.T) {
-	client, err := neo4j.NewClient(neo4j.Config{
-		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
-		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
-		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
-		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
-	})
-	require.NoError(t, err)
+	client := newFlowsTestClient(t)
 	defer client.Close(context.Background())
 
 	ctx := context.Background()
@@ -326,7 +335,7 @@ func TestFlowsFromNameAmbiguity(t *testing.T) {
 	require.Len(t, response.Content, 1)
 
 	var result map[string]interface{}
-	err = json.Unmarshal([]byte(response.Content[0].Text), &result)
+	err := json.Unmarshal([]byte(response.Content[0].Text), &result)
 	require.NoError(t, err)
 
 	// Ambiguity response has "error" field set to "ambiguous"
@@ -432,4 +441,280 @@ func TestEntryPointsTier3TopologicalRoot(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "GetData (no callers, has callee) must be a tier-3 topological root, got: %v", entries)
+}
+
+// TestFlowsFromNode_DepthAndParentKey verifies that steps traced from a node
+// carry Depth (BFS distance from the entry) and ParentKey (spanning-tree
+// parent nodeKey), and that the entry step has Depth 0 and no ParentKey.
+func TestFlowsFromNode_DepthAndParentKey(t *testing.T) {
+	server, nodeIDs, cleanup := setupFlowsTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	response := server.handleFlowsToolV2(ctx, map[string]interface{}{
+		"from_name": "GetData",
+		"max_depth": float64(3),
+		"format":    "json",
+		"scope_id":  "itest-flows-mcp",
+		"persist":   false,
+	})
+
+	require.False(t, response.IsError, "flows from_name should succeed")
+	require.Len(t, response.Content, 1)
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &result))
+
+	flows := result["flows"].([]interface{})
+	require.Len(t, flows, 1)
+	steps := flows[0].(map[string]interface{})["steps"].([]interface{})
+	require.Len(t, steps, 3, "expected GetData -> FetchData -> QueryDB")
+
+	byName := make(map[string]map[string]interface{}, len(steps))
+	for _, s := range steps {
+		sm := s.(map[string]interface{})
+		byName[sm["name"].(string)] = sm
+	}
+
+	entry := byName["GetData"]
+	require.NotNil(t, entry)
+	assert.Equal(t, float64(0), entry["depth"], "entry step must have depth 0")
+	_, hasParent := entry["parentKey"]
+	assert.False(t, hasParent, "entry step must omit parentKey")
+
+	fetch := byName["FetchData"]
+	require.NotNil(t, fetch)
+	assert.Equal(t, float64(1), fetch["depth"], "FetchData is 1 hop from GetData")
+	assert.Equal(t, nodeIDs["GetData"], fetch["parentKey"], "FetchData's parent must be GetData")
+
+	queryStep := byName["QueryDB"]
+	require.NotNil(t, queryStep)
+	assert.Equal(t, float64(2), queryStep["depth"], "QueryDB is 2 hops from GetData")
+	assert.Equal(t, nodeIDs["FetchData"], queryStep["parentKey"], "QueryDB's parent must be FetchData")
+}
+
+// TestFlowsFromNode_EnrichmentFillsNodeIDAndFilePath verifies the
+// post-generation enrichment pass fills nodeId/filePath/startLine on steps
+// that resolve, and leaves them empty (rather than erroring) for steps whose
+// nodeKey doesn't resolve to a live node.
+func TestFlowsFromNode_EnrichmentFillsNodeIDAndFilePath(t *testing.T) {
+	server, _, cleanup := setupFlowsTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	response := server.handleFlowsToolV2(ctx, map[string]interface{}{
+		"from_name": "GetData",
+		"max_depth": float64(3),
+		"format":    "json",
+		"scope_id":  "itest-flows-mcp",
+		"persist":   false,
+	})
+
+	require.False(t, response.IsError)
+	require.Len(t, response.Content, 1)
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &result))
+
+	flows := result["flows"].([]interface{})
+	require.Len(t, flows, 1)
+	steps := flows[0].(map[string]interface{})["steps"].([]interface{})
+	require.Len(t, steps, 3)
+
+	for _, s := range steps {
+		sm := s.(map[string]interface{})
+		nodeID, _ := sm["nodeId"].(string)
+		filePath, _ := sm["filePath"].(string)
+		assert.NotEmpty(t, nodeID, "step %v should have nodeId filled by enrichment", sm["name"])
+		assert.NotEmpty(t, filePath, "step %v should have filePath filled by enrichment", sm["name"])
+	}
+}
+
+// TestFlowsFromNode_PersistFalseSkipsWrite verifies persist=false does not
+// MERGE a Flow node into the graph, while the default (persist omitted /
+// true) does — same call, only the flag differs.
+func TestFlowsFromNode_PersistFalseSkipsWrite(t *testing.T) {
+	server, _, cleanup := setupFlowsTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// persist=false: no Flow node should be written.
+	response := server.handleFlowsToolV2(ctx, map[string]interface{}{
+		"from_name": "GetData",
+		"max_depth": float64(2),
+		"format":    "json",
+		"scope_id":  "itest-flows-mcp",
+		"persist":   false,
+	})
+	require.False(t, response.IsError)
+
+	records, err := server.client.ExecuteQuery(ctx, `MATCH (f:Flow) WHERE f.scopeId = "itest-flows-mcp" RETURN count(f) AS c`, nil)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	count := records[0].AsMap()["c"].(int64)
+	assert.Equal(t, int64(0), count, "persist=false must not write a Flow node")
+
+	// Default (persist omitted): a Flow node should be written.
+	response = server.handleFlowsToolV2(ctx, map[string]interface{}{
+		"from_name": "GetData",
+		"max_depth": float64(2),
+		"format":    "json",
+		"scope_id":  "itest-flows-mcp",
+	})
+	require.False(t, response.IsError)
+
+	records, err = server.client.ExecuteQuery(ctx, `MATCH (f:Flow) WHERE f.scopeId = "itest-flows-mcp" RETURN count(f) AS c`, nil)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	count = records[0].AsMap()["c"].(int64)
+	assert.Equal(t, int64(1), count, "default persist=true must write exactly one Flow node")
+}
+
+// TestFlows_EmptyResultReturnsValidJSON verifies format=json with zero flows
+// returns a parseable {"flow_count":0,"flows":[]} body instead of the
+// plain-text sentence used for format=text, which would break a JSON parser
+// on the Studio side.
+func TestFlows_EmptyResultReturnsValidJSON(t *testing.T) {
+	client := newFlowsTestClient(t)
+	defer client.Close(context.Background())
+
+	ctx := context.Background()
+	// Empty, never-used scope: guaranteed to produce zero discovery-mode flows.
+	scopeID := "itest-flows-empty-scope-does-not-exist"
+	_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID})
+	// Discovery over a PR-style scope falls back to main-scope functions by
+	// design, so this handler call persists Flow nodes stamped with scopeID
+	// even though the response reports zero — without this cleanup every run
+	// leaked ~35 Flow nodes into the dev graph (caught by the post-index
+	// scope-hygiene integrity check). Fresh client: the outer one is
+	// defer-closed before t.Cleanup callbacks fire.
+	t.Cleanup(func() {
+		cctx := context.Background()
+		cclient, err := neo4j.NewClient(neo4j.Config{
+			URI: getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"), Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+			Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"), Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+		})
+		if err != nil {
+			t.Errorf("cleanup: connect: %v", err)
+			return
+		}
+		defer cclient.Close(cctx)
+		if _, err := cclient.ExecuteQuery(cctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID}); err != nil {
+			t.Errorf("cleanup failed (leaks %s residue): %v", scopeID, err)
+		}
+	})
+
+	workspaceRoot, _ := os.Getwd()
+	server := &CodeGraphMCPServer{
+		client:        client,
+		queryBuilder:  neo4j.NewQueryBuilder(client),
+		workspaceRoot: workspaceRoot,
+	}
+
+	response := server.handleFlowsToolV2(ctx, map[string]interface{}{
+		"scope_id": scopeID,
+		"format":   "json",
+	})
+
+	require.False(t, response.IsError)
+	require.Len(t, response.Content, 1)
+
+	var result map[string]interface{}
+	err := json.Unmarshal([]byte(response.Content[0].Text), &result)
+	require.NoError(t, err, "format=json with zero flows must be valid JSON, got: %s", response.Content[0].Text)
+
+	assert.Equal(t, float64(0), result["flow_count"])
+	flows, ok := result["flows"].([]interface{})
+	require.True(t, ok, "flows field must be a JSON array even when empty")
+	assert.Len(t, flows, 0)
+}
+
+// TestEntryPoints_ServiceNameBypassesWorkspaceFilter verifies that passing an
+// explicit service_name returns entries even when the server's workspaceRoot
+// doesn't contain the indexed files — the scenario hit by the Studio MCP
+// bridge, which spawns codegraph-mcp with cwd=bin/.
+func TestEntryPoints_ServiceNameBypassesWorkspaceFilter(t *testing.T) {
+	client := newFlowsTestClient(t)
+	defer client.Close(context.Background())
+
+	ctx := context.Background()
+	scopeID := "itest-flows-cwd-bypass"
+	_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID})
+	t.Cleanup(func() {
+		cctx := context.Background()
+		cclient, err := neo4j.NewClient(neo4j.Config{
+			URI: getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"), Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+			Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"), Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+		})
+		if err != nil {
+			t.Errorf("cleanup: connect: %v", err)
+			return
+		}
+		defer cclient.Close(cctx)
+		if _, err := cclient.ExecuteQuery(cctx, `MATCH (n) WHERE n.scopeId = $scopeId DETACH DELETE n`, map[string]interface{}{"scopeId": scopeID}); err != nil {
+			t.Errorf("cleanup failed: %v", err)
+		}
+	})
+
+	routeKey := "route:GET:/api/bypass"
+	handlerKey := "func:bypass.go#Bypass"
+	_, err := client.MergeNode(ctx, []string{"APIRoute"},
+		map[string]interface{}{"nodeKey": routeKey, "scopeId": scopeID},
+		map[string]interface{}{"nodeKey": routeKey, "name": "GET /api/bypass", "method": "GET", "path": "/api/bypass", "scopeId": scopeID, "scope": "main"})
+	require.NoError(t, err)
+	_, err = client.MergeNode(ctx, []string{"Function"}, map[string]interface{}{"nodeKey": handlerKey, "scopeId": scopeID},
+		map[string]interface{}{
+			"nodeKey": handlerKey, "name": "Bypass", "scopeId": scopeID, "scope": "main",
+			"serviceName": "bypass-svc", "filePath": "bypass.go", "isExported": true, "isTestFunction": false,
+		})
+	require.NoError(t, err)
+	err = client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (h:Function {nodeKey: $handlerKey, scopeId: $scopeId})
+		MATCH (r:APIRoute {nodeKey: $routeKey, scopeId: $scopeId})
+		MERGE (h)-[rel:EXPOSES_API]->(r)
+		SET rel.scope = $scope, rel.scopeId = $scopeId`, map[string]interface{}{
+		"handlerKey": handlerKey, "routeKey": routeKey, "scopeId": scopeID, "scope": "main",
+	})
+	require.NoError(t, err)
+
+	// workspaceRoot deliberately does NOT contain bypass.go (an empty temp
+	// dir), simulating the MCP server spawned with a cwd that has nothing to
+	// do with the indexed repo.
+	server := &CodeGraphMCPServer{
+		client:        client,
+		queryBuilder:  neo4j.NewQueryBuilder(client),
+		workspaceRoot: t.TempDir(),
+	}
+
+	// Without service_name: workspace filtering drops the entry (file isn't
+	// under workspaceRoot).
+	noScope := server.handleEntryPointsToolV2(ctx, map[string]interface{}{
+		"scope_id": scopeID,
+		"format":   "json",
+	})
+	require.False(t, noScope.IsError)
+	var noScopeResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(noScope.Content[0].Text), &noScopeResult))
+	noScopeEntries := noScopeResult["entries"].([]interface{})
+	assert.Len(t, noScopeEntries, 0, "without service_name, workspace filtering should drop the out-of-workspace entry")
+
+	// With service_name: bypasses the workspace check, entry comes back.
+	withScope := server.handleEntryPointsToolV2(ctx, map[string]interface{}{
+		"scope_id":     scopeID,
+		"service_name": "bypass-svc",
+		"format":       "json",
+	})
+	require.False(t, withScope.IsError)
+	var withScopeResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(withScope.Content[0].Text), &withScopeResult))
+	withScopeEntries := withScopeResult["entries"].([]interface{})
+	require.Len(t, withScopeEntries, 1, "explicit service_name must bypass workspace-cwd filtering")
+
+	entry := withScopeEntries[0].(map[string]interface{})
+	assert.Equal(t, "Bypass", entry["name"])
+	assert.NotEmpty(t, entry["node_id"], "entry should carry node_id (elementId)")
+	assert.Equal(t, "Function", entry["label"])
 }

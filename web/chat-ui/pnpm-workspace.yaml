@@ -1,0 +1,7 @@
+# Dependency build-script approvals (pnpm reads these from here, not
+# package.json). Without them, CI installs fail with ERR_PNPM_IGNORED_BUILDS:
+# esbuild's postinstall links its platform binary; svelte-preprocess (via
+# svelte-check 3.x) runs a trivial prepare script.
+allowBuilds:
+  esbuild: true
+  svelte-preprocess: true

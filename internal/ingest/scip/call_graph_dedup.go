@@ -25,16 +25,24 @@ type minLineEdge struct {
 // call sites). Picking the minimum line is deterministic regardless of
 // input order and matches "the first call site in the file".
 //
-// Self-calls (CallerID == TargetID) are dropped. Pure function, no I/O —
-// testable without Neo4j.
+// Self-calls (CallerID == TargetID, i.e. recursion) are KEPT as real CALLS
+// edges — dropping them (the pre-RFC-013 behavior) made every recursive
+// function structurally indistinguishable from an uncalled one to any
+// downstream "has a caller" / "no incoming CALLS" consumer, silently
+// hiding real self-recursive edges from the graph. Callers that treat
+// "has an incoming CALLS edge" as "is used/reachable" must exclude
+// self-edges explicitly at the point of interpretation (a recursive
+// function with no EXTERNAL caller is still unreachable/dead) — see
+// internal/ingest/scip's scipDegreeQuery/genericDegreeQuery, which exclude
+// self-loops from the stored inDegree/outDegree properties, alongside
+// this change.
+//
+// Pure function, no I/O — testable without Neo4j.
 func collapseToMinLinePerPair(triples []minLineEdge) []minLineEdge {
 	edges := make(map[string]*minLineEdge, len(triples))
 	order := make([]string, 0, len(triples))
 
 	for _, t := range triples {
-		if t.CallerID == t.TargetID {
-			continue
-		}
 		key := t.CallerID + "->" + t.TargetID
 		if existing, ok := edges[key]; ok {
 			if t.Line < existing.Line {

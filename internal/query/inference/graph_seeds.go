@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 
 	neo4j "github.com/context-maximiser/code-graph/internal/graph"
@@ -42,9 +43,11 @@ type GraphSeed struct {
 // signals — zero name heuristics. It queries the graph for API endpoints,
 // interface implementations, topological roots, and high-centrality nodes.
 type GraphSeedFinder struct {
-	client   *neo4j.Client
-	scopeCtx models.ScopeContext
-	budget   TraversalBudget
+	client        *neo4j.Client
+	scopeCtx      models.ScopeContext
+	budget        TraversalBudget
+	serviceNames  []string
+	servicePrefix string
 
 	// CentralityThreshold is the minimum betweennessCentrality to qualify
 	// as a Tier 4 seed. Zero means use automatic threshold (mean + 1 stddev).
@@ -69,6 +72,33 @@ func (f *GraphSeedFinder) SetScope(scope models.ScopeContext) {
 func (f *GraphSeedFinder) SetBudget(budget TraversalBudget) {
 	f.budget = budget
 }
+
+// SetServiceFilter restricts seed detection to functions whose serviceName is
+// in names (exact) or starts with prefix. Filtering must happen inside the
+// tier queries — FindSeeds caps results to budget.MaxSteps, and a global cap
+// applied before service filtering starves small services out of the seed set
+// entirely (their tier-3 seeds lose the priority sort to the big services'
+// tier-1 seeds).
+func (f *GraphSeedFinder) SetServiceFilter(names []string, prefix string) {
+	f.serviceNames = append([]string{}, names...)
+	f.servicePrefix = prefix
+}
+
+// serviceParams returns the base query params including service constraints.
+func (f *GraphSeedFinder) serviceParams(extra map[string]any) map[string]any {
+	params := map[string]any{
+		"scopeId":       f.scopeCtx.ScopeID,
+		"serviceNames":  f.serviceNames,
+		"servicePrefix": f.servicePrefix,
+	}
+	maps.Copy(params, extra)
+	return params
+}
+
+// serviceClause is the WHERE-clause fragment enforcing the service filter on fn.
+const serviceClause = `
+		  AND (size($serviceNames) = 0 OR fn.serviceName IN $serviceNames)
+		  AND ($servicePrefix = '' OR fn.serviceName STARTS WITH $servicePrefix)`
 
 // FindSeeds queries the graph across all four tiers, deduplicates by nodeKey
 // (higher tier wins), and returns seeds sorted by priority descending.
@@ -141,6 +171,9 @@ func (f *GraphSeedFinder) FindSeeds(ctx context.Context) ([]GraphSeed, error) {
 // Sub-priority within Tier 1 is based on detection confidence:
 //   - Both external-params + cross-pkg: priority 100
 //   - External-params only: priority 95
+//   - Decorator-detected (RFC-005: NestJS @Get/@Post/etc. routes SCIP can't
+//     see via CALLS edges): priority 95 — a definitive framework signal,
+//     comparable confidence to explicit external-params typing
 //   - Cross-pkg only: priority 90
 //   - Legacy framework-detected: priority 85
 func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed, error) {
@@ -149,16 +182,14 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND (route.scopeId = $scopeId OR route.scopeId = 'main')
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.hasExternalParams, false) AS hasExternal,
 		       coalesce(fn.isCrossPkgTarget, false) AS isCrossPkg,
 		       coalesce(route.detectionSource, '') AS detectionSource
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -174,17 +205,8 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 
 		hasExternal, _ := m["hasExternal"].(bool)
 		isCrossPkg, _ := m["isCrossPkg"].(bool)
-
-		// Sub-priority based on detection confidence.
-		priority := 85 // legacy framework-detected fallback
-		switch {
-		case hasExternal && isCrossPkg:
-			priority = 100
-		case hasExternal:
-			priority = 95
-		case isCrossPkg:
-			priority = 90
-		}
+		detectionSource := strValMap(m, "detectionSource")
+		priority := apiExposedPriority(hasExternal, isCrossPkg, detectionSource)
 
 		seeds = append(seeds, GraphSeed{
 			NodeKey:  nodeKey,
@@ -198,22 +220,48 @@ func (f *GraphSeedFinder) findAPIExposedSeeds(ctx context.Context) ([]GraphSeed,
 	return seeds, nil
 }
 
+// apiExposedPriority computes the Tier 1 sub-priority for one EXPOSES_API
+// seed from its detection signals:
+//   - Both external-params + cross-pkg: 100
+//   - External-params only: 95
+//   - Decorator-detected (RFC-005): 95 — a definitive framework signal
+//     (NestJS @Get/@Post/etc.), comparable confidence to explicit
+//     external-params typing, ranked above the bare cross-pkg-target
+//     heuristic
+//   - Cross-pkg only: 90
+//   - None of the above (legacy framework-detected route synthesis): 85
+//
+// Pure function, no I/O — testable without Neo4j.
+func apiExposedPriority(hasExternal, isCrossPkg bool, detectionSource string) int {
+	switch {
+	case hasExternal && isCrossPkg:
+		return 100
+	case hasExternal:
+		return 95
+	case isCrossPkg:
+		return 90
+	case detectionSource == "decorator":
+		return 95
+	}
+	return 85
+}
+
 // findInterfaceImplSeeds returns functions/methods that implement an interface
 // and have inDegree = 0 (no callers). These are likely dependency-injected
-// entry points.
+// entry points. Method-level IMPLEMENTS edges target the abstract *member*
+// (a Method node), not an :Interface node — only Class→Interface edges do —
+// so the predicate is "implements anything", matching the entry_points tool.
 func (f *GraphSeedFinder) findInterfaceImplSeeds(ctx context.Context) ([]GraphSeed, error) {
 	cypher := `
-		MATCH (fn)-[:IMPLEMENTS]->(iface:Interface)
+		MATCH (fn)-[:IMPLEMENTS]->()
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND coalesce(fn.inDegree, 0) = 0
-		  AND coalesce(fn.isTestFunction, false) = false
-		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
+		RETURN DISTINCT fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -250,14 +298,12 @@ func (f *GraphSeedFinder) findTopologicalRootSeeds(ctx context.Context) ([]Graph
 		  AND coalesce(fn.isExported, false) = true
 		  AND coalesce(fn.inDegree, 0) = 0
 		  AND coalesce(fn.outDegree, 0) > 0
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		RETURN fn.nodeKey AS nodeKey, fn.name AS name, labels(fn) AS labels,
 		       coalesce(fn.outDegree, 0) AS outDegree
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId": f.scopeCtx.ScopeID,
-	})
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(nil))
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +359,7 @@ func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed,
 		WHERE (fn:Function OR fn:Method)
 		  AND (fn.scopeId = $scopeId OR fn.scopeId = 'main')
 		  AND fn.betweennessCentrality > $threshold
-		  AND coalesce(fn.isTestFunction, false) = false
+		  AND coalesce(fn.isTestFunction, false) = false` + serviceClause + `
 		OPTIONAL MATCH (caller)-[:CALLS]->(fn)
 		WHERE (caller:Function OR caller:Method)
 		  AND caller.betweennessCentrality > fn.betweennessCentrality
@@ -325,10 +371,9 @@ func (f *GraphSeedFinder) findCentralitySeeds(ctx context.Context) ([]GraphSeed,
 		ORDER BY bc DESC
 	`
 
-	records, err := f.client.ExecuteQuery(ctx, cypher, map[string]any{
-		"scopeId":   f.scopeCtx.ScopeID,
+	records, err := f.client.ExecuteQuery(ctx, cypher, f.serviceParams(map[string]any{
 		"threshold": threshold,
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}

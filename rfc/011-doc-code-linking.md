@@ -303,6 +303,11 @@ what was skipped — resumable by re-running.
 
 ### 5.3 Provider contract (`internal/llm`)
 
+> **Vendor decision (2026-07-30):** OpenAI `text-embedding-3-small` (1536d,
+> threshold 0.55) is the chosen production embedder, formalizing what the
+> dev graph has been running since implementation. The provider stays
+> pluggable; revisit only if link quality becomes a measured complaint.
+
 The vendor decision is deferred to configuration; the design commits only to:
 
 ```go

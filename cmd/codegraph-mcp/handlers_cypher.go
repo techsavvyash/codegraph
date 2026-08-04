@@ -15,7 +15,11 @@ import (
 // in depth — ExecuteRead also rejects writes at the driver level. Keyword
 // matches inside string literals will produce false positives; users hitting
 // those should rephrase. Comments are stripped before matching.
-var writeKeywordRegex = regexp.MustCompile(`(?i)\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|CALL\s+\{[^}]*\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP)\b)`)
+//
+// Each leading alternative is bounded on both sides (\b...\b) so identifiers
+// that merely start with a keyword — e.g. a property/alias named createdAt —
+// don't false-positive; only CREATE/SET/etc. as a standalone word does.
+var writeKeywordRegex = regexp.MustCompile(`(?i)\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV)\b|\bCALL\s+\{[^}]*\b(?:CREATE|MERGE|DELETE|SET|REMOVE|DROP)\b`)
 
 // stripCypherComments removes // line and /* block */ comments from a query
 // to reduce false negatives in keyword detection.
@@ -222,6 +226,10 @@ type pathEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Type string `json:"type"`
+	// Provenance (RFC-011 I4): present on inferred edges (e.g. MENTIONS) so
+	// surfaces can distinguish them from structural facts. Mirrors expandEdge.
+	Strategy   string  `json:"strategy,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 type pathResult struct {

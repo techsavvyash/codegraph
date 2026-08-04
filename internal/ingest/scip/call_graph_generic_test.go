@@ -34,8 +34,8 @@ func TestResolveGenericCallEdgesDeterministicMinLine(t *testing.T) {
 		{line: 15, targetID: "greet"},
 	}
 
-	edgesA := resolveGenericCallEdges(refsLine15First, funcs)
-	edgesB := resolveGenericCallEdges(refsLine10First, funcs)
+	edgesA, _ := resolveGenericCallEdges(refsLine15First, funcs, nil, "")
+	edgesB, _ := resolveGenericCallEdges(refsLine10First, funcs, nil, "")
 
 	for name, edges := range map[string][]genericCallEdge{"line15First": edgesA, "line10First": edgesB} {
 		if len(edges) != 1 {
@@ -56,11 +56,13 @@ func TestResolveGenericCallEdgesDeterministicMinLine(t *testing.T) {
 	}
 }
 
-// TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers verifies
-// the two skip conditions carried over from the original inline loop: a
-// reference with no enclosing caller is dropped, and a caller calling itself
-// (recursion) does not produce a self-loop edge.
-func TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.T) {
+// TestResolveGenericCallEdgesKeepsSelfCallsDropsUnresolvedCallers verifies a
+// reference with no enclosing caller is dropped, while a caller calling
+// itself (recursion) DOES produce a self-loop edge — shared
+// collapseToMinLinePerPair behavior with the Go builder, fixed together
+// under RFC-013 (the oracle found 0 self-loop CALLS edges anywhere in the
+// live graph, Go or otherwise).
+func TestResolveGenericCallEdgesKeepsSelfCallsDropsUnresolvedCallers(t *testing.T) {
 	funcs := []genericFuncInfo{
 		{ID: "main", StartLine: 1, EndLine: 10},
 	}
@@ -69,9 +71,12 @@ func TestResolveGenericCallEdgesIgnoresSelfCallsAndUnresolvedCallers(t *testing.
 		{line: 100, targetID: "helper"}, // line 100 has no enclosing caller
 	}
 
-	edges := resolveGenericCallEdges(refs, funcs)
-	if len(edges) != 0 {
-		t.Fatalf("expected 0 edges (self-call and unresolved-caller rows both dropped), got %d: %+v", len(edges), edges)
+	edges, _ := resolveGenericCallEdges(refs, funcs, nil, "")
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge (the self-call survives, the unresolved-caller row is dropped), got %d: %+v", len(edges), edges)
+	}
+	if edges[0].CallerID != "main" || edges[0].TargetID != "main" || edges[0].Line != 5 {
+		t.Errorf("unexpected self-call edge: %+v", edges[0])
 	}
 }
 
@@ -90,7 +95,7 @@ func TestResolveGenericCallEdgesMultipleDistinctPairs(t *testing.T) {
 		{line: 45, targetID: "greet"}, // different caller (helper), same target
 	}
 
-	edges := resolveGenericCallEdges(refs, funcs)
+	edges, _ := resolveGenericCallEdges(refs, funcs, nil, "")
 	if len(edges) != 2 {
 		t.Fatalf("expected 2 distinct edges, got %d: %+v", len(edges), edges)
 	}
@@ -198,6 +203,112 @@ func TestGenericDegreeQueryServiceScoped(t *testing.T) {
 	}
 	if params["scopeId"] != "main" {
 		t.Errorf("params[scopeId] = %v, want %q", params["scopeId"], "main")
+	}
+}
+
+// TestApplyDecorators locks decorator resolution: a function's own
+// decorators and its enclosing class's decorators are read from the SAME
+// tree-sitter structure used for range resolution, keyed off the same SCIP
+// identifier position, and encoded as "Name" / "Name:arg" strings.
+func TestApplyDecorators(t *testing.T) {
+	src := `@Controller('users')
+class UsersController {
+  @Get() findAll() {}
+  @Get(':id') findOne() {}
+}
+
+class Plain {
+  plainMethod() {}
+}
+`
+	lang, ok := structure.ForFile("x.ts")
+	if !ok {
+		t.Fatal("typescript grammar not wired")
+	}
+	fs, err := structure.Extract(lang, []byte(src))
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	// SCIP identifier positions for findAll, findOne, plainMethod.
+	funcs := []genericFuncInfo{
+		{ID: "findAll", StartLine: 3, StartCol: 9},
+		{ID: "findOne", StartLine: 4, StartCol: 14},
+		{ID: "plainMethod", StartLine: 8, StartCol: 2},
+	}
+	applyDecorators(funcs, fs)
+
+	byID := make(map[string]genericFuncInfo, len(funcs))
+	for _, f := range funcs {
+		byID[f.ID] = f
+	}
+
+	if got := byID["findAll"].Decorators; len(got) != 1 || got[0] != "Get" {
+		t.Errorf("findAll.Decorators = %v, want [Get]", got)
+	}
+	if got := byID["findAll"].ClassDecorators; len(got) != 1 || got[0] != "Controller:users" {
+		t.Errorf("findAll.ClassDecorators = %v, want [Controller:users]", got)
+	}
+
+	if got := byID["findOne"].Decorators; len(got) != 1 || got[0] != "Get::id" {
+		t.Errorf("findOne.Decorators = %v, want [Get::id]", got)
+	}
+	if got := byID["findOne"].ClassDecorators; len(got) != 1 || got[0] != "Controller:users" {
+		t.Errorf("findOne.ClassDecorators = %v, want [Controller:users]", got)
+	}
+
+	if got := byID["plainMethod"].Decorators; got != nil {
+		t.Errorf("plainMethod.Decorators = %v, want nil", got)
+	}
+	if got := byID["plainMethod"].ClassDecorators; got != nil {
+		t.Errorf("plainMethod.ClassDecorators (Plain has no class decorator) = %v, want nil", got)
+	}
+}
+
+// TestApplyDecoratorsNilStructure: no grammar / unreadable file — decorators
+// stay nil, mirroring applyStructureRanges' nil-structure fallback.
+func TestApplyDecoratorsNilStructure(t *testing.T) {
+	funcs := []genericFuncInfo{{ID: "a", StartLine: 7, StartCol: 2}}
+	applyDecorators(funcs, nil)
+	if funcs[0].Decorators != nil || funcs[0].ClassDecorators != nil {
+		t.Errorf("nil structure must leave decorators nil, got %+v", funcs[0])
+	}
+}
+
+// TestEncodeDecorators locks the "Name" / "Name:arg" encoding, including the
+// documented limitation that ':' inside an arg is not escaped.
+func TestEncodeDecorators(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []structure.DecoratorInfo
+		want []string
+	}{
+		{"empty", nil, nil},
+		{"no-arg", []structure.DecoratorInfo{{Name: "Injectable"}}, []string{"Injectable"}},
+		{"with-arg", []structure.DecoratorInfo{{Name: "Get", Arg: "id"}}, []string{"Get:id"}},
+		{
+			"multiple",
+			[]structure.DecoratorInfo{{Name: "UseGuards"}, {Name: "Post", Arg: "create"}},
+			[]string{"UseGuards", "Post:create"},
+		},
+		{
+			"arg contains colon (known limitation, not escaped)",
+			[]structure.DecoratorInfo{{Name: "Cron", Arg: "0 0 * * *"}},
+			[]string{"Cron:0 0 * * *"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := encodeDecorators(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("encodeDecorators(%+v) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("encodeDecorators(%+v)[%d] = %q, want %q", tt.in, i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 

@@ -66,6 +66,47 @@ func TestGraphSeedDedup(t *testing.T) {
 	}
 }
 
+// TestApiExposedPriority locks the Tier 1 sub-priority ordering, including
+// the RFC-005 decorator-detection case: a decorator-routed handler (NestJS
+// @Get/@Post/etc., which SCIP can't see via CALLS edges) must rank at 95,
+// the same as external-params detection and above the bare cross-pkg
+// heuristic (90), since decorator syntax is an equally definitive framework
+// signal.
+func TestApiExposedPriority(t *testing.T) {
+	tests := []struct {
+		name            string
+		hasExternal     bool
+		isCrossPkg      bool
+		detectionSource string
+		want            int
+	}{
+		{"external + cross-pkg", true, true, "", 100},
+		{"external only", true, false, "", 95},
+		{"decorator detected", false, false, "decorator", 95},
+		{"cross-pkg only", false, true, "", 90},
+		{"decorator detected but also cross-pkg (cross-pkg case wins, both are structural)", false, true, "decorator", 90},
+		{"none (legacy framework fallback)", false, false, "", 85},
+		{"unrecognized detectionSource", false, false, "cross_pkg", 85},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := apiExposedPriority(tt.hasExternal, tt.isCrossPkg, tt.detectionSource)
+			if got != tt.want {
+				t.Errorf("apiExposedPriority(%v, %v, %q) = %d, want %d",
+					tt.hasExternal, tt.isCrossPkg, tt.detectionSource, got, tt.want)
+			}
+		})
+	}
+
+	// Decorator detection must never be beaten by the legacy fallback, and
+	// must rank strictly above bare cross-pkg detection.
+	decoratorPriority := apiExposedPriority(false, false, "decorator")
+	crossPkgPriority := apiExposedPriority(false, true, "")
+	if decoratorPriority <= crossPkgPriority {
+		t.Errorf("decorator priority (%d) must exceed cross-pkg-only priority (%d)", decoratorPriority, crossPkgPriority)
+	}
+}
+
 func TestLabelType(t *testing.T) {
 	tests := []struct {
 		name   string

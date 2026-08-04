@@ -9,6 +9,7 @@ import (
 	graphclient "github.com/context-maximiser/code-graph/internal/graph"
 	models "github.com/context-maximiser/code-graph/internal/model"
 	"github.com/context-maximiser/code-graph/internal/query"
+	"github.com/context-maximiser/code-graph/internal/query/inference"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
@@ -198,6 +199,138 @@ func TestFlowSpineGenerator_GenerateFromAPIEndpoints_KnownPositive(t *testing.T)
 	}
 }
 
+// TestFlowSpineGenerator_TraceCallees_TreeConsistency creates a seed with
+// more callees at distance 1 than the fanout budget allows, and callees of
+// callees at distance 2. It verifies traceCallees (invoked via
+// GenerateFlowFromNode) drops distance-2 steps whose ParentKey names a
+// distance-1 node that got capped out by the fanout limit — the "child of a
+// fanout-capped parent" case called out in the RFC-005 brief. It also checks
+// Depth/ParentKey are populated correctly for the surviving steps.
+func TestFlowSpineGenerator_TraceCallees_TreeConsistency(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client := createTestGraphClient(t)
+	scopeID := "itest-flows-tree-consistency"
+	defer cleanupTestData(t, ctx, client, scopeID)
+
+	seedKey := "func:seed.go#Seed"
+	_, err := client.MergeNode(ctx, []string{"Function"},
+		map[string]interface{}{"nodeKey": seedKey, "scopeId": scopeID},
+		map[string]interface{}{"nodeKey": seedKey, "name": "Seed", "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+	if err != nil {
+		t.Fatalf("failed to create seed: %v", err)
+	}
+
+	// Three distance-1 callees, named so alphabetical ORDER BY (the traceCallees
+	// query's tiebreaker) makes AChild/BChild survive a fanout cap of 2 and
+	// CChild get dropped.
+	distance1 := []string{"AChild", "BChild", "CChild"}
+	for _, name := range distance1 {
+		key := "func:child.go#" + name
+		_, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": key, "scopeId": scopeID},
+			map[string]interface{}{"nodeKey": key, "name": name, "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+		if err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+		if err := client.ExecuteQueryWithoutRecords(ctx, `
+			MATCH (s:Function {nodeKey: $seedKey, scopeId: $scopeId})
+			MATCH (c:Function {nodeKey: $childKey, scopeId: $scopeId})
+			MERGE (s)-[r:CALLS]->(c)
+			SET r.scope = $scope, r.scopeId = $scopeId`, map[string]interface{}{
+			"seedKey": seedKey, "childKey": key, "scopeId": scopeID, "scope": "main",
+		}); err != nil {
+			t.Fatalf("failed to create CALLS seed->%s: %v", name, err)
+		}
+	}
+
+	// A distance-2 grandchild under the callee that WILL be pruned (CChild)
+	// and one under a callee that WILL survive (AChild).
+	orphanKey := "func:grandchild.go#OrphanGrandchild"
+	survivorKey := "func:grandchild.go#SurvivorGrandchild"
+	for parentName, gcKey := range map[string]string{"CChild": orphanKey, "AChild": survivorKey} {
+		parentKey := "func:child.go#" + parentName
+		gcName := "OrphanGrandchild"
+		if gcKey == survivorKey {
+			gcName = "SurvivorGrandchild"
+		}
+		_, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": gcKey, "scopeId": scopeID},
+			map[string]interface{}{"nodeKey": gcKey, "name": gcName, "scopeId": scopeID, "scope": "main", "serviceName": "svc"})
+		if err != nil {
+			t.Fatalf("failed to create %s: %v", gcName, err)
+		}
+		if err := client.ExecuteQueryWithoutRecords(ctx, `
+			MATCH (p:Function {nodeKey: $parentKey, scopeId: $scopeId})
+			MATCH (c:Function {nodeKey: $childKey, scopeId: $scopeId})
+			MERGE (p)-[r:CALLS]->(c)
+			SET r.scope = $scope, r.scopeId = $scopeId`, map[string]interface{}{
+			"parentKey": parentKey, "childKey": gcKey, "scopeId": scopeID, "scope": "main",
+		}); err != nil {
+			t.Fatalf("failed to create CALLS %s->%s: %v", parentName, gcName, err)
+		}
+	}
+
+	gen := query.NewFlowSpineGenerator(client)
+	gen.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	gen.SetBudget(inference.TraversalBudget{MaxDepth: 5, MaxFanout: 2, MaxSteps: 50})
+	gen.SetPersist(false)
+
+	flows, err := gen.GenerateFlowFromNode(ctx, seedKey, "Seed", "Function", 3)
+	if err != nil {
+		t.Fatalf("GenerateFlowFromNode failed: %v", err)
+	}
+	if len(flows) != 1 {
+		t.Fatalf("expected 1 flow, got %d", len(flows))
+	}
+
+	byName := make(map[string]query.FlowStep)
+	for _, s := range flows[0].Steps {
+		byName[s.Name] = s
+	}
+
+	if _, ok := byName["CChild"]; ok {
+		t.Errorf("CChild should have been dropped by the fanout cap (budget=2, 3 distance-1 candidates), got steps: %+v", flows[0].Steps)
+	}
+	if _, ok := byName["OrphanGrandchild"]; ok {
+		t.Errorf("OrphanGrandchild's parent (CChild) was fanout-capped; it must be dropped too (tree consistency), got steps: %+v", flows[0].Steps)
+	}
+
+	aChild, ok := byName["AChild"]
+	if !ok {
+		t.Fatalf("AChild should have survived the fanout cap, got steps: %+v", flows[0].Steps)
+	}
+	if aChild.Depth != 1 {
+		t.Errorf("expected AChild Depth 1, got %d", aChild.Depth)
+	}
+	if aChild.ParentKey != seedKey {
+		t.Errorf("expected AChild ParentKey %s, got %s", seedKey, aChild.ParentKey)
+	}
+
+	survivor, ok := byName["SurvivorGrandchild"]
+	if !ok {
+		t.Fatalf("SurvivorGrandchild (child of surviving AChild) should be present, got steps: %+v", flows[0].Steps)
+	}
+	if survivor.Depth != 2 {
+		t.Errorf("expected SurvivorGrandchild Depth 2, got %d", survivor.Depth)
+	}
+	if survivor.ParentKey != "func:child.go#AChild" {
+		t.Errorf("expected SurvivorGrandchild ParentKey func:child.go#AChild, got %s", survivor.ParentKey)
+	}
+
+	seed, ok := byName["Seed"]
+	if !ok {
+		t.Fatalf("Seed entry step missing, got steps: %+v", flows[0].Steps)
+	}
+	if seed.Depth != 0 {
+		t.Errorf("expected Seed (entry) Depth 0, got %d", seed.Depth)
+	}
+	if seed.ParentKey != "" {
+		t.Errorf("expected Seed (entry) ParentKey empty, got %q", seed.ParentKey)
+	}
+}
+
 // planHasOperator recursively searches a typed driver query plan for an
 // operator whose type contains the given name (operator types come suffixed,
 // e.g. "AllNodesScan@neo4j", so substring match is required).
@@ -377,5 +510,166 @@ func cleanupTestData(t *testing.T, ctx context.Context, client *graphclient.Clie
 	})
 	if err != nil {
 		t.Logf("cleanup failed for scopeId %s: %v", scopeID, err)
+	}
+}
+
+// TestGraphSeedFinder_ServiceFilterBeatsGlobalCap reproduces the seed-starvation
+// bug: FindSeeds caps results to budget.MaxSteps AFTER the priority sort, so
+// without in-query service filtering a small service's tier-3 seeds lose the
+// cut to other services' tier-1 seeds and the service indexes with zero flows.
+// With SetServiceFilter the cap must apply within the requested service.
+func TestGraphSeedFinder_ServiceFilterBeatsGlobalCap(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const scopeID = "itest-seed-starvation"
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, scopeID)
+	}()
+
+	mergeFn := func(nodeKey string, props map[string]interface{}) {
+		t.Helper()
+		props["nodeKey"] = nodeKey
+		props["scopeId"] = scopeID
+		props["scope"] = "main"
+		if _, err := client.MergeNode(ctx, []string{"Function"},
+			map[string]interface{}{"nodeKey": nodeKey, "scopeId": scopeID}, props); err != nil {
+			t.Fatalf("failed to merge %s: %v", nodeKey, err)
+		}
+	}
+
+	// "Big" service: a tier-1 seed (EXPOSES_API handler, priority >= 85).
+	bigHandlerKey := "func:itest-big/handler.go#Handle"
+	mergeFn(bigHandlerKey, map[string]interface{}{
+		"name": "Handle", "serviceName": "itest-svc-big", "filePath": "itest-big/handler.go",
+	})
+	routeKey := "api:itest:GET:/itest"
+	if _, err := client.MergeNode(ctx, []string{"APIRoute"},
+		map[string]interface{}{"nodeKey": routeKey, "scopeId": scopeID},
+		map[string]interface{}{
+			"nodeKey": routeKey, "scopeId": scopeID, "scope": "main",
+			"name": "GET /itest", "method": "GET", "path": "/itest",
+		}); err != nil {
+		t.Fatalf("failed to merge route: %v", err)
+	}
+	if err := client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (h:Function {nodeKey: $h, scopeId: $s})
+		MATCH (r:APIRoute {nodeKey: $r, scopeId: $s})
+		MERGE (h)-[rel:EXPOSES_API]->(r)
+		SET rel.scope = 'main', rel.scopeId = $s`,
+		map[string]interface{}{"h": bigHandlerKey, "r": routeKey, "s": scopeID}); err != nil {
+		t.Fatalf("failed to create EXPOSES_API: %v", err)
+	}
+
+	// "Small" service: only a tier-3 seed (exported topological root, priority ~70).
+	smallRootKey := "func:itest-small/root.go#Root"
+	mergeFn(smallRootKey, map[string]interface{}{
+		"name": "Root", "serviceName": "itest-svc-small", "filePath": "itest-small/root.go",
+		"isExported": true, "inDegree": 0, "outDegree": 1,
+	})
+
+	finder := inference.NewGraphSeedFinder(client)
+	finder.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	budget := inference.DefaultTraversalBudget
+	budget.MaxSteps = 1 // force the cap so priority sorting decides who survives
+	finder.SetBudget(budget)
+
+	// Unfiltered: the single surviving seed must be a tier-1 seed, i.e. the
+	// small service is starved out of the capped seed set.
+	seeds, err := finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("unfiltered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 {
+		t.Fatalf("expected exactly 1 seed under MaxSteps=1, got %d", len(seeds))
+	}
+	if seeds[0].NodeKey == smallRootKey {
+		t.Fatalf("tier-3 seed unexpectedly beat tier-1 seeds in the priority sort")
+	}
+
+	// Service-filtered: the same cap must now apply within the small service,
+	// so its tier-3 root survives.
+	finder.SetServiceFilter([]string{"itest-svc-small"}, "")
+	seeds, err = finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("filtered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 {
+		t.Fatalf("expected exactly 1 seed for itest-svc-small, got %d", len(seeds))
+	}
+	if seeds[0].NodeKey != smallRootKey {
+		t.Fatalf("expected small-service root %s, got %s", smallRootKey, seeds[0].NodeKey)
+	}
+	if seeds[0].Tier != 3 {
+		t.Fatalf("expected tier 3 seed, got tier %d", seeds[0].Tier)
+	}
+
+	// Prefix filtering must behave the same way.
+	finder.SetServiceFilter(nil, "itest-svc-small")
+	seeds, err = finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("prefix-filtered FindSeeds failed: %v", err)
+	}
+	if len(seeds) != 1 || seeds[0].NodeKey != smallRootKey {
+		t.Fatalf("prefix filter: expected only %s, got %+v", smallRootKey, seeds)
+	}
+}
+
+// TestGraphSeedFinder_InterfaceImplSeeds_MethodLevelEdges reproduces the tier-2
+// dead spot: SCIP relationship ingestion emits method-level IMPLEMENTS edges
+// Method→Method (abstract member), while the old tier-2 query demanded
+// fn-[:IMPLEMENTS]->(:Interface) — a shape only Class→Interface edges have —
+// so tier 2 returned zero for every service.
+func TestGraphSeedFinder_InterfaceImplSeeds_MethodLevelEdges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const scopeID = "itest-iface-impl-seeds"
+	client := createTestGraphClient(t)
+	defer func() {
+		cleanupTestData(t, ctx, client, scopeID)
+	}()
+
+	implKey := "method:itest/impl.go#Store#Save"
+	abstractKey := "method:itest/iface.go#Storer#Save"
+	for key, name := range map[string]string{implKey: "Save", abstractKey: "Save"} {
+		if _, err := client.MergeNode(ctx, []string{"Method"},
+			map[string]interface{}{"nodeKey": key, "scopeId": scopeID},
+			map[string]interface{}{
+				"nodeKey": key, "scopeId": scopeID, "scope": "main",
+				"name": name, "serviceName": "itest-iface-svc", "inDegree": 0,
+			}); err != nil {
+			t.Fatalf("failed to merge %s: %v", key, err)
+		}
+	}
+	if err := client.ExecuteQueryWithoutRecords(ctx, `
+		MATCH (a:Method {nodeKey: $a, scopeId: $s})
+		MATCH (b:Method {nodeKey: $b, scopeId: $s})
+		MERGE (a)-[r:IMPLEMENTS]->(b)
+		SET r.scope = 'main', r.scopeId = $s`,
+		map[string]interface{}{"a": implKey, "b": abstractKey, "s": scopeID}); err != nil {
+		t.Fatalf("failed to create IMPLEMENTS: %v", err)
+	}
+
+	finder := inference.NewGraphSeedFinder(client)
+	finder.SetScope(models.ScopeContext{Scope: "main", ScopeID: scopeID})
+	finder.SetServiceFilter([]string{"itest-iface-svc"}, "")
+
+	seeds, err := finder.FindSeeds(ctx)
+	if err != nil {
+		t.Fatalf("FindSeeds failed: %v", err)
+	}
+	var impl *inference.GraphSeed
+	for i := range seeds {
+		if seeds[i].NodeKey == implKey {
+			impl = &seeds[i]
+		}
+	}
+	if impl == nil {
+		t.Fatalf("expected method-level implementer %s as a seed, got %+v", implKey, seeds)
+	}
+	if impl.Tier != 2 {
+		t.Fatalf("expected tier 2, got %d", impl.Tier)
 	}
 }

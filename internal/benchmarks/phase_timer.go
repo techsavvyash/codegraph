@@ -82,14 +82,6 @@ func (pt *PhaseTimer) WallDuration() time.Duration {
 	return pt.wallStop.Sub(pt.wallStart)
 }
 
-// Reset clears all results and wall-clock state for reuse.
-func (pt *PhaseTimer) Reset() {
-	pt.results = nil
-	pt.current = ""
-	pt.wallStart = time.Time{}
-	pt.wallStop = time.Time{}
-}
-
 // Results returns all recorded phase results.
 func (pt *PhaseTimer) Results() []PhaseResult {
 	return pt.results

@@ -3,6 +3,7 @@ package static
 import (
 	"fmt"
 
+	"github.com/context-maximiser/code-graph/internal/ingest/resolve"
 	models "github.com/context-maximiser/code-graph/internal/model"
 )
 
@@ -21,6 +22,25 @@ type SCIPRelationship struct {
 	IsImplementation bool   // true if FromSymbol implements ToSymbol
 	IsReference      bool   // true if FromSymbol references ToSymbol
 	IsTypeDefinition bool   // true if FromSymbol is a type definition of ToSymbol
+
+	// DetectionSource records where this relationship came from: "" (or
+	// "scip") for relationships parsed directly out of SymbolInformation.Relationships
+	// by ExtractRelationships, or "go-types-resolver" for relationships
+	// produced by internal/ingest/resolve's structural type resolver
+	// (RFC-001 Layer 3). Threaded onto the IMPLEMENTS edge's properties by
+	// buildImplementsBatch so resolver-produced edges stay distinguishable
+	// from indexer-native ones for debugging/auditing.
+	DetectionSource string
+}
+
+// detectionSourceOrDefault returns rel.DetectionSource, defaulting to "scip"
+// for relationships that didn't set it (i.e. everything produced by
+// ExtractRelationships, which parses SCIP-native data).
+func detectionSourceOrDefault(rel SCIPRelationship) string {
+	if rel.DetectionSource == "" {
+		return "scip"
+	}
+	return rel.DetectionSource
 }
 
 // ExtractRelationships extracts all SymbolInformation.Relationships from
@@ -98,8 +118,55 @@ func buildImplementsBatch(
 			"fromId": fromID,
 			"toId":   toID,
 			"props": map[string]any{
-				"scope":   scope.Scope,
-				"scopeId": scope.ScopeID,
+				"scope":           scope.Scope,
+				"scopeId":         scope.ScopeID,
+				"detectionSource": detectionSourceOrDefault(rel),
+			},
+		})
+	}
+
+	return batch
+}
+
+// buildLocalCallBatch constructs the Neo4j relationship batch items for
+// synthesized local-interface dispatch edges of a single kind (CALLS or
+// USES_VALUE), resolving each relation's FromSymbol/ToSymbol to definition
+// node IDs the same way buildImplementsBatch does. Only relations whose Kind
+// matches `kind` are included, so the caller can build one batch per rel type.
+//
+// Edge properties mirror the call-graph builder's own CALLS/USES_VALUE edges
+// (line, scope, scopeId — see call_graph_scip.go) plus detectionSource
+// "local-interface" so these resolver-synthesized edges stay distinguishable
+// from scip-native ones. No filePath is set: the resolver reports a line but
+// not a service-relative file path, and downstream consumers treat filePath as
+// optional metadata on CALLS edges.
+func buildLocalCallBatch(
+	rels []resolve.LocalCallRelation,
+	kind resolve.LocalCallKind,
+	symbolIDs map[string]string,
+	defIDs map[string]string,
+	symbolToDefKey map[string]string,
+	scope models.ScopeContext,
+) []map[string]any {
+	var batch []map[string]any
+
+	for _, rel := range rels {
+		if rel.Kind != kind {
+			continue
+		}
+		fromID := resolveNodeID(rel.FromSymbol, symbolIDs, defIDs, symbolToDefKey)
+		toID := resolveNodeID(rel.ToSymbol, symbolIDs, defIDs, symbolToDefKey)
+		if fromID == "" || toID == "" {
+			continue
+		}
+		batch = append(batch, map[string]any{
+			"fromId": fromID,
+			"toId":   toID,
+			"props": map[string]any{
+				"line":            rel.Line,
+				"scope":           scope.Scope,
+				"scopeId":         scope.ScopeID,
+				"detectionSource": "local-interface",
 			},
 		})
 	}

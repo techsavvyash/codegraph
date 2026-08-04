@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -150,4 +151,144 @@ func TestSourceDeclarationStubFallsBackToLines(t *testing.T) {
 	assert.Contains(t, text, "declaration line only",
 		"stub output must warn that the body span is unavailable")
 	assert.NotContains(t, text, "srcMcpArrow", "must not bleed into other lines")
+}
+
+// TestSourceJSONFormat locks the RFC-012 R2 format=json contract: the payload
+// must match web/studio/src/lib/types/graph.ts SourceResponse field-for-field
+// (snake_case keys), with the exact extracted body as `source`.
+func TestSourceJSONFormat(t *testing.T) {
+	server, nodeIDs, cleanup := setupSourceTestDB(t)
+	if server == nil {
+		t.Skip("Neo4j not available")
+	}
+	defer cleanup()
+
+	response := server.handleSourceToolV2(context.Background(), map[string]interface{}{
+		"node_id": nodeIDs["srcMcpArrow"],
+		"format":  "json",
+	})
+	require.False(t, response.IsError, "source should succeed: %+v", response.Content)
+	require.Len(t, response.Content, 1)
+
+	var got sourceResponse
+	require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &got))
+
+	assert.Equal(t, "code", got.Kind)
+	assert.Equal(t, "srcMcpArrow", got.Name)
+	assert.Equal(t, "source-mcp-svc", got.Service)
+	assert.Equal(t, "treesitter", got.RangeSource)
+	assert.Equal(t, "typescript", got.Lang)
+	assert.Equal(t, 2, got.StartLine)
+	assert.Equal(t, 2, got.EndLine)
+	assert.Equal(t, "srcMcpArrow = (x: number): number => x + 1", got.Source,
+		"json format must carry the same byte-exact extraction as markdown format")
+	assert.Empty(t, got.HeadingPath, "code responses must not carry chunk-only fields")
+	assert.Empty(t, got.Title, "code responses must not carry document-only fields")
+}
+
+// TestSourceJSONFormatRejectsInvalidValue verifies the format arg is validated
+// against its enum rather than silently defaulting.
+func TestSourceJSONFormatRejectsInvalidValue(t *testing.T) {
+	server, nodeIDs, cleanup := setupSourceTestDB(t)
+	if server == nil {
+		t.Skip("Neo4j not available")
+	}
+	defer cleanup()
+
+	response := server.handleSourceToolV2(context.Background(), map[string]interface{}{
+		"node_id": nodeIDs["srcMcpArrow"],
+		"format":  "yaml",
+	})
+	require.True(t, response.IsError, "an unsupported format must error, not silently fall back")
+}
+
+// setupSourceRootPathTestDB seeds a Function whose filePath is
+// SERVICE-RELATIVE (unlike setupSourceTestDB's absolute fixture), plus a
+// Service node carrying rootPath, so codegraph_source's rootPath-first
+// resolution (RFC-012 R2) is exercised end-to-end: the graph never stores an
+// absolute path, only the owning Service does.
+func setupSourceRootPathTestDB(t *testing.T) (*CodeGraphMCPServer, string, func()) {
+	t.Helper()
+	client, err := neo4j.NewClient(neo4j.Config{
+		URI:      getEnvOrDefault("NEO4J_URI", "bolt://localhost:7687"),
+		Username: getEnvOrDefault("NEO4J_USERNAME", "neo4j"),
+		Password: getEnvOrDefault("NEO4J_PASSWORD", "password123"),
+		Database: getEnvOrDefault("NEO4J_DATABASE", "neo4j"),
+	})
+	if err != nil {
+		t.Skipf("Neo4j not available: %v", err)
+		return nil, "", nil
+	}
+	ctx := context.Background()
+	if _, err := client.ExecuteQuery(ctx, "RETURN 1", nil); err != nil {
+		t.Skipf("Neo4j not responding: %v", err)
+		return nil, "", nil
+	}
+
+	_, _ = client.ExecuteQuery(ctx, `MATCH (n) WHERE n.scopeId = "itest-source-rootpath-mcp" DETACH DELETE n`, nil)
+
+	root := t.TempDir()
+	relPath := "pkg/root_path_target.go"
+	body := "func RootPathTarget() int {\n\treturn 42\n}\n"
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, relPath), []byte(body), 0o644))
+
+	_, err = client.ExecuteQuery(ctx, `
+		CREATE (:Service {
+			name: 'source-rootpath-mcp-svc', scopeId: 'itest-source-rootpath-mcp',
+			nodeKey: 'svc:source-rootpath-mcp-svc', rootPath: $rootPath
+		})
+		CREATE (:Function {
+			name: 'RootPathTarget', scopeId: 'itest-source-rootpath-mcp',
+			nodeKey: 'itest-source-rootpath-mcp/RootPathTarget',
+			serviceName: 'source-rootpath-mcp-svc', filePath: $relPath,
+			startLine: 1, endLine: 3
+		})
+	`, map[string]any{"rootPath": root, "relPath": relPath})
+	require.NoError(t, err, "failed to seed rootPath test fixture")
+
+	records, err := client.ExecuteQuery(ctx, `
+		MATCH (n:Function) WHERE n.scopeId = 'itest-source-rootpath-mcp'
+		RETURN elementId(n) AS node_id
+	`, nil)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	nodeID := getStringFromRecord(records[0].AsMap(), "node_id")
+
+	server := &CodeGraphMCPServer{
+		client:       client,
+		queryBuilder: neo4j.NewQueryBuilder(client),
+		// workspaceRoot deliberately points somewhere that does NOT contain
+		// relPath — proves resolution used rootPath, not a workspaceRoot
+		// coincidence.
+		workspaceRoot: t.TempDir(),
+	}
+	cleanup := func() {
+		_, _ = client.ExecuteQuery(context.Background(), `MATCH (n) WHERE n.scopeId = "itest-source-rootpath-mcp" DETACH DELETE n`, nil)
+		client.Close(context.Background())
+	}
+	return server, nodeID, cleanup
+}
+
+// TestSourceResolvesViaServiceRootPath is the end-to-end proof for RFC-012 R2
+// Change 3: a Function whose filePath is service-relative (the only form
+// SCIP ever writes) must resolve through its owning Service's rootPath, even
+// though the MCP server's own workspaceRoot points elsewhere.
+func TestSourceResolvesViaServiceRootPath(t *testing.T) {
+	server, nodeID, cleanup := setupSourceRootPathTestDB(t)
+	if server == nil {
+		t.Skip("Neo4j not available")
+	}
+	defer cleanup()
+
+	response := server.handleSourceToolV2(context.Background(), map[string]interface{}{
+		"node_id": nodeID,
+		"format":  "json",
+	})
+	require.False(t, response.IsError, "source should succeed via rootPath: %+v", response.Content)
+
+	var got sourceResponse
+	require.NoError(t, json.Unmarshal([]byte(response.Content[0].Text), &got))
+	assert.Contains(t, got.Source, "func RootPathTarget() int {")
+	assert.Contains(t, got.Source, "return 42")
 }

@@ -38,11 +38,15 @@ jobs:
       - name: Build
         run: make build
 
-  # ── Integration tests (protected branches only) ─────────────────────────
+  # ── Integration + harness (all PRs and pushes) ──────────────────────────
+  # Runs everything the unit job compiles but self-skips for lack of
+  # environment: the integration suite, the labeled/golden/LSP harness
+  # (indexes fixture projects through scip-go/scip-typescript into Neo4j),
+  # and the DB-backed MCP handler tests. dblock serializes the packages
+  # against the shared database.
   integration:
-    name: Integration tests
+    name: Integration + harness
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || github.event_name == 'push'
     services:
       neo4j:
         image: neo4j:5.15
@@ -63,12 +67,44 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - name: Integration tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install SCIP indexers
+        # Pinned, not @latest: scip-go's latest tag (v0.2.7) moved its module
+        # path to github.com/scip-code/scip-go, so the old path floats into a
+        # version-constraints conflict; and floating either indexer risks
+        # silent golden-fixture drift. These are the exact versions the golden
+        # harness is validated against.
+        run: |
+          go install github.com/sourcegraph/scip-go/cmd/scip-go@v0.1.26
+          npm install -g @sourcegraph/scip-typescript@0.3.11
+      - name: Integration, harness, and DB-backed handler tests
         env:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USERNAME: neo4j
           NEO4J_PASSWORD: password123
-        run: go test -v ./test/integration/... -timeout 300s
+        run: |
+          go test -v ./test/integration/... ./test/harness/... ./cmd/codegraph-mcp/ -timeout 1200s 2>&1 | tee test-output.log
+          exit "${PIPESTATUS[0]}"
+      - name: Fail on environment skips
+        # Every prerequisite is provisioned above, so any environment-driven
+        # skip means this job silently stopped testing what it exists to test.
+        # The labeled harness's data-driven knownGap skips are the only
+        # legitimate ones; they print "knownGap:" and match neither pattern.
+        # Belt and braces: also positively assert the flagship suites PASSed
+        # rather than trusting the absence of skip messages.
+        run: |
+          if grep -E "Neo4j not (available|reachable|responding)|Cannot connect to Neo4j|not installed|not on PATH|resolver script not found|not usable in this environment" test-output.log; then
+            echo "::error::Tests skipped due to missing environment — see matches above"
+            exit 1
+          fi
+          for suite in TestLabeledGo TestLabeledTS TestGoldenTinyGo TestGoldenTinyTS TestQueryTinyGo; do
+            if ! grep -q -- "--- PASS: $suite " test-output.log; then
+              echo "::error::$suite did not pass (or did not run) — the harness is not exercising the pipeline"
+              exit 1
+            fi
+          done
 
   # ── Chat UI: typecheck + unit tests + Playwright e2e ────────────────────
   chat-ui:

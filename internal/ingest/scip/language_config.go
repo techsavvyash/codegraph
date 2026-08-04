@@ -1,6 +1,7 @@
 package static
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -204,17 +205,42 @@ func parsePnpmWorkspace(yamlPath, workspaceRoot string) []string {
 }
 
 // workspacePackageLanguage classifies a workspace package directory by its
-// manifest. Returns LanguageTypeScript when a tsconfig.json is present
-// (preferred for typed projects), LanguageJavaScript when only package.json
-// exists, or "" when neither is present (skip).
+// manifest. Returns LanguageTypeScript when a tsconfig.json is present or
+// package.json declares a typescript dependency (preferred for typed
+// projects), LanguageJavaScript when only package.json exists, or "" when
+// neither is present (skip).
 func workspacePackageLanguage(pkgDir string) Language {
 	if _, err := os.Stat(filepath.Join(pkgDir, "tsconfig.json")); err == nil {
 		return LanguageTypeScript
 	}
 	if _, err := os.Stat(filepath.Join(pkgDir, "package.json")); err == nil {
+		if packageJSONDeclaresTypeScript(pkgDir) {
+			return LanguageTypeScript
+		}
 		return LanguageJavaScript
 	}
 	return ""
+}
+
+// packageJSONDeclaresTypeScript reports whether dir/package.json lists
+// "typescript" under dependencies or devDependencies — the signal that a
+// project without a root tsconfig.json (SvelteKit and friends generate
+// theirs under a build directory) is still a TypeScript project.
+func packageJSONDeclaresTypeScript(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return false
+	}
+	_, inDeps := pkg.Dependencies["typescript"]
+	_, inDev := pkg.DevDependencies["typescript"]
+	return inDeps || inDev
 }
 
 // DetectAllLanguages walks the project directory tree and returns every
@@ -294,6 +320,7 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 	// under one Service node (the chat-ui-rolled-into-codegraph symptom).
 	pnpmWorkspacePath := filepath.Join(absRoot, "pnpm-workspace.yaml")
 	if _, err := os.Stat(pnpmWorkspacePath); err == nil {
+		workspacePkgs := 0
 		for _, pkgDir := range parsePnpmWorkspace(pnpmWorkspacePath, absRoot) {
 			lang := workspacePackageLanguage(pkgDir)
 			if lang == "" {
@@ -301,11 +328,19 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 			}
 			roots = append(roots, LanguageRoot{Language: lang, Path: pkgDir})
 			foundLangDirs[lang] = append(foundLangDirs[lang], pkgDir)
+			workspacePkgs++
 		}
-		// Claim the workspace root for TS/JS so WalkDir does not re-detect the
-		// empty root tsconfig as a phantom service.
-		foundLangDirs[LanguageTypeScript] = append(foundLangDirs[LanguageTypeScript], absRoot)
-		foundLangDirs[LanguageJavaScript] = append(foundLangDirs[LanguageJavaScript], absRoot)
+		// Claim the workspace root for TS/JS so WalkDir does not re-detect
+		// the empty root tsconfig as a phantom service — but ONLY when the
+		// workspace actually declared packages. pnpm-workspace.yaml is also
+		// used as a plain config file (onlyBuiltDependencies etc.) by
+		// single-package projects like SvelteKit apps; claiming the root on
+		// such a file made the whole project undetectable ("no supported
+		// languages detected" on web/studio).
+		if workspacePkgs > 0 {
+			foundLangDirs[LanguageTypeScript] = append(foundLangDirs[LanguageTypeScript], absRoot)
+			foundLangDirs[LanguageJavaScript] = append(foundLangDirs[LanguageJavaScript], absRoot)
+		}
 	}
 
 	const maxSeparators = 3 // walk up to 4 levels deep (0-indexed)
@@ -353,9 +388,13 @@ func DetectAllLanguages(projectPath string) ([]LanguageRoot, error) {
 				if _, err := os.Stat(filepath.Join(path, detectionFile)); err != nil {
 					continue
 				}
-				// TypeScript requires tsconfig.json specifically.
+				// TypeScript requires tsconfig.json — or a package.json that
+				// declares a typescript dependency (frameworks like SvelteKit
+				// generate their tsconfig under .svelte-kit/, so the root has
+				// none; scip-typescript handles such projects fine).
 				if lang == LanguageTypeScript {
-					if _, err := os.Stat(filepath.Join(path, "tsconfig.json")); err != nil {
+					if _, err := os.Stat(filepath.Join(path, "tsconfig.json")); err != nil &&
+						!packageJSONDeclaresTypeScript(path) {
 						continue
 					}
 				}
@@ -501,30 +540,6 @@ func DetectLanguage(projectPath string) (Language, error) {
 	}
 
 	return detectedLang, nil
-}
-
-// InferLanguageFromExtension infers language from file extension
-func InferLanguageFromExtension(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-
-	for _, config := range LanguageRegistry {
-		for _, langExt := range config.FileExtensions {
-			if ext == langExt {
-				return config.DisplayName
-			}
-		}
-	}
-
-	return "unknown"
-}
-
-// GetSupportedLanguages returns a list of all supported languages
-func GetSupportedLanguages() []Language {
-	langs := make([]Language, 0, len(LanguageRegistry))
-	for lang := range LanguageRegistry {
-		langs = append(langs, lang)
-	}
-	return langs
 }
 
 // FormatLanguageList returns a formatted string of supported languages

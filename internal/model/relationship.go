@@ -10,9 +10,17 @@ const (
 	ReferencesRel RelationshipType = "REFERENCES"
 
 	// Behavioral Relationships
-	CallsRel    RelationshipType = "CALLS"
-	FlowsToRel  RelationshipType = "FLOWS_TO"
-	NextExecRel RelationshipType = "NEXT_EXECUTION"
+	CallsRel RelationshipType = "CALLS"
+	// UsesValueRel records a function-VALUE reference (`handler = fn`,
+	// `wrap(fn)`) from the enclosing Function/Method — or the File for
+	// module-scope references — to the referenced function. NOT a call:
+	// kept as a distinct edge so liveness analysis can treat address-taken
+	// functions as conservatively live (a callback passed by value and
+	// invoked dynamically must never be classified dead) without the CALLS
+	// graph fabricating invocations that never happen.
+	UsesValueRel RelationshipType = "USES_VALUE"
+	FlowsToRel   RelationshipType = "FLOWS_TO"
+	NextExecRel  RelationshipType = "NEXT_EXECUTION"
 
 	// Object-Oriented Relationships
 	InheritsFromRel RelationshipType = "INHERITS_FROM"
@@ -131,50 +139,4 @@ type DescribesRelationship struct {
 type MentionsRelationship struct {
 	BaseRelationship
 	Context string `json:"context" neo4j:"context"`
-}
-
-// RelationshipFactory creates relationships from type and properties
-func RelationshipFactory(relType RelationshipType, startID, endID string, props map[string]any) interface{} {
-	base := BaseRelationship{
-		Type:       relType,
-		Properties: props,
-		StartID:    startID,
-		EndID:      endID,
-	}
-
-	switch relType {
-	case ContainsRel:
-		return &ContainsRelationship{BaseRelationship: base}
-	case DefinesRel:
-		return &DefinesRelationship{BaseRelationship: base}
-	case ReferencesRel:
-		return &ReferencesRelationship{BaseRelationship: base}
-	case CallsRel:
-		return &CallsRelationship{BaseRelationship: base}
-	case FlowsToRel:
-		return &FlowsToRelationship{BaseRelationship: base}
-	case NextExecRel:
-		return &NextExecutionRelationship{BaseRelationship: base}
-	case InheritsFromRel:
-		return &InheritsFromRelationship{BaseRelationship: base}
-	case ImplementsRel:
-		return &ImplementsRelationship{BaseRelationship: base}
-	case ExposesAPIRel:
-		return &ExposesAPIRelationship{BaseRelationship: base}
-	case CallsAPIRel:
-		return &CallsAPIRelationship{BaseRelationship: base}
-	case DependsOnRel:
-		return &DependsOnRelationship{BaseRelationship: base}
-	case DescribesRel:
-		return &DescribesRelationship{BaseRelationship: base}
-	case MentionsRel:
-		return &MentionsRelationship{BaseRelationship: base}
-	default:
-		return &BaseRelationship{
-			Type:       relType,
-			Properties: props,
-			StartID:    startID,
-			EndID:      endID,
-		}
-	}
 }

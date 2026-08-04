@@ -1,0 +1,252 @@
+{
+  "fixture": "labeled-ts",
+  "service": "labeledts",
+  "mustHaveNodes": [
+    {
+      "label": "Interface",
+      "name": "PdfOps",
+      "file": "src/pdf.ts",
+      "props": {}
+    },
+    {
+      "label": "Class",
+      "name": "PdfGenerator",
+      "file": "src/pdf.ts",
+      "props": {}
+    },
+    {
+      "label": "Function",
+      "name": "run",
+      "file": "src/pdf.ts",
+      "props": {}
+    },
+    {
+      "label": "Class",
+      "name": "Paginator",
+      "file": "src/options.ts",
+      "props": {}
+    },
+    {
+      "label": "Method",
+      "name": "list",
+      "file": "src/items-controller.ts",
+      "props": {},
+      "decoratorContains": "Get:list",
+      "comment": "list() is emitted with label Method (class member). Confirmed empirically: fn.decorators = ['Get:list'] (parseDecoratorStrings' 'Name:arg' encoding \u2014 decorator name 'Get', arg 'list'). The 'decoratorContains' field is a dedicated matcher check (list-membership, not exact prop equality) since fn.decorators is a string list, not a scalar the generic props subset-match can compare directly."
+    },
+    {
+      "label": "Function",
+      "name": "formatName",
+      "file": "src/greet.ts",
+      "props": {}
+    },
+    {
+      "label": "Function",
+      "name": "greetUser",
+      "file": "src/greet.ts",
+      "props": {}
+    },
+    {
+      "label": "Function",
+      "name": "doWork",
+      "file": "src/impl.ts",
+      "props": {}
+    },
+    {
+      "label": "Function",
+      "name": "callDoWork",
+      "file": "src/main.ts",
+      "props": {}
+    },
+    {
+      "label": "APIRoute",
+      "name": "",
+      "file": "",
+      "props": {
+        "method": "GET",
+        "path": "/items/list",
+        "detectionSource": "decorator",
+        "framework": "nestjs",
+        "protocol": "HTTP"
+      },
+      "comment": "APIRoute nodes have no 'name' property (matched by nodeKey/props only); matcher must allow name to be empty/absent when props alone identify the node. nodeKey = models.APIRouteNodeKey('GET','/items/list') = 'api:GET:/items/list', confirmed empirically."
+    },
+    {
+      "label": "Function",
+      "name": "registerThing",
+      "file": "registry.ts",
+      "props": {},
+      "comment": "Classification fixture (tasks #18/#19): module-scope call target."
+    },
+    {
+      "label": "Function",
+      "name": "registerThing",
+      "file": "registry.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: called at module scope in toplevel.ts \u2014 tier-3 module-load root."
+    },
+    {
+      "label": "Function",
+      "name": "valueOnly",
+      "file": "registry.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 3
+      },
+      "comment": "RFC-014: address-taken at module scope (export const savedRef = valueOnly) \u2014 conservatively live."
+    },
+    {
+      "label": "Method",
+      "name": "list",
+      "file": "items-controller.ts",
+      "props": {
+        "reachability": "live",
+        "reachabilityTier": 1
+      },
+      "comment": "RFC-014: @Get()-decorated route \u2192 EXPOSES_API \u2192 tier-1 root."
+    }
+  ],
+  "mustNotHaveNodes": [],
+  "mustHaveEdges": [
+    {
+      "type": "CALLS",
+      "from": {
+        "label": "Function",
+        "name": "run",
+        "file": "src/pdf.ts"
+      },
+      "to": {
+        "label": "Method",
+        "name": "generate",
+        "file": "src/pdf.ts"
+      },
+      "comment": "run(ops: PdfOps) calls ops.generate('doc'); the only concrete implementation in this fixture is PdfGenerator, and the call graph resolves directly to PdfGenerator.generate. Verified empirically via plain scip-typescript indexing (no resolver needed)."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {
+        "label": "Class",
+        "name": "PdfGenerator"
+      },
+      "to": {
+        "label": "Interface",
+        "name": "PdfOps"
+      },
+      "comment": "Type-level IMPLEMENTS, produced natively by scip-typescript (detectionSource=scip) \u2014 NOT the CODEGRAPH_TS_RESOLVER structural resolver. PdfGenerator's `implements PdfOps` clause causes scip-typescript to emit an is_implementation_of relationship directly; verified empirically the resolver script was skipped in this run ('resolve.mjs not found') and the edge was still present with detectionSource=scip, confirming the plain SCIP path is sufficient here."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {
+        "label": "Method",
+        "name": "generate",
+        "file": "src/pdf.ts",
+        "nodeKeyContains": "PdfGenerator#generate"
+      },
+      "to": {
+        "label": "Method",
+        "name": "generate",
+        "file": "src/pdf.ts",
+        "nodeKeyContains": "PdfOps#generate"
+      },
+      "comment": "Method-level IMPLEMENTS: PdfGenerator.generate -> PdfOps.generate, detectionSource=scip (native scip-typescript path, matches tiny-ts golden.json's ConsoleLogger.log -> Logger.log shape exactly). nodeKeyContains disambiguates the two same-named 'generate' Method nodes (concrete PdfGenerator#generate vs interface member PdfOps#generate)."
+    },
+    {
+      "type": "CALLS",
+      "from": {
+        "label": "Function",
+        "name": "greetUser",
+        "file": "src/greet.ts"
+      },
+      "to": {
+        "label": "Function",
+        "name": "formatName",
+        "file": "src/greet.ts"
+      },
+      "comment": "Construct 4: formatName is a const-bound arrow (export const formatName = (n) => n.trim()), promoted from Variable to Function by promoteDeclaratorBoundFunctions (kind_promotion.go) because its SCIP definition occurrence sits inside a declarator-widened function node of the same name. greetUser calls it directly. Verified empirically: formatName appears as a Function node (not Variable) with inDegree=1."
+    },
+    {
+      "type": "CALLS",
+      "from": {
+        "label": "Function",
+        "name": "callDoWork",
+        "file": "src/main.ts"
+      },
+      "to": {
+        "label": "Function",
+        "name": "doWork",
+        "file": "src/impl.ts"
+      },
+      "comment": "Construct 5: main.ts imports doWork from './facade' (a bare re-export `export { doWork } from './impl'` with no local binding), and callDoWork() calls it. Verified empirically via direct Cypher on the Reference/Symbol graph BEFORE the call-graph builder ran: the Reference node at main.ts covering the call site links directly to the ORIGINAL src/impl.ts doWork() SCIP symbol, not to any facade.ts phantom symbol \u2014 scip-typescript itself resolves re-exports transparently at the reference level. The resulting CALLS edge lands on impl.ts's doWork, confirming no phantom re-export node is created. NOTE: the original fixture design called doWork() at TOP-LEVEL module scope in main.ts; that produced ZERO CALLS edges for ANY top-level call in the file (also true for run(), Paginator(), etc.) because the call-graph builder only attributes CALLS edges to an enclosing Function/Method \u2014 top-level statements have no enclosing node. The fixture was corrected to wrap the call in an exported function (callDoWork) so this construct actually exercises re-export resolution instead of silently testing nothing. This top-level-attribution behavior is itself arguably a gap (see report) but is out of scope for this construct's assertion."
+    },
+    {
+      "type": "EXPOSES_API",
+      "from": {
+        "label": "Method",
+        "name": "list",
+        "file": "src/items-controller.ts"
+      },
+      "to": {
+        "label": "APIRoute",
+        "props": {
+          "method": "GET",
+          "path": "/items/list"
+        }
+      },
+      "comment": "Construct 3: decorator-routed handler. @Controller('items') + @Get('list') on ItemsController.list must produce APIRoute{method:GET,path:/items/list,detectionSource:decorator} plus this EXPOSES_API edge. Verified empirically via direct Cypher after indexing without any nestjs/common package installed \u2014 only ambient .d.ts declarations for Controller/Get (see src/decorators.d.ts) were needed for scip-typescript to index the file; the decorators are never invoked at runtime so no real framework implementation is required, only that they parse and resolve as decorator syntax."
+    },
+    {
+      "type": "CALLS",
+      "from": {
+        "label": "File",
+        "file": "toplevel.ts"
+      },
+      "to": {
+        "label": "Function",
+        "name": "registerThing",
+        "file": "registry.ts"
+      },
+      "comment": "Module-scope call attribution: `export const registration = registerThing()` runs at import time, so the FILE is the caller. This is the exact gap construct-5's comment documented ('top-level statements have no enclosing node ... produced ZERO CALLS edges'), now asserted as fixed."
+    }
+  ],
+  "mustNotHaveEdges": [
+    {
+      "type": "IMPLEMENTS",
+      "to": {
+        "name": "Options"
+      },
+      "knownGap": false,
+      "comment": "THE 767-NOISE REGRESSION CLASS. Options has only optional members (page?, onDone?: () => void) \u2014 per tsresolver.go's SkippedNoRequiredCallable rule, an interface with no REQUIRED function-typed member is universally/near-universally assignable and must be skipped by the structural resolver entirely, never producing an IMPLEMENTS edge. Paginator structurally matches Options' shape (same two optional members) but does NOT `implements Options` in source. Verified empirically in TWO configurations: (1) plain scip-typescript path (resolver not invoked, resolve.mjs not found in this environment) \u2014 0 IMPLEMENTS edges touch Options at all, confirmed via direct Cypher; scip-typescript itself never emits is_implementation_of for structural-only matches, only for explicit `implements` clauses, so Options is safe on the native path regardless of the resolver. (2) See labeled_test.go's CODEGRAPH_TS_RESOLVER-guarded subtest for the resolver-path re-verification \u2014 if the resolver runs, this same assertion is re-checked against its output; if the resolver cannot run in this environment, that subtest SKIPs with a clear message rather than silently passing. 'from' is omitted (matches ANY source node)."
+    },
+    {
+      "type": "IMPLEMENTS",
+      "from": {
+        "name": "Paginator"
+      },
+      "knownGap": false,
+      "comment": "Symmetric check: Paginator must not be the source of ANY IMPLEMENTS edge (it implements nothing in source \u2014 no `implements` clause at all)."
+    },
+    {
+      "type": "CALLS",
+      "from": {},
+      "to": {
+        "label": "Function",
+        "name": "valueOnly",
+        "file": "registry.ts"
+      },
+      "comment": "Module-scope VALUE reference (`export const savedRef = valueOnly`) must not fabricate a CALLS edge from any node."
+    },
+    {
+      "type": "CALLS",
+      "from": {},
+      "to": {
+        "label": "Function",
+        "name": "bodyValue",
+        "file": "registry.ts"
+      },
+      "comment": "In-body VALUE reference (`const h = bodyValue` inside useBodyValue) must not fabricate a CALLS edge from any node."
+    }
+  ]
+}

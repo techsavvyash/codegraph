@@ -2958,6 +2958,7 @@
       ],
       "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -2973,6 +2974,7 @@
       ],
       "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -2988,6 +2990,7 @@
       ],
       "endKey": "iface:scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -3003,6 +3006,7 @@
       ],
       "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }
@@ -3018,6 +3022,7 @@
       ],
       "endKey": "method:tinygo:greeter/greeter.go#scip-go gomod example.com/tinygo . `example.com/tinygo/greeter`/Greeter#Greet.",
       "props": {
+        "detectionSource": "scip",
         "scope": "main",
         "scopeId": "main"
       }

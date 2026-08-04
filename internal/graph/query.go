@@ -652,6 +652,70 @@ func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, n
 	return result, nil
 }
 
+// readSourceFileForQuery resolves and reads a function's source file on disk.
+// Tries, in order: filePath as-is (handles absolute paths, and relative paths
+// when cwd already sits at the project root) → rootPath/filePath (the owning
+// Service's indexed root, RFC-012 R2 — authoritative regardless of the
+// caller's cwd) → cwd-relative fallbacks that existed before rootPath was
+// introduced (kept for legacy graphs indexed without it, and for the
+// test/integration cwd quirk). Returns the file content and the resolved
+// path (for error messages).
+func readSourceFileForQuery(filePath, rootPath string) ([]byte, error) {
+	if content, err := os.ReadFile(filePath); err == nil {
+		return content, nil
+	}
+	if filepath.IsAbs(filePath) {
+		// Absolute and already failed above; no other candidate will help.
+		_, err := os.ReadFile(filePath)
+		return nil, err
+	}
+
+	var lastErr error
+	if rootPath != "" {
+		candidate := filepath.Join(rootPath, filePath)
+		if content, err := os.ReadFile(candidate); err == nil {
+			return content, nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	// Legacy fallback: resolve relative to cwd, adjusting for the
+	// test/integration working directory.
+	if pwd, pwdErr := os.Getwd(); pwdErr == nil {
+		projectRoot := pwd
+		if strings.HasSuffix(pwd, "/test/integration") {
+			projectRoot = filepath.Dir(filepath.Dir(pwd))
+		}
+		candidate := filepath.Join(projectRoot, filePath)
+		if content, err := os.ReadFile(candidate); err == nil {
+			return content, nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("failed to read file %s", filePath)
+	}
+	return nil, lastErr
+}
+
+// extractSource returns the byte-exact or line-based slice of content
+// described by the given offsets, in that preference order.
+func extractSource(content []byte, startByte, endByte, startLine, endLine int) (string, bool) {
+	if startByte >= 0 && endByte >= 0 && startByte < len(content) && endByte <= len(content) {
+		return string(content[startByte:endByte]), true
+	}
+	if startLine > 0 && endLine > 0 {
+		lines := strings.Split(string(content), "\n")
+		if startLine <= len(lines) && endLine <= len(lines) {
+			return strings.Join(lines[startLine-1:endLine], "\n"), true
+		}
+	}
+	return "", false
+}
+
 // GetFunctionSourceCode retrieves the exact source code for a function or
 // method. serviceName optionally bounds the match to one service — names
 // repeat across services (and across a dev index and a test index of the
@@ -659,16 +723,19 @@ func (qb *QueryBuilder) SemanticSearch(ctx context.Context, searchTerm string, n
 // for the file on disk. Empty serviceName matches any service
 // (deterministically, via ORDER BY).
 func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName, serviceName string) (string, error) {
-	// Find the function/method node with location metadata
+	// Find the function/method node with location metadata. rootPath comes
+	// from the owning Service (RFC-012 R2) so the read works regardless of
+	// the caller's cwd.
 	cypher := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method) AND f.name = $functionName
 		  AND ($serviceName = '' OR f.serviceName = $serviceName)
+		WITH f ORDER BY f.serviceName, f.filePath, f.startLine LIMIT 1
+		OPTIONAL MATCH (sv:Service {name: f.serviceName})
 		RETURN f.filePath AS filePath, f.startByte AS startByte, f.endByte AS endByte,
 			   f.startLine AS startLine, f.endLine AS endLine,
-			   f.name AS name, f.signature AS signature
-		ORDER BY f.serviceName, f.filePath, f.startLine
-		LIMIT 1
+			   f.name AS name, f.signature AS signature,
+			   coalesce(sv.rootPath, '') AS rootPath
 	`
 
 	params := map[string]any{"functionName": functionName, "serviceName": serviceName}
@@ -687,52 +754,19 @@ func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName,
 	endByte := getInt(record, "endByte")
 	startLine := getInt(record, "startLine")
 	endLine := getInt(record, "endLine")
+	rootPath := getString(record, "rootPath")
 
 	if filePath == "" {
 		return "", fmt.Errorf("no file path found for function: %s", functionName)
 	}
 
-	// Read the file content - handle both absolute and relative paths
-	content, err := os.ReadFile(filePath)
+	content, err := readSourceFileForQuery(filePath, rootPath)
 	if err != nil {
-		// If relative path fails, try from project root
-		// This handles the case where tests run from different directories
-		if !filepath.IsAbs(filePath) {
-			// Try from current working directory
-			if pwd, pwdErr := os.Getwd(); pwdErr == nil {
-				// Go up to project root if we're in test directory
-				projectRoot := pwd
-				if strings.HasSuffix(pwd, "/test/integration") {
-					projectRoot = filepath.Dir(filepath.Dir(pwd))
-				}
-				absolutePath := filepath.Join(projectRoot, filePath)
-				if content, err = os.ReadFile(absolutePath); err == nil {
-					// Success with absolute path
-				} else {
-					return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-				}
-			} else {
-				return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-			}
-		} else {
-			return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-		}
+		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
-	// If we have byte offsets, use them for precise extraction
-	if startByte >= 0 && endByte >= 0 && startByte < len(content) && endByte <= len(content) {
-		sourceCode := string(content[startByte:endByte])
+	if sourceCode, ok := extractSource(content, startByte, endByte, startLine, endLine); ok {
 		return sourceCode, nil
-	}
-
-	// Fallback to line-based extraction
-	if startLine > 0 && endLine > 0 {
-		lines := strings.Split(string(content), "\n")
-		if startLine <= len(lines) && endLine <= len(lines) {
-			functionLines := lines[startLine-1 : endLine]
-			sourceCode := strings.Join(functionLines, "\n")
-			return sourceCode, nil
-		}
 	}
 
 	return "", fmt.Errorf("unable to extract source code for function: %s", functionName)
@@ -747,16 +781,19 @@ func (qb *QueryBuilder) GetFunctionSourceCode(ctx context.Context, functionName,
 // that may be stale for the file on disk. Empty serviceName matches any
 // service (deterministically, via ORDER BY).
 func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, signature, serviceName string) (string, error) {
-	// Find the function/method node with location metadata using signature
+	// Find the function/method node with location metadata using signature.
+	// rootPath comes from the owning Service (RFC-012 R2) so the read works
+	// regardless of the caller's cwd.
 	cypher := `
 		MATCH (f)
 		WHERE (f:Function OR f:Method) AND f.signature = $signature
 		  AND ($serviceName = '' OR f.serviceName = $serviceName)
+		WITH f ORDER BY f.serviceName, f.filePath, f.startLine LIMIT 1
+		OPTIONAL MATCH (sv:Service {name: f.serviceName})
 		RETURN f.filePath AS filePath, f.startByte AS startByte, f.endByte AS endByte,
 			   f.startLine AS startLine, f.endLine AS endLine,
-			   f.name AS name, f.signature AS signature
-		ORDER BY f.serviceName, f.filePath, f.startLine
-		LIMIT 1
+			   f.name AS name, f.signature AS signature,
+			   coalesce(sv.rootPath, '') AS rootPath
 	`
 
 	params := map[string]any{"signature": signature, "serviceName": serviceName}
@@ -775,52 +812,19 @@ func (qb *QueryBuilder) GetFunctionSourceCodeBySignature(ctx context.Context, si
 	endByte := getInt(record, "endByte")
 	startLine := getInt(record, "startLine")
 	endLine := getInt(record, "endLine")
+	rootPath := getString(record, "rootPath")
 
 	if filePath == "" {
 		return "", fmt.Errorf("no file path found for function with signature: %s", signature)
 	}
 
-	// Read the file content - handle both absolute and relative paths
-	content, err := os.ReadFile(filePath)
+	content, err := readSourceFileForQuery(filePath, rootPath)
 	if err != nil {
-		// If relative path fails, try from project root
-		// This handles the case where tests run from different directories
-		if !filepath.IsAbs(filePath) {
-			// Try from current working directory
-			if pwd, pwdErr := os.Getwd(); pwdErr == nil {
-				// Go up to project root if we're in test directory
-				projectRoot := pwd
-				if strings.HasSuffix(pwd, "/test/integration") {
-					projectRoot = filepath.Dir(filepath.Dir(pwd))
-				}
-				absolutePath := filepath.Join(projectRoot, filePath)
-				if content, err = os.ReadFile(absolutePath); err == nil {
-					// Success with absolute path
-				} else {
-					return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-				}
-			} else {
-				return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-			}
-		} else {
-			return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
-		}
+		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
-	// If we have byte offsets, use them for precise extraction
-	if startByte >= 0 && endByte >= 0 && startByte < len(content) && endByte <= len(content) {
-		sourceCode := string(content[startByte:endByte])
+	if sourceCode, ok := extractSource(content, startByte, endByte, startLine, endLine); ok {
 		return sourceCode, nil
-	}
-
-	// Fallback to line-based extraction
-	if startLine > 0 && endLine > 0 {
-		lines := strings.Split(string(content), "\n")
-		if startLine <= len(lines) && endLine <= len(lines) {
-			functionLines := lines[startLine-1 : endLine]
-			sourceCode := strings.Join(functionLines, "\n")
-			return sourceCode, nil
-		}
 	}
 
 	return "", fmt.Errorf("unable to extract source code for function with signature: %s", signature)

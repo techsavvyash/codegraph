@@ -1,0 +1,8 @@
+node_modules
+/build
+/.svelte-kit
+/test-results
+/playwright-report
+vite.config.ts.timestamp-*
+.server.log
+server.log

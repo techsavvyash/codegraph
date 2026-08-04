@@ -1,0 +1,229 @@
+<!-- @dsCard group="Screens" name="Dashboard" subtitle="Index overview &#183; KPI strip &#183; service cards &#183; health flags &#183; call hubs" viewport="1440" -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=1456">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+:root {
+  --bg-page:#FCFCFD; --bg-panel:#FFFFFF; --bg-subtle:#F6F7F9; --bg-hover:#EEF0F3; --bg-canvas:#FAFBFC;
+  --border:#E3E6EA; --border-strong:#CDD2D9;
+  --ink:#16181D; --ink-2:#444B57; --ink-3:#6E7686; --ink-disabled:#9AA1AC;
+  --accent:#3B5BDB; --accent-hover:#364FC7; --accent-subtle:#EDF2FF; --accent-border:#BAC8FF; --accent-ink:#2B44A1;
+  --ok:#087F5B; --ok-subtle:#E6FCF5; --warn:#E67700; --warn-subtle:#FFF9DB; --err:#C92A2A; --err-subtle:#FFF5F5;
+  --node-service:#7048E8; --node-service-bg:#F3F0FF; --node-file:#495057; --node-file-bg:#F1F3F5;
+  --node-function:#1C7ED6; --node-function-bg:#E7F5FF; --node-method:#0B7285; --node-method-bg:#E3FAFC;
+  --node-class:#E8590C; --node-class-bg:#FFF4E6; --node-interface:#9C36B5; --node-interface-bg:#F8F0FC;
+  --node-document:#C2255C; --node-document-bg:#FFF0F6; --node-chunk:#E64980; --node-chunk-bg:#FFF0F6;
+  --edge-structural:#ADB5BD; --edge-docmine:#E67700; --edge-docmine-bg:#FFF9DB; --edge-semlink:#6741D9; --edge-semlink-bg:#F3F0FF;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',sans-serif; --font-mono:'IBM Plex Mono','SF Mono',monospace;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:20px; --text-2xl:28px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+  --r-sm:4px; --r-md:6px; --r-lg:10px; --r-full:9999px;
+  --shadow-1:0 1px 2px rgba(22,24,29,.05); --shadow-2:0 1px 3px rgba(22,24,29,.07), 0 4px 12px rgba(22,24,29,.05);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:var(--font-sans); font-size:var(--text-base); line-height:1.5; color:var(--ink); background:var(--bg-page); -webkit-font-smoothing:antialiased; }
+.mono { font-family:var(--font-mono); }
+
+.app { width:1440px; height:900px; display:grid; grid-template-rows:48px 1fr 42px; overflow:hidden; }
+
+/* === Topbar === */
+.topbar { display:flex; align-items:center; gap:var(--s-4); padding:0 var(--s-4); background:var(--bg-panel); border-bottom:1px solid var(--border); }
+.brand { display:flex; align-items:center; gap:8px; font-weight:600; font-size:var(--text-md); letter-spacing:-.01em; }
+.brand .mark { width:20px; height:20px; border-radius:6px; background:var(--accent); position:relative; }
+.brand .mark::after { content:''; position:absolute; inset:6px; border-radius:2px; background:#fff; opacity:.9; }
+.brand small { font-weight:450; color:var(--ink-3); font-size:var(--text-sm); }
+
+.svc { display:flex; align-items:center; gap:6px; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--r-md); padding:4px 10px; font-size:var(--text-sm); font-weight:500; cursor:pointer; }
+.svc .dot { width:8px; height:8px; border-radius:var(--r-full); background:var(--node-service); }
+.svc .chev { color:var(--ink-3); font-size:10px; }
+
+.omni { flex:1; max-width:520px; display:flex; align-items:center; gap:8px; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--r-md); padding:5px 12px; color:var(--ink-3); font-size:var(--text-sm); }
+.omni .kbd { margin-left:auto; font-family:var(--font-mono); font-size:10px; background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-sm); padding:1px 5px; }
+
+.tabs { display:flex; gap:2px; margin-left:auto; }
+.tab { padding:5px 12px; border-radius:var(--r-md); font-size:var(--text-sm); font-weight:500; color:var(--ink-2); cursor:pointer; }
+.tab.active { background:var(--accent-subtle); color:var(--accent-ink); }
+.tab:not(.active):hover { background:var(--bg-hover); }
+
+/* === Scroll pane === */
+.pane { overflow:auto; padding:var(--s-5) var(--s-6); }
+
+.phead { display:flex; align-items:baseline; gap:12px; margin-bottom:var(--s-4); }
+.phead h1 { font-size:var(--text-xl); font-weight:600; letter-spacing:-.01em; }
+.phead .meta { margin-left:auto; display:flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:var(--text-xs); color:var(--ink-3); }
+.phead .okd { width:8px; height:8px; border-radius:var(--r-full); background:var(--ok); }
+
+/* -- KPI strip -- */
+.kpis { display:grid; grid-template-columns:repeat(4, 1fr); gap:var(--s-3); margin-bottom:var(--s-4); }
+.kpi { background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-lg); padding:12px 16px; box-shadow:var(--shadow-1); }
+.kpi .num { font-size:var(--text-2xl); font-weight:600; letter-spacing:-.02em; line-height:1.2; }
+.kpi .lbl { font-size:var(--text-sm); color:var(--ink-3); }
+.kpi .sub { font-family:var(--font-mono); font-size:10px; color:var(--ink-3); margin-top:2px; }
+.kpi .sub .dm { color:var(--edge-docmine); } .kpi .sub .sl { color:var(--edge-semlink); }
+
+/* -- Service cards -- */
+.secttl { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-3); margin:0 0 var(--s-2); }
+.services { display:grid; grid-template-columns:repeat(4, 340px); gap:var(--s-3); margin-bottom:var(--s-4); }
+.scard { background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-lg); padding:12px 14px; box-shadow:var(--shadow-1); display:flex; flex-direction:column; gap:7px; }
+.scard .head { display:flex; align-items:center; gap:7px; }
+.scard .head .dot { width:8px; height:8px; border-radius:var(--r-full); background:var(--node-service); flex:none; }
+.scard .head .nm { font-weight:600; font-size:var(--text-base); }
+.scard .fresh { margin-left:auto; font-size:10px; font-weight:500; border-radius:var(--r-full); padding:1px 8px; white-space:nowrap; }
+.fresh.ok { background:var(--ok-subtle); color:var(--ok); }
+.fresh.warn { background:var(--warn-subtle); color:var(--warn); }
+.scard .stat { font-size:var(--text-sm); color:var(--ink-2); }
+.scard .stat b { font-family:var(--font-mono); font-weight:500; color:var(--ink); }
+.scard .note { font-size:var(--text-xs); color:var(--ink-disabled); font-style:italic; }
+.covbar { display:flex; height:8px; border-radius:var(--r-full); overflow:hidden; background:var(--bg-subtle); }
+.covbar .dm { background:var(--edge-docmine); }
+.covbar .sl { background:var(--edge-semlink); }
+.covleg { display:flex; gap:12px; font-size:10px; color:var(--ink-3); }
+.covleg .li { display:flex; align-items:center; gap:5px; }
+.covleg .sw { width:8px; height:8px; border-radius:2px; }
+.scard .foot { margin-top:auto; padding-top:7px; border-top:1px solid var(--border); font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
+
+/* -- Health flags -- */
+.health { background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-1); margin-bottom:var(--s-4); }
+.flag { display:flex; align-items:center; gap:10px; padding:9px 14px; font-size:var(--text-sm); border-bottom:1px solid var(--border); }
+.flag:last-child { border-bottom:none; }
+.flag .sev { flex:none; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; border-radius:var(--r-full); padding:1px 9px; width:52px; text-align:center; }
+.sev.warn { background:var(--warn-subtle); color:var(--warn); }
+.sev.err { background:var(--err-subtle); color:var(--err); }
+.sev.ok { background:var(--ok-subtle); color:var(--ok); }
+.flag .txt { color:var(--ink-2); }
+.flag .txt b { font-family:var(--font-mono); font-weight:500; color:var(--ink); }
+.flag .go { margin-left:auto; font-size:var(--text-xs); color:var(--ink-3); cursor:pointer; }
+.flag .go:hover { color:var(--accent); text-decoration:underline; }
+
+/* -- Bottom strip -- */
+.bottom { display:grid; grid-template-columns:1fr 1fr; gap:var(--s-3); }
+.bcard { background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--r-lg); padding:12px 14px; box-shadow:var(--shadow-1); }
+.bcard h2 { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-3); margin-bottom:8px; }
+.hub { display:flex; align-items:center; gap:10px; padding:4px 0; font-size:var(--text-sm); }
+.hub .nm { font-family:var(--font-mono); width:190px; flex:none; }
+.hub .bar { flex:1; height:6px; border-radius:var(--r-full); background:var(--bg-subtle); overflow:hidden; }
+.hub .bar i { display:block; height:100%; background:var(--node-function); border-radius:var(--r-full); }
+.hub .deg { font-family:var(--font-mono); font-size:var(--text-xs); color:var(--ink-3); width:34px; text-align:right; flex:none; }
+.dlink { display:flex; align-items:center; gap:8px; padding:5px 0; font-size:var(--text-sm); }
+.dlink .dot { width:7px; height:7px; border-radius:var(--r-full); background:var(--node-chunk); flex:none; }
+.dlink .path { font-family:var(--font-mono); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dlink .badge { margin-left:auto; font-family:var(--font-mono); font-size:10px; font-weight:500; padding:1px 8px; border-radius:var(--r-full); flex:none; }
+.badge.dm { background:var(--edge-docmine-bg); color:var(--edge-docmine); }
+.badge.sl { background:var(--edge-semlink-bg); color:var(--edge-semlink); }
+
+/* === Chat drawer (collapsed) === */
+.chatbar { display:flex; align-items:center; gap:10px; background:var(--bg-panel); border-top:1px solid var(--border); padding:0 var(--s-4); cursor:pointer; }
+.chatbar .bubble { width:22px; height:22px; border-radius:var(--r-full); background:var(--accent-subtle); display:grid; place-items:center; font-size:11px; }
+.chatbar .hint { color:var(--ink-3); font-size:var(--text-sm); }
+.chatbar .last { font-size:var(--text-sm); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:640px; }
+.chatbar .kbd { margin-left:auto; font-family:var(--font-mono); font-size:10px; background:var(--bg-subtle); border:1px solid var(--border); border-radius:var(--r-sm); padding:1px 6px; color:var(--ink-3); }
+</style>
+
+<div class="app">
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="brand"><div class="mark"></div>CodeGraph <small>Studio</small></div>
+    <div class="svc"><span class="dot"></span>codegraph <span class="mono" style="font-size:10px;color:var(--ink-3)">scope: main</span><span class="chev">&#9662;</span></div>
+    <div class="omni">&#8981; Search symbols, files, docs&#8230; <span class="kbd">&#8984;K</span></div>
+    <div class="tabs">
+      <div class="tab">Graph</div><div class="tab">Flows</div><div class="tab">Docs</div><div class="tab">Console</div><div class="tab active">Dashboard</div>
+    </div>
+  </div>
+
+  <!-- Scroll pane -->
+  <div class="pane">
+    <div class="phead">
+      <h1>Index overview</h1>
+      <div class="meta"><span class="okd"></span>Neo4j 5.26 &#183; bolt://localhost:7687 &#183; connected</div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi"><div class="num">4</div><div class="lbl">services</div></div>
+      <div class="kpi"><div class="num">51,940</div><div class="lbl">symbols</div></div>
+      <div class="kpi"><div class="num">20,925</div><div class="lbl">CALLS edges</div></div>
+      <div class="kpi"><div class="num">1,099</div><div class="lbl">doc links</div><div class="sub"><span class="dm">461 docmine</span> &#183; <span class="sl">638 semlink</span></div></div>
+    </div>
+
+    <!-- Services -->
+    <div class="secttl">Services</div>
+    <div class="services">
+      <div class="scard">
+        <div class="head"><span class="dot"></span><span class="nm">codegraph</span><span class="fresh ok">indexed 2h ago</span></div>
+        <div class="stat">Functions <b>4,213</b> &#183; Methods <b>1,877</b> &#183; Files <b>412</b></div>
+        <div class="stat">Docs <b>69</b> &#183; Chunks <b>872</b> &#183; CALLS <b>6,481</b></div>
+        <div class="covbar"><span class="dm" style="width:42%"></span><span class="sl" style="width:58%"></span></div>
+        <div class="covleg">
+          <span class="li"><span class="sw" style="background:var(--edge-docmine)"></span>docmine 461</span>
+          <span class="li"><span class="sw" style="background:var(--edge-semlink)"></span>semlink 638</span>
+        </div>
+        <div class="foot">text-embedding-3-small &#183; 1536d &#183; threshold 0.55</div>
+      </div>
+      <div class="scard">
+        <div class="head"><span class="dot"></span><span class="nm">khaata-backend</span><span class="fresh warn">4 months ago</span></div>
+        <div class="stat">Files <b>403</b> &#183; Symbols <b>28,005</b></div>
+        <div class="stat">CALLS <b>9,352</b> &#183; API endpoints <b>107</b></div>
+        <div class="note">no docs indexed</div>
+        <div class="foot">scip-typescript &#183; scope: main</div>
+      </div>
+      <div class="scard">
+        <div class="head"><span class="dot"></span><span class="nm">khaata-frontend</span><span class="fresh warn">4 months ago</span></div>
+        <div class="stat">Files <b>257</b> &#183; Symbols <b>14,586</b></div>
+        <div class="stat">CALLS <b>5,092</b></div>
+        <div class="note">no docs indexed</div>
+        <div class="foot">scip-typescript &#183; scope: main</div>
+      </div>
+      <div class="scard">
+        <div class="head"><span class="dot"></span><span class="nm">dough-core</span><span class="fresh ok">indexed 3d ago</span></div>
+        <div class="stat">Docs <b>22</b> &#183; Chunks <b>188</b></div>
+        <div class="stat">Doc links <b>400</b></div>
+        <div class="note">code not indexed</div>
+        <div class="foot">docs-only scope &#183; threshold 0.55</div>
+      </div>
+    </div>
+
+    <!-- Health -->
+    <div class="secttl">Health</div>
+    <div class="health">
+      <div class="flag">
+        <span class="sev warn">warn</span>
+        <span class="txt"><b>codegraph</b> and <b>context-maximiser</b>: same repo indexed twice &#8212; consider dropping the older scope</span>
+        <span class="go">inspect</span>
+      </div>
+      <div class="flag">
+        <span class="sev err">err</span>
+        <span class="txt"><b>khaata-frontend</b>: 0 flows generated &#8212; no entry points detected</span>
+        <span class="go">inspect</span>
+      </div>
+      <div class="flag">
+        <span class="sev ok">ok</span>
+        <span class="txt">vector indexes online &#183; 2 indexes &#183; 1536d</span>
+        <span class="go">inspect</span>
+      </div>
+    </div>
+
+    <!-- Bottom strip -->
+    <div class="bottom">
+      <div class="bcard">
+        <h2>Largest call hubs</h2>
+        <div class="hub"><span class="nm">ExecuteQuery()</span><span class="bar"><i style="width:100%"></i></span><span class="deg">214</span></div>
+        <div class="hub"><span class="nm">MergeNode()</span><span class="bar"><i style="width:87%"></i></span><span class="deg">187</span></div>
+        <div class="hub"><span class="nm">getStringFromRecord()</span><span class="bar"><i style="width:57%"></i></span><span class="deg">122</span></div>
+      </div>
+      <div class="bcard">
+        <h2>Recently linked docs</h2>
+        <div class="dlink"><span class="dot"></span><span class="path">rfc/011-doc-code-linking.md &#8250; Budget &amp; stamping</span><span class="badge dm">docmine 0.92</span></div>
+        <div class="dlink"><span class="dot"></span><span class="path">docs/ledger-spec.md &#8250; Posting rules</span><span class="badge dm">docmine 0.88</span></div>
+        <div class="dlink"><span class="dot"></span><span class="path">rfc/010-treesitter-structure-extraction.md &#8250; Fallback ranges</span><span class="badge sl">semlink 0.52</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat drawer, collapsed -->
+  <div class="chatbar">
+    <div class="bubble">&#128172;</div>
+    <span class="last"><b style="font-weight:500">Which services are stale?</b> &#8212; answered &#183; khaata-backend last indexed in March</span>
+    <span class="hint">Ask about this graph&#8230;</span>
+    <span class="kbd">C</span>
+  </div>
+</div>
